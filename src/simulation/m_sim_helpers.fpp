@@ -123,11 +123,16 @@ contains
                 alpha(num_fluids) = 1._wp - sum(alpha(1:num_fluids - 1))
             end if
         else
-            $:GPU_LOOP(parallelism='[seq]')
-            do i = 1, num_fluids
-                alpha_rho(i) = q_prim_vf(i)%sf(j, k, l)
-                alpha(i) = q_prim_vf(advxb + i - 1)%sf(j, k, l)
-            end do
+            if (num_fluids == 1) then
+                alpha_rho(1) = q_prim_vf(1)%sf(j, k, l)
+                alpha(1) = 1._wp
+            else
+                $:GPU_LOOP(parallelism='[seq]')
+                do i = 1, num_fluids
+                    alpha_rho(i) = q_prim_vf(i)%sf(j, k, l)
+                    alpha(i) = q_prim_vf(advxb + i - 1)%sf(j, k, l)
+                end do
+            end if
         end if
 
         if (elasticity) then
