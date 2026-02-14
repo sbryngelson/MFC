@@ -114,7 +114,7 @@ tail_pid=$!
 last_heartbeat=$(date +%s)
 
 while true; do
-  # Try to read from tail output (non-blocking via timeout)
+  # Try to read from tail output with a 1s timeout (polling-based)
   # Read multiple lines if available to avoid falling behind
   lines_read=0
   while IFS= read -r -t 1 line <&3 2>/dev/null; do
