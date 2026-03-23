@@ -235,6 +235,13 @@ _SIMPLE_DESCS = {
     "case_dir": "Case directory path",
     "cantera_file": "Cantera mechanism file",
     "num_ibs": "Number of immersed boundaries",
+    "sphere_pack": "Enable random sphere packing for IB initialization",
+    "sphere_pack_radius": "Radius of each packed sphere",
+    "sphere_pack_vf": "Target solid volume fraction for sphere packing",
+    "sphere_pack_void_frac": "Target void fraction (porosity) for sphere packing",
+    "sphere_pack_n": "Explicit number of spheres to pack",
+    "sphere_pack_min_gap": "Minimum surface-to-surface gap between packed spheres",
+    "sphere_pack_seed": "RNG seed for sphere packing (>0 for reproducible)",
     "num_source": "Number of acoustic sources",
     "num_probes": "Number of probes",
     "num_integrals": "Number of integral regions",
@@ -704,9 +711,7 @@ DEPENDENCIES = {
         }
     },
     "ib": {
-        "when_true": {
-            "requires": ["num_ibs"],
-        }
+        "when_true": {}
     },
     "acoustic_source": {
         "when_true": {
@@ -902,6 +907,15 @@ def _load():
     # Immersed boundary
     _r("num_ibs", INT, {"ib"})
     _r("ib", LOG, {"ib"})
+
+    # Sphere packing (IB initialization)
+    _r("sphere_pack", LOG, {"ib"})
+    _r("sphere_pack_radius", REAL, {"ib"})
+    _r("sphere_pack_vf", REAL, {"ib"})
+    _r("sphere_pack_void_frac", REAL, {"ib"})
+    _r("sphere_pack_n", INT, {"ib"})
+    _r("sphere_pack_min_gap", REAL, {"ib"})
+    _r("sphere_pack_seed", INT, {"ib"})
 
     # Probes
     for n in ["num_probes", "num_integrals"]:

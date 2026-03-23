@@ -54,6 +54,7 @@ module m_start_up
     use m_boundary_common
 
     use m_boundary_conditions
+    use m_sphere_pack_data
 
     implicit none
 
@@ -148,7 +149,9 @@ contains
             viscous, bubbles_lagrange, num_bc_patches, &
             patch_bc, Bx0, relativity, cont_damage, igr, igr_order, &
             down_sample, recon_type, muscl_order, hyper_cleaning, &
-            simplex_perturb, simplex_params, fft_wrt
+            simplex_perturb, simplex_params, fft_wrt, &
+            sphere_pack, sphere_pack_radius, sphere_pack_vf, sphere_pack_void_frac, sphere_pack_n, &
+            sphere_pack_min_gap, sphere_pack_seed
 
         ! Inquiring the status of the pre_process.inp file
         file_loc = 'pre_process.inp'
@@ -899,6 +902,7 @@ contains
         call s_finalize_boundary_common_module()
         if (relax) call s_finalize_relaxation_solver_module()
         call s_finalize_initial_condition_module()
+        call s_finalize_sphere_pack_data()
         ! Finalization of the MPI environment
         call s_mpi_finalize()
     end subroutine s_finalize_modules

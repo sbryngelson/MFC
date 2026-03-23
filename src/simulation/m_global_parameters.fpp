@@ -398,7 +398,7 @@ module m_global_parameters
     integer :: num_ibs
     logical :: ib_state_wrt
 
-    type(ib_patch_parameters), dimension(num_patches_max) :: patch_ib
+    type(ib_patch_parameters), dimension(num_ibs_max) :: patch_ib
     type(vec3_dt), allocatable, dimension(:) :: airfoil_grid_u, airfoil_grid_l
     integer :: Np
     !! Database of the immersed boundary patch parameters for each of the
@@ -858,7 +858,7 @@ contains
             relativity = .false.
         #:endif
 
-        do i = 1, num_patches_max
+        do i = 1, num_ibs_max
             patch_ib(i)%geometry = dflt_int
             patch_ib(i)%x_centroid = 0._wp
             patch_ib(i)%y_centroid = 0._wp

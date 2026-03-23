@@ -9,6 +9,8 @@ program p_main
     use m_global_parameters     !< Global parameters for the code
 
     use m_start_up
+    use m_sphere_packing
+    use m_sphere_pack_data
 
     implicit none
 
@@ -23,6 +25,12 @@ program p_main
     ! Initialization of the MPI environment
 
     call s_initialize_modules()
+
+    ! Pack spheres before s_read_grid(), which overwrites x_domain/y_domain/
+    ! z_domain with local (per-rank) subdomain bounds. Sphere packing needs
+    ! the global domain bounds from the namelist.
+    call s_pack_spheres()
+    if (sphere_pack) call s_write_sphere_pack_file(case_dir)
 
     call s_read_grid()
 

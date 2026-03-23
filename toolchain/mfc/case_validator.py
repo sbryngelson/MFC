@@ -556,18 +556,62 @@ class CaseValidator:
         ib = self.get("ib", "F") == "T"
         n = self.get("n", 0)
         num_ibs = self.get("num_ibs", 0)
+        sphere_pack = self.get("sphere_pack", "F") == "T"
 
         ib_state_wrt = self.get("ib_state_wrt", "F") == "T"
 
         self.prohibit(ib and n <= 0, "Immersed Boundaries do not work in 1D (requires n > 0)")
-        self.prohibit(ib and num_ibs <= 0, "num_ibs must be >= 1 when ib is enabled")
-        num_patches_max = get_fortran_constants().get("num_patches_max", 1000)
         self.prohibit(
-            ib and num_ibs > num_patches_max,
-            f"num_ibs must be <= {num_patches_max} (num_patches_max in m_constants.fpp)",
+            ib and num_ibs <= 0 and not sphere_pack,
+            "num_ibs must be >= 1 when ib is enabled (or use sphere_pack)",
+        )
+        num_ibs_max = get_fortran_constants().get("num_ibs_max", 1100)
+        self.prohibit(
+            ib and num_ibs > num_ibs_max,
+            f"num_ibs must be <= {num_ibs_max} (num_ibs_max in m_constants.fpp)",
         )
         self.prohibit(not ib and num_ibs > 0, "num_ibs is set, but ib is not enabled")
         self.prohibit(ib_state_wrt and not ib, "ib_state_wrt requires ib to be enabled")
+
+        # Sphere packing constraints
+        if sphere_pack:
+            p_val = self.get("p", 0)
+            self.prohibit(p_val <= 0, "sphere_pack requires a 3D domain (p > 0)")
+            sp_radius = self.get("sphere_pack_radius", 0)
+            sp_vf = self.get("sphere_pack_vf", 0)
+            sp_void = self.get("sphere_pack_void_frac", 0)
+            sp_n = self.get("sphere_pack_n", 0)
+            self.prohibit(
+                self._is_numeric(sp_radius) and sp_radius <= 0,
+                "sphere_pack_radius must be positive",
+            )
+            # Exactly one of sphere_pack_vf, sphere_pack_void_frac, or
+            # sphere_pack_n must be set.
+            n_set = (
+                (1 if self._is_numeric(sp_vf) and sp_vf > 0 else 0)
+                + (1 if self._is_numeric(sp_void) and sp_void > 0 else 0)
+                + (1 if self._is_numeric(sp_n) and sp_n > 0 else 0)
+            )
+            self.prohibit(
+                n_set != 1,
+                "sphere_pack: set exactly one of sphere_pack_vf, "
+                "sphere_pack_void_frac, or sphere_pack_n",
+            )
+            if self._is_numeric(sp_vf) and sp_vf > 0:
+                self.prohibit(
+                    sp_vf > 0.74,
+                    "sphere_pack_vf must be in (0, 0.74]",
+                )
+            if self._is_numeric(sp_void) and sp_void > 0:
+                self.prohibit(
+                    sp_void < 0.26,
+                    "sphere_pack_void_frac must be >= 0.26 "
+                    "(solid VF cannot exceed FCC limit ~74%)",
+                )
+                self.prohibit(
+                    sp_void >= 1.0,
+                    "sphere_pack_void_frac must be < 1.0",
+                )
 
     def check_stiffened_eos(self):
         """Checks constraints on stiffened equation of state fluids parameters"""

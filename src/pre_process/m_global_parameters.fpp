@@ -235,7 +235,18 @@ module m_global_parameters
     integer :: num_ibs      !< Number of immersed boundaries
     integer :: Np
 
-    type(ib_patch_parameters), dimension(num_patches_max) :: patch_ib
+    type(ib_patch_parameters), dimension(num_ibs_max) :: patch_ib
+
+    !> @name Sphere packing parameters
+    !> @{
+    logical  :: sphere_pack          !< Enable random sphere packing for IB initialization
+    real(wp) :: sphere_pack_radius   !< Radius of each packed sphere
+    real(wp) :: sphere_pack_vf       !< Target solid volume fraction
+    real(wp) :: sphere_pack_void_frac !< Target void fraction (porosity)
+    integer  :: sphere_pack_n       !< Explicit number of spheres to pack
+    real(wp) :: sphere_pack_min_gap  !< Minimum surface-to-surface gap between spheres
+    integer  :: sphere_pack_seed     !< RNG seed (>0 for reproducible, <=0 for random)
+    !> @}
 
     type(vec3_dt), allocatable, dimension(:) :: airfoil_grid_u, airfoil_grid_l
     !! Database of the immersed boundary patch parameters for each of the
@@ -546,7 +557,16 @@ contains
         ib = .false.
         num_ibs = dflt_int
 
-        do i = 1, num_patches_max
+        ! Sphere Packing defaults
+        sphere_pack         = .false.
+        sphere_pack_radius  = dflt_real
+        sphere_pack_vf      = dflt_real
+        sphere_pack_void_frac = dflt_real
+        sphere_pack_n       = dflt_int
+        sphere_pack_min_gap = 0.0_wp
+        sphere_pack_seed    = -1
+
+        do i = 1, num_ibs_max
             patch_ib(i)%geometry = dflt_int
             patch_ib(i)%x_centroid = dflt_real
             patch_ib(i)%y_centroid = dflt_real
