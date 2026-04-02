@@ -220,11 +220,6 @@ contains
                                        & idwbuff(3)%beg:idwbuff(3)%end))
                         end if
                     end if
-                else
-                    do l = 1, sys_size
-                        @:ALLOCATE(flux_gsrc_n(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end))
-                    end do
                 end if
 
                 @:ACC_SETUP_VFs(flux_n(i))
@@ -243,6 +238,8 @@ contains
                         $:GPU_ENTER_DATA(attach='[flux_n(i)%vf(l)%sf]')
                         flux_src_n(i)%vf(l)%sf => flux_src_n(1)%vf(l)%sf
                         $:GPU_ENTER_DATA(attach='[flux_src_n(i)%vf(l)%sf]')
+                        flux_gsrc_n(i)%vf(l)%sf => flux_gsrc_n(1)%vf(l)%sf
+                        $:GPU_ENTER_DATA(attach='[flux_gsrc_n(i)%vf(l)%sf]')
                     end do
                 end if
             end do
@@ -1832,7 +1829,7 @@ contains
                     do l = 1, sys_size
                         nullify (flux_n(i)%vf(l)%sf)
                         nullify (flux_src_n(i)%vf(l)%sf)
-                        @:DEALLOCATE(flux_gsrc_n(i)%vf(l)%sf)
+                        nullify (flux_gsrc_n(i)%vf(l)%sf)
                     end do
                 else
                     do l = 1, sys_size
