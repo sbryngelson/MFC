@@ -263,12 +263,21 @@ contains
             do i = 1, num_dims
                 @:ALLOCATE(qL_prim(i)%vf(1:sys_size))
                 @:ALLOCATE(qR_prim(i)%vf(1:sys_size))
-                do l = mom_idx%beg, mom_idx%end
-                    @:ALLOCATE(qL_prim(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end))
-                    @:ALLOCATE(qR_prim(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end))
-                end do
+                if (i == 1) then
+                    do l = mom_idx%beg, mom_idx%end
+                        @:ALLOCATE(qL_prim(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                                   & idwbuff(3)%beg:idwbuff(3)%end))
+                        @:ALLOCATE(qR_prim(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                                   & idwbuff(3)%beg:idwbuff(3)%end))
+                    end do
+                else
+                    do l = mom_idx%beg, mom_idx%end
+                        qL_prim(i)%vf(l)%sf => qL_prim(1)%vf(l)%sf
+                        $:GPU_ENTER_DATA(attach='[qL_prim(i)%vf(l)%sf]')
+                        qR_prim(i)%vf(l)%sf => qR_prim(1)%vf(l)%sf
+                        $:GPU_ENTER_DATA(attach='[qR_prim(i)%vf(l)%sf]')
+                    end do
+                end if
                 @:ACC_SETUP_VFs(qL_prim(i), qR_prim(i))
             end do
 
