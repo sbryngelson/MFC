@@ -68,11 +68,9 @@ contains
     end subroutine s_initialize_surface_tension_module
 
     !> Compute the capillary source flux from reconstructed color-gradient fields
-    subroutine s_compute_capillary_source_flux(vSrc_rsx_vf, vSrc_rsy_vf, vSrc_rsz_vf, flux_src_vf, id, isx, isy, isz)
+    subroutine s_compute_capillary_source_flux(vSrc_rs_vf, flux_src_vf, id, isx, isy, isz)
 
-        real(wp), dimension(-1:,0:,0:,1:), intent(in)          :: vSrc_rsx_vf
-        real(wp), dimension(-1:,0:,0:,1:), intent(in)          :: vSrc_rsy_vf
-        real(wp), dimension(-1:,0:,0:,1:), intent(in)          :: vSrc_rsz_vf
+        real(wp), dimension(-1:,0:,0:,1:), intent(in)          :: vSrc_rs_vf
         type(scalar_field), dimension(sys_size), intent(inout) :: flux_src_vf
         integer, intent(in)                                    :: id
         type(int_bounds_info), intent(in)                      :: isx, isy, isz
@@ -115,13 +113,12 @@ contains
                             do i = 1, num_dims
                                 flux_src_vf(momxb + i - 1)%sf(j, k, l) = flux_src_vf(momxb + i - 1)%sf(j, k, l) + Omega(1, i)
 
-                                flux_src_vf(E_idx)%sf(j, k, l) = flux_src_vf(E_idx)%sf(j, k, l) + Omega(1, i)*vSrc_rsx_vf(j, k, &
-                                            & l, i)
+                                flux_src_vf(E_idx)%sf(j, k, l) = flux_src_vf(E_idx)%sf(j, k, l) + Omega(1, i)*vSrc_rs_vf(j, k, l, i)
                             end do
 
                             ! Continuum surface force capillary stress, Schmidmayer et al. JCP (2017)
                             flux_src_vf(E_idx)%sf(j, k, l) = flux_src_vf(E_idx)%sf(j, k, l) + sigma*c_divs(num_dims + 1)%sf(j, k, &
-                                        & l)*vSrc_rsx_vf(j, k, l, 1)
+                                        & l)*vSrc_rs_vf(j, k, l, 1)
                         end if
                     end do
                 end do
@@ -157,12 +154,12 @@ contains
                                 do i = 1, num_dims
                                     flux_src_vf(momxb + i - 1)%sf(j, k, l) = flux_src_vf(momxb + i - 1)%sf(j, k, l) + Omega(2, i)
 
-                                    flux_src_vf(E_idx)%sf(j, k, l) = flux_src_vf(E_idx)%sf(j, k, l) + Omega(2, i)*vSrc_rsy_vf(k, &
+                                    flux_src_vf(E_idx)%sf(j, k, l) = flux_src_vf(E_idx)%sf(j, k, l) + Omega(2, i)*vSrc_rs_vf(k, &
                                                 & j, l, i)
                                 end do
 
                                 flux_src_vf(E_idx)%sf(j, k, l) = flux_src_vf(E_idx)%sf(j, k, &
-                                            & l) + sigma*c_divs(num_dims + 1)%sf(j, k, l)*vSrc_rsy_vf(k, j, l, 2)
+                                            & l) + sigma*c_divs(num_dims + 1)%sf(j, k, l)*vSrc_rs_vf(k, j, l, 2)
                             end if
                         end do
                     end do
@@ -199,12 +196,12 @@ contains
                                 do i = 1, num_dims
                                     flux_src_vf(momxb + i - 1)%sf(j, k, l) = flux_src_vf(momxb + i - 1)%sf(j, k, l) + Omega(3, i)
 
-                                    flux_src_vf(E_idx)%sf(j, k, l) = flux_src_vf(E_idx)%sf(j, k, l) + Omega(3, i)*vSrc_rsz_vf(l, &
+                                    flux_src_vf(E_idx)%sf(j, k, l) = flux_src_vf(E_idx)%sf(j, k, l) + Omega(3, i)*vSrc_rs_vf(l, &
                                                 & k, j, i)
                                 end do
 
                                 flux_src_vf(E_idx)%sf(j, k, l) = flux_src_vf(E_idx)%sf(j, k, &
-                                            & l) + sigma*c_divs(num_dims + 1)%sf(j, k, l)*vSrc_rsz_vf(l, k, j, 3)
+                                            & l) + sigma*c_divs(num_dims + 1)%sf(j, k, l)*vSrc_rs_vf(l, k, j, 3)
                             end if
                         end do
                     end do
