@@ -223,9 +223,24 @@ contains
         @:ALLOCATE(q_prim_vf(1:sys_size))
 
         if (.not. igr) then
-            do i = 1, adv_idx%end
+            ! For model_eqns=2, prim density = cons density, prim volfrac = cons volfrac. Alias those fields to q_cons_ts(1) to
+            ! avoid separate allocation.
+            do i = 1, cont_idx%end
+                if (.not. relativity) then
+                    q_prim_vf(i)%sf => q_cons_ts(1)%vf(i)%sf
+                else
+                    @:ALLOCATE(q_prim_vf(i)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end))
+                end if
+                @:ACC_SETUP_SFs(q_prim_vf(i))
+            end do
+            do i = mom_idx%beg, E_idx
                 @:ALLOCATE(q_prim_vf(i)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
                            & idwbuff(3)%beg:idwbuff(3)%end))
+                @:ACC_SETUP_SFs(q_prim_vf(i))
+            end do
+            do i = adv_idx%beg, adv_idx%end
+                q_prim_vf(i)%sf => q_cons_ts(1)%vf(i)%sf
                 @:ACC_SETUP_SFs(q_prim_vf(i))
             end do
 
@@ -917,9 +932,19 @@ contains
         end if
 
         if (.not. igr) then
-            ! Deallocating the cell-average primitive variables
-            do i = 1, adv_idx%end
+            ! Deallocating/nullifying the cell-average primitive variables
+            do i = 1, cont_idx%end
+                if (relativity) then
+                    @:DEALLOCATE(q_prim_vf(i)%sf)
+                else
+                    nullify (q_prim_vf(i)%sf)
+                end if
+            end do
+            do i = mom_idx%beg, E_idx
                 @:DEALLOCATE(q_prim_vf(i)%sf)
+            end do
+            do i = adv_idx%beg, adv_idx%end
+                nullify (q_prim_vf(i)%sf)
             end do
 
             if (mhd) then
