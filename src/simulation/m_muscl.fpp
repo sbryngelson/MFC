@@ -266,14 +266,10 @@ contains
         v_size = ubound(v_vf, 1)
         $:GPU_UPDATE(device='[v_size]')
 
-        ! Reallocate workspace if direction changed (saves GPU memory by sharing one array across all three directions)
-        if (v_rs_ws_muscl_dir /= muscl_dir) then
-            if (allocated(v_rs_ws_muscl)) then
-                @:DEALLOCATE(v_rs_ws_muscl)
-            end if
-            @:ALLOCATE(v_rs_ws_muscl(is1_muscl%beg - muscl_polyn:is1_muscl%end + muscl_polyn, is2_muscl%beg:is2_muscl%end, &
-                       & is3_muscl%beg:is3_muscl%end, 1:sys_size))
-            v_rs_ws_muscl_dir = muscl_dir
+        ! Allocate workspace once with max-bounds shape (covers all directions)
+        if (.not. allocated(v_rs_ws_muscl)) then
+            @:ALLOCATE(v_rs_ws_muscl( -buff_size - muscl_polyn:max(m, n, p) + buff_size + muscl_polyn, -buff_size:max(m, n, &
+                       & p) + buff_size, -buff_size:max(m, n, p) + buff_size, 1:sys_size))
         end if
 
         if (muscl_dir == 1) then

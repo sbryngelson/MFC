@@ -456,90 +456,32 @@ contains
 
     end subroutine s_initialize_rhs_module
 
-    !> Reallocate qL_rs_vf/qR_rs_vf when the reconstruction direction changes
+    !> Allocate qL_rs_vf/qR_rs_vf once with max-bounds shape (covers all directions)
     subroutine s_ensure_rs_allocated(dir)
 
         integer, intent(in) :: dir
+        integer             :: beg_d, end_d
 
-        if (rs_dir /= dir) then
-            if (allocated(qL_rs_vf)) then
-                @:DEALLOCATE(qL_rs_vf, qR_rs_vf)
-            end if
-            if (dir == 1) then
-                @:ALLOCATE(qL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-                @:ALLOCATE(qR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-            else if (dir == 2) then
-                if (n > 0) then
-                    @:ALLOCATE(qL_rs_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
-                    @:ALLOCATE(qR_rs_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
-                else
-                    @:ALLOCATE(qL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
-                    @:ALLOCATE(qR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
-                end if
-            else
-                if (p > 0) then
-                    @:ALLOCATE(qL_rs_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(1)%beg:idwbuff(1)%end, 1:sys_size))
-                    @:ALLOCATE(qR_rs_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(1)%beg:idwbuff(1)%end, 1:sys_size))
-                else
-                    @:ALLOCATE(qL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
-                    @:ALLOCATE(qR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
-                end if
-            end if
-            rs_dir = dir
+        if (.not. allocated(qL_rs_vf)) then
+            beg_d = min(idwbuff(1)%beg, idwbuff(2)%beg, idwbuff(3)%beg)
+            end_d = max(idwbuff(1)%end, idwbuff(2)%end, idwbuff(3)%end)
+            @:ALLOCATE(qL_rs_vf(beg_d:end_d, beg_d:end_d, beg_d:end_d, 1:sys_size))
+            @:ALLOCATE(qR_rs_vf(beg_d:end_d, beg_d:end_d, beg_d:end_d, 1:sys_size))
         end if
 
     end subroutine s_ensure_rs_allocated
 
-    !> Reallocate dqL_rs_vf/dqR_rs_vf when the viscous reconstruction direction changes
+    !> Allocate dqL_rs_vf/dqR_rs_vf once with max-bounds shape (covers all directions)
     subroutine s_ensure_drs_allocated(dir)
 
         integer, intent(in) :: dir
+        integer             :: beg_d, end_d
 
-        if (drs_dir /= dir) then
-            if (allocated(dqL_rs_vf)) then
-                @:DEALLOCATE(dqL_rs_vf, dqR_rs_vf)
-            end if
-            if (dir == 1) then
-                @:ALLOCATE(dqL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & momxb:momxe))
-                @:ALLOCATE(dqR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & momxb:momxe))
-            else if (dir == 2) then
-                if (n > 0) then
-                    @:ALLOCATE(dqL_rs_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
-                    @:ALLOCATE(dqR_rs_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
-                else
-                    @:ALLOCATE(dqL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
-                    @:ALLOCATE(dqR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
-                end if
-            else
-                if (p > 0) then
-                    @:ALLOCATE(dqL_rs_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(1)%beg:idwbuff(1)%end, momxb:momxe))
-                    @:ALLOCATE(dqR_rs_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(1)%beg:idwbuff(1)%end, momxb:momxe))
-                else
-                    @:ALLOCATE(dqL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
-                    @:ALLOCATE(dqR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
-                end if
-            end if
-            drs_dir = dir
+        if (.not. allocated(dqL_rs_vf)) then
+            beg_d = min(idwbuff(1)%beg, idwbuff(2)%beg, idwbuff(3)%beg)
+            end_d = max(idwbuff(1)%end, idwbuff(2)%end, idwbuff(3)%end)
+            @:ALLOCATE(dqL_rs_vf(beg_d:end_d, beg_d:end_d, beg_d:end_d, momxb:momxe))
+            @:ALLOCATE(dqR_rs_vf(beg_d:end_d, beg_d:end_d, beg_d:end_d, momxb:momxe))
         end if
 
     end subroutine s_ensure_drs_allocated
