@@ -75,8 +75,10 @@ contains
 
         if (time_stepper == 1) then
             num_ts = 1
-        else if (any(time_stepper == (/2, 3/))) then
+        else if (time_stepper == 2) then
             num_ts = 2
+        else if (time_stepper == 3) then
+            num_ts = 1  ! Williamson 2N-storage RK3: no backup register needed
         end if
 
         if (probe_wrt) then
@@ -446,21 +448,29 @@ contains
             ! temporary array index for TVD RK
             if (time_stepper == 1) then
                 stor = 1
-            else
+            else if (time_stepper == 2) then
                 stor = 2
+            else
+                stor = 1  ! Williamson 2N: no backup register
             end if
 
-            ! TVD RK coefficients
-            @:ALLOCATE(rk_coef(time_stepper, 4))
-            if (time_stepper == 1) then
-                rk_coef(1,:) = (/1._wp, 0._wp, 1._wp, 1._wp/)
-            else if (time_stepper == 2) then
-                rk_coef(1,:) = (/1._wp, 0._wp, 1._wp, 1._wp/)
-                rk_coef(2,:) = (/1._wp, 1._wp, 1._wp, 2._wp/)
-            else if (time_stepper == 3) then
-                rk_coef(1,:) = (/1._wp, 0._wp, 1._wp, 1._wp/)
-                rk_coef(2,:) = (/1._wp, 3._wp, 1._wp, 4._wp/)
-                rk_coef(3,:) = (/2._wp, 1._wp, 2._wp, 3._wp/)
+            if (time_stepper == 3) then
+                ! Williamson (1980) 2N-storage RK3 coefficients dU = A_i * dU + dt * L(U); U = U + B_i * dU
+                @:ALLOCATE(rk_coef(3, 4))
+                ! Columns 1-2: Williamson A_i, B_i. Columns 3-4: unused but set to safe values (avoid divide-by-zero in dead
+                ! Shu-Osher branch on GPU).
+                rk_coef(1,:) = (/0._wp, 1._wp/3._wp, 1._wp, 1._wp/)
+                rk_coef(2,:) = (/-5._wp/9._wp, 15._wp/16._wp, 1._wp, 1._wp/)
+                rk_coef(3,:) = (/-153._wp/128._wp, 8._wp/15._wp, 1._wp, 1._wp/)
+            else
+                ! TVD RK coefficients (Shu-Osher form)
+                @:ALLOCATE(rk_coef(time_stepper, 4))
+                if (time_stepper == 1) then
+                    rk_coef(1,:) = (/1._wp, 0._wp, 1._wp, 1._wp/)
+                else if (time_stepper == 2) then
+                    rk_coef(1,:) = (/1._wp, 0._wp, 1._wp, 1._wp/)
+                    rk_coef(2,:) = (/1._wp, 1._wp, 1._wp, 2._wp/)
+                end if
             end if
             $:GPU_UPDATE(device='[rk_coef, stor]')
         end if
@@ -487,6 +497,20 @@ contains
         if (adap_dt) call s_adaptive_dt_bubble(1)
 
         do s = 1, nstage
+            ! Williamson 2N pre-scale: dU *= A_s (before s_compute_rhs adds L(U))
+            if (time_stepper == 3) then
+                $:GPU_PARALLEL_LOOP(collapse=4)
+                do i = 1, sys_size
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 0, m
+                                rhs_vf(i)%sf(j, k, l) = rk_coef(s, 1)*rhs_vf(i)%sf(j, k, l)
+                            end do
+                        end do
+                    end do
+                end do
+                $:END_GPU_PARALLEL_LOOP()
+            end if
             call s_compute_rhs(q_cons_ts(1)%vf, q_T_sf, q_prim_vf, bc_type, rhs_vf, pb_ts(1)%sf, rhs_pb, mv_ts(1)%sf, rhs_mv, &
                                & t_step, time_avg, s)
 
@@ -518,17 +542,23 @@ contains
                 do l = 0, p
                     do k = 0, n
                         do j = 0, m
-                            if (s == 1 .and. nstage > 1) then
-                                q_cons_ts(stor)%vf(i)%sf(j, k, l) = q_cons_ts(1)%vf(i)%sf(j, k, l)
-                            end if
-                            if (igr) then
-                                q_cons_ts(1)%vf(i)%sf(j, k, l) = (rk_coef(s, 1)*q_cons_ts(1)%vf(i)%sf(j, k, l) + rk_coef(s, &
-                                          & 2)*q_cons_ts(stor)%vf(i)%sf(j, k, l) + rk_coef(s, 3)*rhs_vf(i)%sf(j, k, &
-                                          & l))/rk_coef(s, 4)
+                            if (time_stepper == 3) then
+                                ! Williamson 2N: U = U + B_s * dt * dU
+                                q_cons_ts(1)%vf(i)%sf(j, k, l) = q_cons_ts(1)%vf(i)%sf(j, k, l) + rk_coef(s, &
+                                          & 2)*dt*rhs_vf(i)%sf(j, k, l)
                             else
-                                q_cons_ts(1)%vf(i)%sf(j, k, l) = (rk_coef(s, 1)*q_cons_ts(1)%vf(i)%sf(j, k, l) + rk_coef(s, &
-                                          & 2)*q_cons_ts(stor)%vf(i)%sf(j, k, l) + rk_coef(s, 3)*dt*rhs_vf(i)%sf(j, k, &
-                                          & l))/rk_coef(s, 4)
+                                if (s == 1 .and. nstage > 1) then
+                                    q_cons_ts(stor)%vf(i)%sf(j, k, l) = q_cons_ts(1)%vf(i)%sf(j, k, l)
+                                end if
+                                if (igr) then
+                                    q_cons_ts(1)%vf(i)%sf(j, k, l) = (rk_coef(s, 1)*q_cons_ts(1)%vf(i)%sf(j, k, l) + rk_coef(s, &
+                                              & 2)*q_cons_ts(stor)%vf(i)%sf(j, k, l) + rk_coef(s, 3)*rhs_vf(i)%sf(j, k, &
+                                              & l))/rk_coef(s, 4)
+                                else
+                                    q_cons_ts(1)%vf(i)%sf(j, k, l) = (rk_coef(s, 1)*q_cons_ts(1)%vf(i)%sf(j, k, l) + rk_coef(s, &
+                                              & 2)*q_cons_ts(stor)%vf(i)%sf(j, k, l) + rk_coef(s, 3)*dt*rhs_vf(i)%sf(j, k, &
+                                              & l))/rk_coef(s, 4)
+                                end if
                             end if
                         end do
                     end do

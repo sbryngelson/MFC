@@ -944,7 +944,8 @@ contains
                             inv_ds = 1._wp/dx(k_loop)
                             flux_face1 = flux_n(1)%vf(j)%sf(k_loop - 1, l_loop, q_loop)
                             flux_face2 = flux_n(1)%vf(j)%sf(k_loop, l_loop, q_loop)
-                            rhs_vf(j)%sf(k_loop, l_loop, q_loop) = inv_ds*(flux_face1 - flux_face2)
+                            rhs_vf(j)%sf(k_loop, l_loop, q_loop) = rhs_vf(j)%sf(k_loop, l_loop, &
+                                   & q_loop) + inv_ds*(flux_face1 - flux_face2)
                         end do
                     end do
                 end do
