@@ -38,10 +38,10 @@ module m_rhs
 
     private; public :: s_initialize_rhs_module, s_compute_rhs, s_finalize_rhs_module
 
-    type(vector_field) :: q_cons_qp  !< WENO-reconstructed cell-average conservative variables at quadrature points
+    type(vector_field) :: q_cons_qp  !< Conservative variables (pointer-aliased to q_cons_vf, not a copy)
     $:GPU_DECLARE(create='[q_cons_qp]')
-
-    type(vector_field) :: q_prim_qp  !< Primitive variables at cell-interior quadrature points
+    type(scalar_field), allocatable :: alf_copies(:)  !< Renormalized volume fraction copies (mpp_lim + bubbles only)
+    type(vector_field)              :: q_prim_qp      !< Primitive variables at cell-interior quadrature points
     $:GPU_DECLARE(create='[q_prim_qp]')
 
     !> @name The first-order spatial derivatives of the primitive variables at cell- interior Gaussian quadrature points. These are
@@ -140,10 +140,8 @@ contains
         @:ALLOCATE(q_prim_qp%vf(1:sys_size))
 
         if (.not. igr) then
-            do l = 1, sys_size
-                @:ALLOCATE(q_cons_qp%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                           & idwbuff(3)%beg:idwbuff(3)%end))
-            end do
+            ! q_cons_qp fields are NOT allocated here; they are pointer-aliased to q_cons_vf at runtime in s_compute_rhs to avoid a
+            ! full copy.
             do l = mom_idx%beg, E_idx
                 @:ALLOCATE(q_prim_qp%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
                            & idwbuff(3)%beg:idwbuff(3)%end))
@@ -165,37 +163,16 @@ contains
         end if
 
         if (.not. igr) then
-            @:ACC_SETUP_VFs(q_cons_qp, q_prim_qp)
+            @:ACC_SETUP_VFs(q_prim_qp)
 
-            do l = 1, cont_idx%end
-                if (relativity) then
-                    ! Cons and Prim densities are different for relativity
+            if (relativity) then
+                do l = 1, cont_idx%end
                     @:ALLOCATE(q_prim_qp%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
                                & idwbuff(3)%beg:idwbuff(3)%end))
-                else
-                    q_prim_qp%vf(l)%sf => q_cons_qp%vf(l)%sf
-                    $:GPU_ENTER_DATA(copyin='[q_prim_qp%vf(l)%sf]')
-                    $:GPU_ENTER_DATA(attach='[q_prim_qp%vf(l)%sf]')
-                end if
-            end do
-
-            do l = adv_idx%beg, adv_idx%end
-                q_prim_qp%vf(l)%sf => q_cons_qp%vf(l)%sf
-                $:GPU_ENTER_DATA(copyin='[q_prim_qp%vf(l)%sf]')
-                $:GPU_ENTER_DATA(attach='[q_prim_qp%vf(l)%sf]')
-            end do
-        end if
-
-        if (surface_tension) then
-            q_prim_qp%vf(c_idx)%sf => q_cons_qp%vf(c_idx)%sf
-            $:GPU_ENTER_DATA(copyin='[q_prim_qp%vf(c_idx)%sf]')
-            $:GPU_ENTER_DATA(attach='[q_prim_qp%vf(c_idx)%sf]')
-        end if
-
-        if (hyper_cleaning) then
-            q_prim_qp%vf(psi_idx)%sf => q_cons_qp%vf(psi_idx)%sf
-            $:GPU_ENTER_DATA(copyin='[q_prim_qp%vf(psi_idx)%sf]')
-            $:GPU_ENTER_DATA(attach='[q_prim_qp%vf(psi_idx)%sf]')
+                end do
+            end if
+            ! Non-relativity density + volume fraction + special field aliasing is deferred to s_compute_rhs where q_cons_vf is
+            ! available.
         end if
 
         if (.not. igr) then
@@ -459,6 +436,7 @@ contains
 
         if (mpp_lim .and. bubbles_euler) then
             @:ALLOCATE(alf_sum%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end))
+            allocate (alf_copies(advxb:advxe - 1))
         end if
         if (.not. igr) then
             @:ALLOCATE(gm_alphaL_n(1:num_dims))
@@ -597,22 +575,40 @@ contains
         call cpu_time(t_start)
 
         if (.not. igr .or. dummy) then
-            ! Association/Population of Working Variables
-            $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
+            ! Alias q_cons_qp to q_cons_vf (no copy needed since conversion is not in-place)
             do i = 1, sys_size
-                do l = idwbuff(3)%beg, idwbuff(3)%end
-                    do k = idwbuff(2)%beg, idwbuff(2)%end
-                        do j = idwbuff(1)%beg, idwbuff(1)%end
-                            q_cons_qp%vf(i)%sf(j, k, l) = q_cons_vf(i)%sf(j, k, l)
-                        end do
-                    end do
-                end do
+                q_cons_qp%vf(i)%sf => q_cons_vf(i)%sf
+                $:GPU_ENTER_DATA(attach='[q_cons_qp%vf(i)%sf]')
             end do
-            $:END_GPU_PARALLEL_LOOP()
+            ! Also alias shared fields into q_prim_qp
+            if (.not. relativity) then
+                do i = 1, cont_idx%end
+                    q_prim_qp%vf(i)%sf => q_cons_vf(i)%sf
+                    $:GPU_ENTER_DATA(attach='[q_prim_qp%vf(i)%sf]')
+                end do
+            end if
+            do i = adv_idx%beg, adv_idx%end
+                q_prim_qp%vf(i)%sf => q_cons_vf(i)%sf
+                $:GPU_ENTER_DATA(attach='[q_prim_qp%vf(i)%sf]')
+            end do
+            if (surface_tension) then
+                q_prim_qp%vf(c_idx)%sf => q_cons_vf(c_idx)%sf
+                $:GPU_ENTER_DATA(attach='[q_prim_qp%vf(c_idx)%sf]')
+            end if
+            if (hyper_cleaning) then
+                q_prim_qp%vf(psi_idx)%sf => q_cons_vf(psi_idx)%sf
+                $:GPU_ENTER_DATA(attach='[q_prim_qp%vf(psi_idx)%sf]')
+            end if
 
-            ! Converting Conservative to Primitive Variables
-
+            ! mpp_lim renormalization modifies advected components in-place. Since q_cons_qp now aliases q_cons_vf, we must copy and
+            ! renormalize only the affected advected components to avoid corrupting the state.
             if (mpp_lim .and. bubbles_euler) then
+                do i = advxb, advxe - 1
+                    if (.not. associated(alf_copies(i)%sf)) then
+                        @:ALLOCATE(alf_copies(i)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                                   & idwbuff(3)%beg:idwbuff(3)%end))
+                    end if
+                end do
                 $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3)
                 do l = idwbuff(3)%beg, idwbuff(3)%end
                     do k = idwbuff(2)%beg, idwbuff(2)%end
@@ -620,17 +616,23 @@ contains
                             alf_sum%sf(j, k, l) = 0._wp
                             $:GPU_LOOP(parallelism='[seq]')
                             do i = advxb, advxe - 1
-                                alf_sum%sf(j, k, l) = alf_sum%sf(j, k, l) + q_cons_qp%vf(i)%sf(j, k, l)
+                                alf_copies(i)%sf(j, k, l) = q_cons_vf(i)%sf(j, k, l)
+                                alf_sum%sf(j, k, l) = alf_sum%sf(j, k, l) + alf_copies(i)%sf(j, k, l)
                             end do
                             $:GPU_LOOP(parallelism='[seq]')
                             do i = advxb, advxe - 1
-                                q_cons_qp%vf(i)%sf(j, k, l) = q_cons_qp%vf(i)%sf(j, k, l)*(1._wp - q_cons_qp%vf(alf_idx)%sf(j, k, &
-                                             & l))/alf_sum%sf(j, k, l)
+                                alf_copies(i)%sf(j, k, l) = alf_copies(i)%sf(j, k, l)*(1._wp - q_cons_vf(alf_idx)%sf(j, k, &
+                                           & l))/alf_sum%sf(j, k, l)
                             end do
                         end do
                     end do
                 end do
                 $:END_GPU_PARALLEL_LOOP()
+                ! Point q_cons_qp advected components to the renormalized copies
+                do i = advxb, advxe - 1
+                    q_cons_qp%vf(i)%sf => alf_copies(i)%sf
+                    q_prim_qp%vf(i)%sf => alf_copies(i)%sf
+                end do
             end if
         end if
 
@@ -1771,10 +1773,13 @@ contains
         call s_finalize_pressure_relaxation_module
 
         if (.not. igr) then
+            ! q_cons_qp fields are pointer-aliased, not allocated - just nullify
+            do j = 1, sys_size
+                nullify (q_cons_qp%vf(j)%sf)
+            end do
+
             do j = cont_idx%beg, cont_idx%end
                 if (relativity) then
-                    ! Cons and Prim densities are different for relativity
-                    @:DEALLOCATE(q_cons_qp%vf(j)%sf)
                     @:DEALLOCATE(q_prim_qp%vf(j)%sf)
                 else
                     nullify (q_prim_qp%vf(j)%sf)
@@ -1786,9 +1791,18 @@ contains
             end do
 
             do j = mom_idx%beg, E_idx
-                @:DEALLOCATE(q_cons_qp%vf(j)%sf)
                 @:DEALLOCATE(q_prim_qp%vf(j)%sf)
             end do
+
+            ! Deallocate mpp_lim renormalization copies
+            if (mpp_lim .and. bubbles_euler) then
+                do j = advxb, advxe - 1
+                    if (associated(alf_copies(j)%sf)) then
+                        @:DEALLOCATE(alf_copies(j)%sf)
+                    end if
+                end do
+                deallocate (alf_copies)
+            end if
         end if
 
         @:DEALLOCATE(q_cons_qp%vf, q_prim_qp%vf)
