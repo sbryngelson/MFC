@@ -140,12 +140,8 @@ contains
         @:ALLOCATE(q_prim_qp%vf(1:sys_size))
 
         if (.not. igr) then
-            ! q_cons_qp fields are NOT allocated here; they are pointer-aliased to q_cons_vf at runtime in s_compute_rhs to avoid a
-            ! full copy.
-            do l = mom_idx%beg, E_idx
-                @:ALLOCATE(q_prim_qp%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                           & idwbuff(3)%beg:idwbuff(3)%end))
-            end do
+            ! q_cons_qp fields: pointer-aliased to q_cons_vf at runtime in s_compute_rhs. q_prim_qp momentum+energy fields:
+            ! pointer-aliased to q_prim_vf at runtime. The conversion writes to q_prim_qp, which updates q_prim_vf automatically.
         end if
 
         if (surface_tension) then
@@ -547,6 +543,12 @@ contains
                 q_prim_qp%vf(psi_idx)%sf => q_cons_vf(psi_idx)%sf
                 $:GPU_ENTER_DATA(attach='[q_prim_qp%vf(psi_idx)%sf]')
             end if
+            ! Alias q_prim_qp momentum+energy to q_prim_vf (avoids separate allocation). The conversion writes to q_prim_qp, which
+            ! updates q_prim_vf automatically.
+            do i = mom_idx%beg, E_idx
+                q_prim_qp%vf(i)%sf => q_prim_vf(i)%sf
+                $:GPU_ENTER_DATA(attach='[q_prim_qp%vf(i)%sf]')
+            end do
 
             ! mpp_lim renormalization modifies advected components in-place. Since q_cons_qp now aliases q_cons_vf, we must copy and
             ! renormalize only the affected advected components to avoid corrupting the state.
@@ -1739,7 +1741,7 @@ contains
             end do
 
             do j = mom_idx%beg, E_idx
-                @:DEALLOCATE(q_prim_qp%vf(j)%sf)
+                nullify (q_prim_qp%vf(j)%sf)
             end do
 
             ! Deallocate mpp_lim renormalization copies
