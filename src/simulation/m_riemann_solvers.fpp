@@ -29,7 +29,7 @@ module m_riemann_solvers
     implicit none
 
     private; public :: s_initialize_riemann_solvers_module, s_riemann_solver, s_hll_riemann_solver, s_hllc_riemann_solver, &
-        & s_hlld_riemann_solver, s_lf_riemann_solver, s_finalize_riemann_solvers_module
+        & s_hlld_riemann_solver, s_lf_riemann_solver, s_finalize_riemann_solvers_module, flux_rs_vf
 
     !> The cell-boundary values of the fluxes (src - source) that are computed through the chosen Riemann problem solver, and the
     !! direct evaluation of source terms, by using the left and right states given in qK_prim_rs_vf, dqK_prim_ds_vf where ds = dx,
@@ -3538,7 +3538,8 @@ contains
 
         $:GPU_ENTER_DATA(copyin='[is1, is2, is3, isx, isy, isz]')
 
-        @:ALLOCATE(flux_rs_vf(-1:max(m, n, p), 0:max(m, n, p), 0:max(m, n, p), 1:sys_size))
+        @:ALLOCATE(flux_rs_vf( -buff_size - max(weno_polyn, muscl_polyn):max(m, n, p) + buff_size + max(weno_polyn, muscl_polyn), &
+                   & -buff_size:max(m, n, p) + buff_size, -buff_size:max(m, n, p) + buff_size, 1:sys_size))
         @:ALLOCATE(flux_gsrc_rs_vf(-1:max(m, n, p), 0:max(m, n, p), 0:max(m, n, p), 1:sys_size))
         @:ALLOCATE(flux_src_rs_vf(-1:max(m, n, p), 0:max(m, n, p), 0:max(m, n, p), advxb:sys_size))
         @:ALLOCATE(vel_src_rs_vf(-1:max(m, n, p), 0:max(m, n, p), 0:max(m, n, p), 1:num_vels))

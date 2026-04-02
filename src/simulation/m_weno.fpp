@@ -14,18 +14,8 @@ module m_weno
 
     use m_mpi_proxy
     use m_muscl
+    use m_riemann_solvers, only: v_rs_ws => flux_rs_vf
     private; public :: s_initialize_weno_module, s_initialize_weno, s_finalize_weno_module, s_weno
-
-    !> @name The cell-average variables that will be WENO-reconstructed. Formerly, they are stored in v_vf. However, they are
-    !! transferred to v_rs_wsL and v_rs_wsR as to be reshaped (RS) and/or characteristically decomposed. The reshaping allows the
-    !! WENO procedure to be independent of the coordinate direction of the reconstruction. Lastly, notice that the left (L) and
-    !! right (R) results of the characteristic decomposition are stored in custom-constructed WENO- stencils (WS) that are annexed
-    !! to each position of a given scalar field.
-    !> @{
-    real(wp), allocatable, dimension(:,:,:,:) :: v_rs_ws
-    integer                                   :: v_rs_ws_dir = 0
-    !> @}
-    $:GPU_DECLARE(create='[v_rs_ws]')
 
     ! WENO Coefficients
 
@@ -1383,12 +1373,6 @@ contains
         v_size = ubound(v_vf, 1)
         $:GPU_UPDATE(device='[v_size]')
 
-        ! Allocate workspace once with max-bounds shape (covers all directions)
-        if (.not. allocated(v_rs_ws)) then
-            @:ALLOCATE(v_rs_ws( -buff_size - weno_polyn:max(m, n, p) + buff_size + weno_polyn, -buff_size:max(m, n, &
-                       & p) + buff_size, -buff_size:max(m, n, p) + buff_size, 1:sys_size))
-        end if
-
         if (weno_dir == 1) then
             $:GPU_PARALLEL_LOOP(collapse=4)
             do j = 1, v_size
@@ -1537,12 +1521,6 @@ contains
     impure subroutine s_finalize_weno_module()
 
         if (weno_order == 1) return
-
-        ! Deallocating the WENO-stencil of the WENO-reconstructed variables
-
-        if (allocated(v_rs_ws)) then
-            @:DEALLOCATE(v_rs_ws)
-        end if
 
         ! Deallocating WENO coefficients in x-direction
         @:DEALLOCATE(poly_coef_cbL_x, poly_coef_cbR_x)
