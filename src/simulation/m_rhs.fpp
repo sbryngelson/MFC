@@ -185,8 +185,10 @@ contains
                     do l = 1, sys_size
                         @:ALLOCATE(flux_n(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
                                    & idwbuff(3)%beg:idwbuff(3)%end))
-                        @:ALLOCATE(flux_gsrc_n(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end))
+                        if (cyl_coord) then
+                            @:ALLOCATE(flux_gsrc_n(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                                       & idwbuff(3)%beg:idwbuff(3)%end))
+                        end if
                     end do
 
                     if (viscous .or. surface_tension) then
@@ -219,7 +221,10 @@ contains
                 end if
 
                 @:ACC_SETUP_VFs(flux_n(i))
-                @:ACC_SETUP_VFs(flux_src_n(i), flux_gsrc_n(i))
+                @:ACC_SETUP_VFs(flux_src_n(i))
+                if (cyl_coord) then
+                    @:ACC_SETUP_VFs(flux_gsrc_n(i))
+                end if
 
                 if (i == 1) then
                     if (riemann_solver /= 1) then
@@ -234,8 +239,10 @@ contains
                         $:GPU_ENTER_DATA(attach='[flux_n(i)%vf(l)%sf]')
                         flux_src_n(i)%vf(l)%sf => flux_src_n(1)%vf(l)%sf
                         $:GPU_ENTER_DATA(attach='[flux_src_n(i)%vf(l)%sf]')
-                        flux_gsrc_n(i)%vf(l)%sf => flux_gsrc_n(1)%vf(l)%sf
-                        $:GPU_ENTER_DATA(attach='[flux_gsrc_n(i)%vf(l)%sf]')
+                        if (cyl_coord) then
+                            flux_gsrc_n(i)%vf(l)%sf => flux_gsrc_n(1)%vf(l)%sf
+                            $:GPU_ENTER_DATA(attach='[flux_gsrc_n(i)%vf(l)%sf]')
+                        end if
                     end do
                 end if
             end do
@@ -401,19 +408,21 @@ contains
                 end do
             end if  ! end allocation of viscous variables
 
-            $:GPU_PARALLEL_LOOP(private='[i, j, k, l, id]', collapse=4)
-            do id = 1, num_dims
-                do i = 1, sys_size
-                    do l = idwbuff(3)%beg, idwbuff(3)%end
-                        do k = idwbuff(2)%beg, idwbuff(2)%end
-                            do j = idwbuff(1)%beg, idwbuff(1)%end
-                                flux_gsrc_n(id)%vf(i)%sf(j, k, l) = 0._wp
+            if (cyl_coord) then
+                $:GPU_PARALLEL_LOOP(private='[i, j, k, l, id]', collapse=4)
+                do id = 1, num_dims
+                    do i = 1, sys_size
+                        do l = idwbuff(3)%beg, idwbuff(3)%end
+                            do k = idwbuff(2)%beg, idwbuff(2)%end
+                                do j = idwbuff(1)%beg, idwbuff(1)%end
+                                    flux_gsrc_n(id)%vf(i)%sf(j, k, l) = 0._wp
+                                end do
                             end do
                         end do
                     end do
                 end do
-            end do
-            $:END_GPU_PARALLEL_LOOP()
+                $:END_GPU_PARALLEL_LOOP()
+            end if
         end if  ! end allocation for .not. igr
 
         if (qbmm) then
@@ -1840,12 +1849,14 @@ contains
                     do l = 1, sys_size
                         nullify (flux_n(i)%vf(l)%sf)
                         nullify (flux_src_n(i)%vf(l)%sf)
-                        nullify (flux_gsrc_n(i)%vf(l)%sf)
+                        if (cyl_coord) nullify (flux_gsrc_n(i)%vf(l)%sf)
                     end do
                 else
                     do l = 1, sys_size
                         @:DEALLOCATE(flux_n(i)%vf(l)%sf)
-                        @:DEALLOCATE(flux_gsrc_n(i)%vf(l)%sf)
+                        if (cyl_coord) then
+                            @:DEALLOCATE(flux_gsrc_n(i)%vf(l)%sf)
+                        end if
                     end do
 
                     if (viscous) then

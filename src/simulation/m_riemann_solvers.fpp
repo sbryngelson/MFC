@@ -3539,7 +3539,9 @@ contains
         $:GPU_ENTER_DATA(copyin='[is1, is2, is3, isx, isy, isz]')
 
         @:ALLOCATE(flux_rs_vf(-1:max(m, n, p), 0:max(m, n, p), 0:max(m, n, p), 1:sys_size))
-        @:ALLOCATE(flux_gsrc_rs_vf(-1:max(m, n, p), 0:max(m, n, p), 0:max(m, n, p), 1:sys_size))
+        if (cyl_coord) then
+            @:ALLOCATE(flux_gsrc_rs_vf(-1:max(m, n, p), 0:max(m, n, p), 0:max(m, n, p), 1:sys_size))
+        end if
         @:ALLOCATE(flux_src_rs_vf(-1:max(m, n, p), 0:max(m, n, p), 0:max(m, n, p), advxb:sys_size))
         @:ALLOCATE(vel_src_rs_vf(-1:max(m, n, p), 0:max(m, n, p), 0:max(m, n, p), 1:num_vels))
         if (qbmm) then
@@ -4540,7 +4542,9 @@ contains
         @:DEALLOCATE(vel_src_rs_vf)
         @:DEALLOCATE(flux_rs_vf)
         @:DEALLOCATE(flux_src_rs_vf)
-        @:DEALLOCATE(flux_gsrc_rs_vf)
+        if (cyl_coord) then
+            @:DEALLOCATE(flux_gsrc_rs_vf)
+        end if
         if (qbmm) then
             @:DEALLOCATE(mom_sp_rs_vf)
         end if
