@@ -116,11 +116,12 @@ module m_rhs
     $:GPU_DECLARE(create='[alf_sum]')
 
     real(wp), allocatable, dimension(:,:,:)   :: blkmod1, blkmod2, alpha1, alpha2, Kterm
-    real(wp), allocatable, dimension(:,:,:,:) :: qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, qR_rsx_vf, qR_rsy_vf, qR_rsz_vf
-    real(wp), allocatable, dimension(:,:,:,:) :: dqL_rsx_vf, dqL_rsy_vf, dqL_rsz_vf, dqR_rsx_vf, dqR_rsy_vf, dqR_rsz_vf
+    real(wp), allocatable, dimension(:,:,:,:) :: qL_rs_vf, qR_rs_vf
+    real(wp), allocatable, dimension(:,:,:,:) :: dqL_rs_vf, dqR_rs_vf
+    integer                                   :: rs_dir = 0, drs_dir = 0
     $:GPU_DECLARE(create='[blkmod1, blkmod2, alpha1, alpha2, Kterm]')
-    $:GPU_DECLARE(create='[qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, qR_rsx_vf, qR_rsy_vf, qR_rsz_vf]')
-    $:GPU_DECLARE(create='[dqL_rsx_vf, dqL_rsy_vf, dqL_rsz_vf, dqR_rsx_vf, dqR_rsy_vf, dqR_rsz_vf]')
+    $:GPU_DECLARE(create='[qL_rs_vf, qR_rs_vf]')
+    $:GPU_DECLARE(create='[dqL_rs_vf, dqR_rs_vf]')
 
     real(wp), allocatable, dimension(:,:,:) :: nbub  !< Bubble number density
     $:GPU_DECLARE(create='[nbub]')
@@ -297,34 +298,7 @@ contains
                 @:ACC_SETUP_VFs(qL_prim(i), qR_prim(i))
             end do
 
-            @:ALLOCATE(qL_rsx_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                       & 1:sys_size))
-            @:ALLOCATE(qR_rsx_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                       & 1:sys_size))
-
-            if (n > 0) then
-                @:ALLOCATE(qL_rsy_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-                @:ALLOCATE(qR_rsy_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-            else
-                @:ALLOCATE(qL_rsy_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-                @:ALLOCATE(qR_rsy_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-            end if
-
-            if (p > 0) then
-                @:ALLOCATE(qL_rsz_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                           & 1:sys_size))
-                @:ALLOCATE(qR_rsz_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                           & 1:sys_size))
-            else
-                @:ALLOCATE(qL_rsz_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-                @:ALLOCATE(qR_rsz_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-            end if
+            call s_ensure_rs_allocated(1)
 
             if (.not. viscous) then
                 do i = 1, num_dims
@@ -427,34 +401,7 @@ contains
                 end do
 
                 if (weno_Re_flux) then
-                    @:ALLOCATE(dqL_rsx_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, mom_idx%beg:mom_idx%end))
-                    @:ALLOCATE(dqR_rsx_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end, mom_idx%beg:mom_idx%end))
-
-                    if (n > 0) then
-                        @:ALLOCATE(dqL_rsy_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, mom_idx%beg:mom_idx%end))
-                        @:ALLOCATE(dqR_rsy_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, mom_idx%beg:mom_idx%end))
-                    else
-                        @:ALLOCATE(dqL_rsy_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, mom_idx%beg:mom_idx%end))
-                        @:ALLOCATE(dqR_rsy_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, mom_idx%beg:mom_idx%end))
-                    end if
-
-                    if (p > 0) then
-                        @:ALLOCATE(dqL_rsz_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(1)%beg:idwbuff(1)%end, mom_idx%beg:mom_idx%end))
-                        @:ALLOCATE(dqR_rsz_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(1)%beg:idwbuff(1)%end, mom_idx%beg:mom_idx%end))
-                    else
-                        @:ALLOCATE(dqL_rsz_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, mom_idx%beg:mom_idx%end))
-                        @:ALLOCATE(dqR_rsz_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, mom_idx%beg:mom_idx%end))
-                    end if
+                    call s_ensure_drs_allocated(1)
                 end if  ! end allocation for weno_Re_flux
             else
                 @:ALLOCATE(dq_prim_dx_qp(1)%vf(1:sys_size))
@@ -530,6 +477,94 @@ contains
         end if
 
     end subroutine s_initialize_rhs_module
+
+    !> Reallocate qL_rs_vf/qR_rs_vf when the reconstruction direction changes
+    subroutine s_ensure_rs_allocated(dir)
+
+        integer, intent(in) :: dir
+
+        if (rs_dir /= dir) then
+            if (allocated(qL_rs_vf)) then
+                @:DEALLOCATE(qL_rs_vf, qR_rs_vf)
+            end if
+            if (dir == 1) then
+                @:ALLOCATE(qL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
+                           & 1:sys_size))
+                @:ALLOCATE(qR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
+                           & 1:sys_size))
+            else if (dir == 2) then
+                if (n > 0) then
+                    @:ALLOCATE(qL_rs_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
+                    @:ALLOCATE(qR_rs_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
+                else
+                    @:ALLOCATE(qL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
+                    @:ALLOCATE(qR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
+                end if
+            else
+                if (p > 0) then
+                    @:ALLOCATE(qL_rs_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(1)%beg:idwbuff(1)%end, 1:sys_size))
+                    @:ALLOCATE(qR_rs_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(1)%beg:idwbuff(1)%end, 1:sys_size))
+                else
+                    @:ALLOCATE(qL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
+                    @:ALLOCATE(qR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, 1:sys_size))
+                end if
+            end if
+            rs_dir = dir
+        end if
+
+    end subroutine s_ensure_rs_allocated
+
+    !> Reallocate dqL_rs_vf/dqR_rs_vf when the viscous reconstruction direction changes
+    subroutine s_ensure_drs_allocated(dir)
+
+        integer, intent(in) :: dir
+
+        if (drs_dir /= dir) then
+            if (allocated(dqL_rs_vf)) then
+                @:DEALLOCATE(dqL_rs_vf, dqR_rs_vf)
+            end if
+            if (dir == 1) then
+                @:ALLOCATE(dqL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
+                           & momxb:momxe))
+                @:ALLOCATE(dqR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
+                           & momxb:momxe))
+            else if (dir == 2) then
+                if (n > 0) then
+                    @:ALLOCATE(dqL_rs_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
+                    @:ALLOCATE(dqR_rs_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
+                else
+                    @:ALLOCATE(dqL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
+                    @:ALLOCATE(dqR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
+                end if
+            else
+                if (p > 0) then
+                    @:ALLOCATE(dqL_rs_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(1)%beg:idwbuff(1)%end, momxb:momxe))
+                    @:ALLOCATE(dqR_rs_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(1)%beg:idwbuff(1)%end, momxb:momxe))
+                else
+                    @:ALLOCATE(dqL_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
+                    @:ALLOCATE(dqR_rs_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end, momxb:momxe))
+                end if
+            end if
+            drs_dir = dir
+        end if
+
+    end subroutine s_ensure_drs_allocated
 
     !> Compute the right-hand side of the semi-discrete governing equations for a single time stage
     impure subroutine s_compute_rhs(q_cons_vf, q_T_sf, q_prim_vf, bc_type, rhs_vf, pb_in, rhs_pb, mv_in, rhs_mv, t_step, &
@@ -629,9 +664,9 @@ contains
 
         if ((viscous .and. .not. igr) .or. dummy) then
             call nvtxStartRange("RHS-VISCOUS")
-            call s_get_viscous(qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, dqL_prim_dx_n, dqL_prim_dy_n, dqL_prim_dz_n, qL_prim, qR_rsx_vf, &
-                               & qR_rsy_vf, qR_rsz_vf, dqR_prim_dx_n, dqR_prim_dy_n, dqR_prim_dz_n, qR_prim, q_prim_qp, &
-                               & dq_prim_dx_qp, dq_prim_dy_qp, dq_prim_dz_qp, idwbuff(1), idwbuff(2), idwbuff(3))
+            call s_get_viscous(qL_rs_vf, dqL_prim_dx_n, dqL_prim_dy_n, dqL_prim_dz_n, qL_prim, qR_rs_vf, dqR_prim_dx_n, &
+                               & dqR_prim_dy_n, dqR_prim_dz_n, qR_prim, q_prim_qp, dq_prim_dx_qp, dq_prim_dy_qp, dq_prim_dz_qp, &
+                               & idwbuff(1), idwbuff(2), idwbuff(3))
             call nvtxEndRange
         end if
 
@@ -677,65 +712,57 @@ contains
                 ! Reconstructing Primitive/Conservative Variables
                 call nvtxStartRange("RHS-WENO")
 
+                call s_ensure_rs_allocated(id)
+
                 if (.not. surface_tension) then
                     if (all(Re_size == 0)) then
                         ! Reconstruct densitiess
                         iv%beg = 1; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(1:sys_size), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(1:sys_size), qL_rs_vf, qR_rs_vf, id)
                     else
                         iv%beg = 1; iv%end = contxe
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
 
                         iv%beg = E_idx; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
                     end if
                 else
                     if (all(Re_size == 0)) then
                         iv%beg = 1; iv%end = E_idx - 1
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
 
                         iv%beg = E_idx; iv%end = E_idx
-                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(E_idx), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                            & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(E_idx), qL_rs_vf, qR_rs_vf, id)
 
                         iv%beg = E_idx + 1; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
                     else
                         iv%beg = 1; iv%end = contxe
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
 
                         iv%beg = E_idx; iv%end = E_idx
-                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(E_idx), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                            & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(E_idx), qL_rs_vf, qR_rs_vf, id)
 
                         iv%beg = E_idx + 1; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
                     end if
                 end if
 
                 ! Reconstruct viscous derivatives for viscosity
                 if (weno_Re_flux) then
+                    call s_ensure_drs_allocated(id)
                     iv%beg = momxb; iv%end = momxe
-                    call s_reconstruct_cell_boundary_values_visc_deriv(dq_prim_dx_qp(1)%vf(iv%beg:iv%end), dqL_rsx_vf, &
-                        & dqL_rsy_vf, dqL_rsz_vf, dqR_rsx_vf, dqR_rsy_vf, dqR_rsz_vf, id, dqL_prim_dx_n(id)%vf(iv%beg:iv%end), &
-                        & dqR_prim_dx_n(id)%vf(iv%beg:iv%end), idwbuff(1), idwbuff(2), idwbuff(3))
+                    call s_reconstruct_cell_boundary_values_visc_deriv(dq_prim_dx_qp(1)%vf(iv%beg:iv%end), dqL_rs_vf, dqR_rs_vf, &
+                        & id, dqL_prim_dx_n(id)%vf(iv%beg:iv%end), dqR_prim_dx_n(id)%vf(iv%beg:iv%end), idwbuff(1), idwbuff(2), &
+                        & idwbuff(3))
                     if (n > 0) then
-                        call s_reconstruct_cell_boundary_values_visc_deriv(dq_prim_dy_qp(1)%vf(iv%beg:iv%end), dqL_rsx_vf, &
-                            & dqL_rsy_vf, dqL_rsz_vf, dqR_rsx_vf, dqR_rsy_vf, dqR_rsz_vf, id, &
-                            & dqL_prim_dy_n(id)%vf(iv%beg:iv%end), dqR_prim_dy_n(id)%vf(iv%beg:iv%end), idwbuff(1), idwbuff(2), &
-                            & idwbuff(3))
+                        call s_reconstruct_cell_boundary_values_visc_deriv(dq_prim_dy_qp(1)%vf(iv%beg:iv%end), dqL_rs_vf, &
+                            & dqR_rs_vf, id, dqL_prim_dy_n(id)%vf(iv%beg:iv%end), dqR_prim_dy_n(id)%vf(iv%beg:iv%end), &
+                            & idwbuff(1), idwbuff(2), idwbuff(3))
                         if (p > 0) then
-                            call s_reconstruct_cell_boundary_values_visc_deriv(dq_prim_dz_qp(1)%vf(iv%beg:iv%end), dqL_rsx_vf, &
-                                & dqL_rsy_vf, dqL_rsz_vf, dqR_rsx_vf, dqR_rsy_vf, dqR_rsz_vf, id, &
-                                & dqL_prim_dz_n(id)%vf(iv%beg:iv%end), dqR_prim_dz_n(id)%vf(iv%beg:iv%end), idwbuff(1), &
-                                & idwbuff(2), idwbuff(3))
+                            call s_reconstruct_cell_boundary_values_visc_deriv(dq_prim_dz_qp(1)%vf(iv%beg:iv%end), dqL_rs_vf, &
+                                & dqR_rs_vf, id, dqL_prim_dz_n(id)%vf(iv%beg:iv%end), dqR_prim_dz_n(id)%vf(iv%beg:iv%end), &
+                                & idwbuff(1), idwbuff(2), idwbuff(3))
                         end if
                     end if
                 end if
@@ -753,10 +780,10 @@ contains
                 irx%end = m; iry%end = n; irz%end = p
                 ! Computing Riemann Solver Flux and Source Flux
                 call nvtxStartRange("RHS-RIEMANN-SOLVER")
-                call s_riemann_solver(qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, dqR_prim_dx_n(id)%vf, dqR_prim_dy_n(id)%vf, &
-                                      & dqR_prim_dz_n(id)%vf, qR_prim(id)%vf, qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                      & dqL_prim_dx_n(id)%vf, dqL_prim_dy_n(id)%vf, dqL_prim_dz_n(id)%vf, qL_prim(id)%vf, &
-                                      & q_prim_qp%vf, flux_n(id)%vf, flux_src_n(id)%vf, flux_gsrc_n(id)%vf, id, irx, iry, irz)
+                call s_riemann_solver(qR_rs_vf, dqR_prim_dx_n(id)%vf, dqR_prim_dy_n(id)%vf, dqR_prim_dz_n(id)%vf, qR_prim(id)%vf, &
+                                      & qL_rs_vf, dqL_prim_dx_n(id)%vf, dqL_prim_dy_n(id)%vf, dqL_prim_dz_n(id)%vf, &
+                                      & qL_prim(id)%vf, q_prim_qp%vf, flux_n(id)%vf, flux_src_n(id)%vf, flux_gsrc_n(id)%vf, id, &
+                                      & irx, iry, irz)
                 call nvtxEndRange
 
                 ! Additional physics and source terms RHS addition for advection source
@@ -1621,11 +1648,10 @@ contains
     end subroutine s_compute_additional_physics_rhs
 
     !> Reconstruct left and right cell-boundary values from cell-averaged variables
-    subroutine s_reconstruct_cell_boundary_values(v_vf, vL_x, vL_y, vL_z, vR_x, vR_y, vR_z, norm_dir)
+    subroutine s_reconstruct_cell_boundary_values(v_vf, vL, vR, norm_dir)
 
         type(scalar_field), dimension(iv%beg:iv%end), intent(in) :: v_vf
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_x, vL_y, vL_z
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_x, vR_y, vR_z
+        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL, vR
         integer, intent(in) :: norm_dir
         integer :: recon_dir  !< Coordinate direction of the reconstruction
         integer :: i, j, k, l
@@ -1649,17 +1675,15 @@ contains
 
                 if (n > 0) then
                     if (p > 0) then
-                        call s_${SCHEME}$ (v_vf(iv%beg:iv%end), vL_x(:,:,:,iv%beg:iv%end), vL_y(:,:,:,iv%beg:iv%end), vL_z(:,:,:, &
-                                           & iv%beg:iv%end), vR_x(:,:,:,iv%beg:iv%end), vR_y(:,:,:,iv%beg:iv%end), vR_z(:,:,:, &
-                                           & iv%beg:iv%end), recon_dir, is1, is2, is3)
+                        call s_${SCHEME}$ (v_vf(iv%beg:iv%end), vL(:,:,:,iv%beg:iv%end), vR(:,:,:,iv%beg:iv%end), recon_dir, is1, &
+                                           & is2, is3)
                     else
-                        call s_${SCHEME}$ (v_vf(iv%beg:iv%end), vL_x(:,:,:,iv%beg:iv%end), vL_y(:,:,:,iv%beg:iv%end), vL_z(:,:,:, &
-                                           & :), vR_x(:,:,:,iv%beg:iv%end), vR_y(:,:,:,iv%beg:iv%end), vR_z(:,:,:,:), recon_dir, &
-                                           & is1, is2, is3)
+                        call s_${SCHEME}$ (v_vf(iv%beg:iv%end), vL(:,:,:,iv%beg:iv%end), vR(:,:,:,iv%beg:iv%end), recon_dir, is1, &
+                                           & is2, is3)
                     end if
                 else
-                    call s_${SCHEME}$ (v_vf(iv%beg:iv%end), vL_x(:,:,:,iv%beg:iv%end), vL_y(:,:,:,:), vL_z(:,:,:,:), vR_x(:,:,:, &
-                                       & iv%beg:iv%end), vR_y(:,:,:,:), vR_z(:,:,:,:), recon_dir, is1, is2, is3)
+                    call s_${SCHEME}$ (v_vf(iv%beg:iv%end), vL(:,:,:,iv%beg:iv%end), vR(:,:,:,iv%beg:iv%end), recon_dir, is1, &
+                                       & is2, is3)
                 end if
             end if
         #:endfor
@@ -1667,11 +1691,10 @@ contains
     end subroutine s_reconstruct_cell_boundary_values
 
     !> Perform first-order (piecewise constant) reconstruction of left and right cell-boundary values
-    subroutine s_reconstruct_cell_boundary_values_first_order(v_vf, vL_x, vL_y, vL_z, vR_x, vR_y, vR_z, norm_dir)
+    subroutine s_reconstruct_cell_boundary_values_first_order(v_vf, vL, vR, norm_dir)
 
         type(scalar_field), dimension(iv%beg:iv%end), intent(in) :: v_vf
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_x, vL_y, vL_z
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_x, vR_y, vR_z
+        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL, vR
         integer, intent(in) :: norm_dir
         integer :: recon_dir  !< Coordinate direction of the WENO reconstruction
         integer :: i, j, k, l
@@ -1703,8 +1726,8 @@ contains
                 do l = is3%beg, is3%end
                     do k = is2%beg, is2%end
                         do j = is1%beg, is1%end
-                            vL_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
-                            vR_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
+                            vL(j, k, l, i) = v_vf(i)%sf(j, k, l)
+                            vR(j, k, l, i) = v_vf(i)%sf(j, k, l)
                         end do
                     end do
                 end do
@@ -1716,8 +1739,8 @@ contains
                 do l = is3%beg, is3%end
                     do k = is2%beg, is2%end
                         do j = is1%beg, is1%end
-                            vL_y(j, k, l, i) = v_vf(i)%sf(k, j, l)
-                            vR_y(j, k, l, i) = v_vf(i)%sf(k, j, l)
+                            vL(j, k, l, i) = v_vf(i)%sf(k, j, l)
+                            vR(j, k, l, i) = v_vf(i)%sf(k, j, l)
                         end do
                     end do
                 end do
@@ -1729,8 +1752,8 @@ contains
                 do l = is3%beg, is3%end
                     do k = is2%beg, is2%end
                         do j = is1%beg, is1%end
-                            vL_z(j, k, l, i) = v_vf(i)%sf(l, k, j)
-                            vR_z(j, k, l, i) = v_vf(i)%sf(l, k, j)
+                            vL(j, k, l, i) = v_vf(i)%sf(l, k, j)
+                            vR(j, k, l, i) = v_vf(i)%sf(l, k, j)
                         end do
                     end do
                 end do
@@ -1771,14 +1794,8 @@ contains
         @:DEALLOCATE(q_cons_qp%vf, q_prim_qp%vf)
 
         if (.not. igr) then
-            @:DEALLOCATE(qL_rsx_vf, qR_rsx_vf)
-
-            if (n > 0) then
-                @:DEALLOCATE(qL_rsy_vf, qR_rsy_vf)
-            end if
-
-            if (p > 0) then
-                @:DEALLOCATE(qL_rsz_vf, qR_rsz_vf)
+            if (allocated(qL_rs_vf)) then
+                @:DEALLOCATE(qL_rs_vf, qR_rs_vf)
             end if
 
             if (viscous) then
@@ -1831,14 +1848,8 @@ contains
                 end do
 
                 if (weno_Re_flux) then
-                    @:DEALLOCATE(dqL_rsx_vf, dqR_rsx_vf)
-
-                    if (n > 0) then
-                        @:DEALLOCATE(dqL_rsy_vf, dqR_rsy_vf)
-                    end if
-
-                    if (p > 0) then
-                        @:DEALLOCATE(dqL_rsz_vf, dqR_rsz_vf)
+                    if (allocated(dqL_rs_vf)) then
+                        @:DEALLOCATE(dqL_rs_vf, dqR_rs_vf)
                     end if
                 end if
 

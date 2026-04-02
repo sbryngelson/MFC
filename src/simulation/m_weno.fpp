@@ -22,9 +22,10 @@ module m_weno
     !! right (R) results of the characteristic decomposition are stored in custom-constructed WENO- stencils (WS) that are annexed
     !! to each position of a given scalar field.
     !> @{
-    real(wp), allocatable, dimension(:,:,:,:) :: v_rs_ws_x, v_rs_ws_y, v_rs_ws_z
+    real(wp), allocatable, dimension(:,:,:,:) :: v_rs_ws
+    integer                                   :: v_rs_ws_dir = 0
     !> @}
-    $:GPU_DECLARE(create='[v_rs_ws_x, v_rs_ws_y, v_rs_ws_z]')
+    $:GPU_DECLARE(create='[v_rs_ws]')
 
     ! WENO Coefficients
 
@@ -118,8 +119,6 @@ contains
 
         call s_compute_weno_coefficients(1, is1_weno)
 
-        @:ALLOCATE(v_rs_ws_x(is1_weno%beg:is1_weno%end, is2_weno%beg:is2_weno%end, is3_weno%beg:is3_weno%end, 1:sys_size))
-
         ! Allocating/Computing WENO Coefficients in y-direction
         if (n == 0) return
 
@@ -145,8 +144,6 @@ contains
 
         call s_compute_weno_coefficients(2, is2_weno)
 
-        @:ALLOCATE(v_rs_ws_y(is2_weno%beg:is2_weno%end, is1_weno%beg:is1_weno%end, is3_weno%beg:is3_weno%end, 1:sys_size))
-
         ! Allocating/Computing WENO Coefficients in z-direction
         if (p == 0) return
 
@@ -164,8 +161,6 @@ contains
                    & 0:weno_polyn*(weno_polyn + 1)/2 - 1))
 
         call s_compute_weno_coefficients(3, is3_weno)
-
-        @:ALLOCATE(v_rs_ws_z(is3_weno%beg:is3_weno%end, is2_weno%beg:is2_weno%end, is1_weno%beg:is1_weno%end, 1:sys_size))
 
     end subroutine s_initialize_weno_module
 
@@ -857,13 +852,13 @@ contains
     end subroutine s_compute_weno_coefficients
 
     !> Perform WENO reconstruction of left and right cell-boundary values from cell-averaged variables
-    subroutine s_weno(v_vf, vL_rs_vf_x, vL_rs_vf_y, vL_rs_vf_z, vR_rs_vf_x, vR_rs_vf_y, vR_rs_vf_z, weno_dir, is1_weno_d, &
+    subroutine s_weno(v_vf, vL_rs_vf, vR_rs_vf, weno_dir, is1_weno_d, &
 
         & is2_weno_d, is3_weno_d)
 
         type(scalar_field), dimension(1:), intent(in)                                          :: v_vf
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf_x, vL_rs_vf_y, vL_rs_vf_z
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_rs_vf_x, vR_rs_vf_y, vR_rs_vf_z
+        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf
+        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_rs_vf
         integer, intent(in)                                                                    :: weno_dir
         type(int_bounds_info), intent(in)                                                      :: is1_weno_d, is2_weno_d, is3_weno_d
 
@@ -903,8 +898,8 @@ contains
                     do l = is3_weno%beg, is3_weno%end
                         do k = is2_weno%beg, is2_weno%end
                             do j = is1_weno%beg, is1_weno%end
-                                vL_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
-                                vR_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
+                                vL_rs_vf(j, k, l, i) = v_vf(i)%sf(j, k, l)
+                                vR_rs_vf(j, k, l, i) = v_vf(i)%sf(j, k, l)
                             end do
                         end do
                     end do
@@ -916,8 +911,8 @@ contains
                     do l = is3_weno%beg, is3_weno%end
                         do k = is2_weno%beg, is2_weno%end
                             do j = is1_weno%beg, is1_weno%end
-                                vL_rs_vf_y(j, k, l, i) = v_vf(i)%sf(k, j, l)
-                                vR_rs_vf_y(j, k, l, i) = v_vf(i)%sf(k, j, l)
+                                vL_rs_vf(j, k, l, i) = v_vf(i)%sf(k, j, l)
+                                vR_rs_vf(j, k, l, i) = v_vf(i)%sf(k, j, l)
                             end do
                         end do
                     end do
@@ -929,8 +924,8 @@ contains
                     do l = is3_weno%beg, is3_weno%end
                         do k = is2_weno%beg, is2_weno%end
                             do j = is1_weno%beg, is1_weno%end
-                                vL_rs_vf_z(j, k, l, i) = v_vf(i)%sf(l, k, j)
-                                vR_rs_vf_z(j, k, l, i) = v_vf(i)%sf(l, k, j)
+                                vL_rs_vf(j, k, l, i) = v_vf(i)%sf(l, k, j)
+                                vR_rs_vf(j, k, l, i) = v_vf(i)%sf(l, k, j)
                             end do
                         end do
                     end do
@@ -952,11 +947,11 @@ contains
                                     omega(:) = 0._wp
                                     beta(:) = weno_eps
 
-                                    dvd(0) = v_rs_ws_${XYZ}$ (j + 1, k, l, i) - v_rs_ws_${XYZ}$ (j, k, l, i)
-                                    dvd(-1) = v_rs_ws_${XYZ}$ (j, k, l, i) - v_rs_ws_${XYZ}$ (j - 1, k, l, i)
+                                    dvd(0) = v_rs_ws (j + 1, k, l, i) - v_rs_ws (j, k, l, i)
+                                    dvd(-1) = v_rs_ws (j, k, l, i) - v_rs_ws (j - 1, k, l, i)
 
-                                    poly(0) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 0, 0)*dvd(0)
-                                    poly(1) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 1, 0)*dvd(-1)
+                                    poly(0) = v_rs_ws (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 0, 0)*dvd(0)
+                                    poly(1) = v_rs_ws (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 1, 0)*dvd(-1)
 
                                     beta(0) = beta_coef_${XYZ}$ (j, 0, 0)*dvd(0)*dvd(0) + weno_eps
                                     beta(1) = beta_coef_${XYZ}$ (j, 1, 0)*dvd(-1)*dvd(-1) + weno_eps
@@ -984,12 +979,12 @@ contains
 
                                     omega = alpha/sum(alpha)
 
-                                    vL_rs_vf_${XYZ}$ (j, k, l, i) = omega(0)*poly(0) + omega(1)*poly(1)
+                                    vL_rs_vf (j, k, l, i) = omega(0)*poly(0) + omega(1)*poly(1)
 
                                     ! reconstruct from right side
 
-                                    poly(0) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 0, 0)*dvd(0)
-                                    poly(1) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 1, 0)*dvd(-1)
+                                    poly(0) = v_rs_ws (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 0, 0)*dvd(0)
+                                    poly(1) = v_rs_ws (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 1, 0)*dvd(-1)
 
                                     if (wenojs) then
                                         alpha(0:weno_num_stencils) = d_cbR_${XYZ}$ (0:weno_num_stencils, &
@@ -1011,7 +1006,7 @@ contains
 
                                     omega = alpha/sum(alpha)
 
-                                    vR_rs_vf_${XYZ}$ (j, k, l, i) = omega(0)*poly(0) + omega(1)*poly(1)
+                                    vR_rs_vf (j, k, l, i) = omega(0)*poly(0) + omega(1)*poly(1)
                                 end do
                             end do
                         end do
@@ -1037,16 +1032,16 @@ contains
                                         delta(:) = 0._wp
                                         beta(:) = weno_eps
 
-                                        dvd(1) = v_rs_ws_${XYZ}$ (j + 2, k, l, i) - v_rs_ws_${XYZ}$ (j + 1, k, l, i)
-                                        dvd(0) = v_rs_ws_${XYZ}$ (j + 1, k, l, i) - v_rs_ws_${XYZ}$ (j, k, l, i)
-                                        dvd(-1) = v_rs_ws_${XYZ}$ (j, k, l, i) - v_rs_ws_${XYZ}$ (j - 1, k, l, i)
-                                        dvd(-2) = v_rs_ws_${XYZ}$ (j - 1, k, l, i) - v_rs_ws_${XYZ}$ (j - 2, k, l, i)
+                                        dvd(1) = v_rs_ws (j + 2, k, l, i) - v_rs_ws (j + 1, k, l, i)
+                                        dvd(0) = v_rs_ws (j + 1, k, l, i) - v_rs_ws (j, k, l, i)
+                                        dvd(-1) = v_rs_ws (j, k, l, i) - v_rs_ws (j - 1, k, l, i)
+                                        dvd(-2) = v_rs_ws (j - 1, k, l, i) - v_rs_ws (j - 2, k, l, i)
 
-                                        poly(0) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 0, &
+                                        poly(0) = v_rs_ws (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 0, &
                                              & 0)*dvd(1) + poly_coef_cbL_${XYZ}$ (j, 0, 1)*dvd(0)
-                                        poly(1) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 1, &
+                                        poly(1) = v_rs_ws (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 1, &
                                              & 0)*dvd(0) + poly_coef_cbL_${XYZ}$ (j, 1, 1)*dvd(-1)
-                                        poly(2) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 2, &
+                                        poly(2) = v_rs_ws (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 2, &
                                              & 0)*dvd(-1) + poly_coef_cbL_${XYZ}$ (j, 2, 1)*dvd(-2)
 
                                         beta(0) = beta_coef_${XYZ}$ (j, 0, 0)*dvd(1)*dvd(1) + beta_coef_${XYZ}$ (j, 0, &
@@ -1102,15 +1097,15 @@ contains
 
                                         omega = alpha/sum(alpha)
 
-                                        vL_rs_vf_${XYZ}$ (j, k, l, i) = omega(0)*poly(0) + omega(1)*poly(1) + omega(2)*poly(2)
+                                        vL_rs_vf (j, k, l, i) = omega(0)*poly(0) + omega(1)*poly(1) + omega(2)*poly(2)
 
                                         ! reconstruct from right side
 
-                                        poly(0) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 0, &
+                                        poly(0) = v_rs_ws (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 0, &
                                              & 0)*dvd(1) + poly_coef_cbR_${XYZ}$ (j, 0, 1)*dvd(0)
-                                        poly(1) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 1, &
+                                        poly(1) = v_rs_ws (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 1, &
                                              & 0)*dvd(0) + poly_coef_cbR_${XYZ}$ (j, 1, 1)*dvd(-1)
-                                        poly(2) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 2, &
+                                        poly(2) = v_rs_ws (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 2, &
                                              & 0)*dvd(-1) + poly_coef_cbR_${XYZ}$ (j, 2, 1)*dvd(-2)
 
                                         if (wenojs) then
@@ -1140,7 +1135,7 @@ contains
 
                                         omega = alpha/sum(alpha)
 
-                                        vR_rs_vf_${XYZ}$ (j, k, l, i) = omega(0)*poly(0) + omega(1)*poly(1) + omega(2)*poly(2)
+                                        vR_rs_vf (j, k, l, i) = omega(0)*poly(0) + omega(1)*poly(1) + omega(2)*poly(2)
                                     end do
                                 end do
                             end do
@@ -1148,7 +1143,7 @@ contains
                         $:END_GPU_PARALLEL_LOOP()
 
                         if (mp_weno) then
-                            call s_preserve_monotonicity(v_rs_ws_${XYZ}$, vL_rs_vf_${XYZ}$, vR_rs_vf_${XYZ}$)
+                            call s_preserve_monotonicity(v_rs_ws, vL_rs_vf, vR_rs_vf)
                         end if
                     end if
                 #:endfor
@@ -1169,27 +1164,26 @@ contains
                                         delta(:) = 0._wp
                                         beta(:) = weno_eps
 
-                                        if (teno) v = v_rs_ws_${XYZ}$ (j - 3:j + 3,k, l, &
-                                            & i)  ! temporary field value array for clarity
+                                        if (teno) v = v_rs_ws (j - 3:j + 3,k, l, i)  ! temporary field value array for clarity
 
                                         if (.not. teno) then
-                                            dvd(2) = v_rs_ws_${XYZ}$ (j + 3, k, l, i) - v_rs_ws_${XYZ}$ (j + 2, k, l, i)
-                                            dvd(1) = v_rs_ws_${XYZ}$ (j + 2, k, l, i) - v_rs_ws_${XYZ}$ (j + 1, k, l, i)
-                                            dvd(0) = v_rs_ws_${XYZ}$ (j + 1, k, l, i) - v_rs_ws_${XYZ}$ (j, k, l, i)
-                                            dvd(-1) = v_rs_ws_${XYZ}$ (j, k, l, i) - v_rs_ws_${XYZ}$ (j - 1, k, l, i)
-                                            dvd(-2) = v_rs_ws_${XYZ}$ (j - 1, k, l, i) - v_rs_ws_${XYZ}$ (j - 2, k, l, i)
-                                            dvd(-3) = v_rs_ws_${XYZ}$ (j - 2, k, l, i) - v_rs_ws_${XYZ}$ (j - 3, k, l, i)
+                                            dvd(2) = v_rs_ws (j + 3, k, l, i) - v_rs_ws (j + 2, k, l, i)
+                                            dvd(1) = v_rs_ws (j + 2, k, l, i) - v_rs_ws (j + 1, k, l, i)
+                                            dvd(0) = v_rs_ws (j + 1, k, l, i) - v_rs_ws (j, k, l, i)
+                                            dvd(-1) = v_rs_ws (j, k, l, i) - v_rs_ws (j - 1, k, l, i)
+                                            dvd(-2) = v_rs_ws (j - 1, k, l, i) - v_rs_ws (j - 2, k, l, i)
+                                            dvd(-3) = v_rs_ws (j - 2, k, l, i) - v_rs_ws (j - 3, k, l, i)
 
-                                            poly(3) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 0, &
+                                            poly(3) = v_rs_ws (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 0, &
                                                  & 0)*dvd(2) + poly_coef_cbL_${XYZ}$ (j, 0, 1)*dvd(1) + poly_coef_cbL_${XYZ}$ (j, &
                                                  & 0, 2)*dvd(0)
-                                            poly(2) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 1, &
+                                            poly(2) = v_rs_ws (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 1, &
                                                  & 0)*dvd(1) + poly_coef_cbL_${XYZ}$ (j, 1, 1)*dvd(0) + poly_coef_cbL_${XYZ}$ (j, &
                                                  & 1, 2)*dvd(-1)
-                                            poly(1) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 2, &
+                                            poly(1) = v_rs_ws (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 2, &
                                                  & 0)*dvd(0) + poly_coef_cbL_${XYZ}$ (j, 2, &
                                                  & 1)*dvd(-1) + poly_coef_cbL_${XYZ}$ (j, 2, 2)*dvd(-2)
-                                            poly(0) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 3, &
+                                            poly(0) = v_rs_ws (j, k, l, i) + poly_coef_cbL_${XYZ}$ (j, 3, &
                                                  & 0)*dvd(-1) + poly_coef_cbL_${XYZ}$ (j, 3, &
                                                  & 1)*dvd(-2) + poly_coef_cbL_${XYZ}$ (j, 3, 2)*dvd(-3)
                                         else
@@ -1293,27 +1287,26 @@ contains
 
                                         omega = alpha/sum(alpha)
 
-                                        vL_rs_vf_${XYZ}$ (j, k, l, &
-                                                          & i) = omega(0)*poly(0) + omega(1)*poly(1) + omega(2)*poly(2) + omega(3) &
-                                                          & *poly(3)
+                                        vL_rs_vf (j, k, l, &
+                                                  & i) = omega(0)*poly(0) + omega(1)*poly(1) + omega(2)*poly(2) + omega(3)*poly(3)
 
                                         if (teno) then
                                             #:if not MFC_CASE_OPTIMIZATION or weno_num_stencils > 3
-                                                vL_rs_vf_${XYZ}$ (j, k, l, i) = vL_rs_vf_${XYZ}$ (j, k, l, i) + omega(4)*poly(4)
+                                                vL_rs_vf (j, k, l, i) = vL_rs_vf (j, k, l, i) + omega(4)*poly(4)
                                             #:endif
                                         end if
 
                                         if (.not. teno) then
-                                            poly(3) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 0, &
+                                            poly(3) = v_rs_ws (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 0, &
                                                  & 0)*dvd(2) + poly_coef_cbR_${XYZ}$ (j, 0, 1)*dvd(1) + poly_coef_cbR_${XYZ}$ (j, &
                                                  & 0, 2)*dvd(0)
-                                            poly(2) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 1, &
+                                            poly(2) = v_rs_ws (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 1, &
                                                  & 0)*dvd(1) + poly_coef_cbR_${XYZ}$ (j, 1, 1)*dvd(0) + poly_coef_cbR_${XYZ}$ (j, &
                                                  & 1, 2)*dvd(-1)
-                                            poly(1) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 2, &
+                                            poly(1) = v_rs_ws (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 2, &
                                                  & 0)*dvd(0) + poly_coef_cbR_${XYZ}$ (j, 2, &
                                                  & 1)*dvd(-1) + poly_coef_cbR_${XYZ}$ (j, 2, 2)*dvd(-2)
-                                            poly(0) = v_rs_ws_${XYZ}$ (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 3, &
+                                            poly(0) = v_rs_ws (j, k, l, i) + poly_coef_cbR_${XYZ}$ (j, 3, &
                                                  & 0)*dvd(-1) + poly_coef_cbR_${XYZ}$ (j, 3, &
                                                  & 1)*dvd(-2) + poly_coef_cbR_${XYZ}$ (j, 3, 2)*dvd(-3)
                                         else
@@ -1354,13 +1347,12 @@ contains
 
                                         omega = alpha/sum(alpha)
 
-                                        vR_rs_vf_${XYZ}$ (j, k, l, &
-                                                          & i) = omega(0)*poly(0) + omega(1)*poly(1) + omega(2)*poly(2) + omega(3) &
-                                                          & *poly(3)
+                                        vR_rs_vf (j, k, l, &
+                                                  & i) = omega(0)*poly(0) + omega(1)*poly(1) + omega(2)*poly(2) + omega(3)*poly(3)
 
                                         if (teno) then
                                             #:if not MFC_CASE_OPTIMIZATION or weno_num_stencils > 3
-                                                vR_rs_vf_${XYZ}$ (j, k, l, i) = vR_rs_vf_${XYZ}$ (j, k, l, i) + omega(4)*poly(4)
+                                                vR_rs_vf (j, k, l, i) = vR_rs_vf (j, k, l, i) + omega(4)*poly(4)
                                             #:endif
                                         end if
                                     end do
@@ -1374,8 +1366,7 @@ contains
         end if
 
         if (int_comp) then
-            call s_interface_compression(vL_rs_vf_x, vL_rs_vf_y, vL_rs_vf_z, vR_rs_vf_x, vR_rs_vf_y, vR_rs_vf_z, weno_dir, &
-                                         & is1_weno_d, is2_weno_d, is3_weno_d)
+            call s_interface_compression(vL_rs_vf, vR_rs_vf, weno_dir, is1_weno_d, is2_weno_d, is3_weno_d)
         end if
 
     end subroutine s_weno
@@ -1392,13 +1383,23 @@ contains
         v_size = ubound(v_vf, 1)
         $:GPU_UPDATE(device='[v_size]')
 
+        ! Reallocate workspace if direction changed (saves ~15% GPU memory by sharing one array across all three directions)
+        if (v_rs_ws_dir /= weno_dir) then
+            if (allocated(v_rs_ws)) then
+                @:DEALLOCATE(v_rs_ws)
+            end if
+            @:ALLOCATE(v_rs_ws(is1_weno%beg - weno_polyn:is1_weno%end + weno_polyn, is2_weno%beg:is2_weno%end, &
+                       & is3_weno%beg:is3_weno%end, 1:sys_size))
+            v_rs_ws_dir = weno_dir
+        end if
+
         if (weno_dir == 1) then
             $:GPU_PARALLEL_LOOP(collapse=4)
             do j = 1, v_size
                 do q = is3_weno%beg, is3_weno%end
                     do l = is2_weno%beg, is2_weno%end
                         do k = is1_weno%beg - weno_polyn, is1_weno%end + weno_polyn
-                            v_rs_ws_x(k, l, q, j) = v_vf(j)%sf(k, l, q)
+                            v_rs_ws(k, l, q, j) = v_vf(j)%sf(k, l, q)
                         end do
                     end do
                 end do
@@ -1415,7 +1416,7 @@ contains
                 do q = is3_weno%beg, is3_weno%end
                     do l = is2_weno%beg, is2_weno%end
                         do k = is1_weno%beg - weno_polyn, is1_weno%end + weno_polyn
-                            v_rs_ws_y(k, l, q, j) = v_vf(j)%sf(l, k, q)
+                            v_rs_ws(k, l, q, j) = v_vf(j)%sf(l, k, q)
                         end do
                     end do
                 end do
@@ -1432,7 +1433,7 @@ contains
                 do q = is3_weno%beg, is3_weno%end
                     do l = is2_weno%beg, is2_weno%end
                         do k = is1_weno%beg - weno_polyn, is1_weno%end + weno_polyn
-                            v_rs_ws_z(k, l, q, j) = v_vf(j)%sf(q, l, k)
+                            v_rs_ws(k, l, q, j) = v_vf(j)%sf(q, l, k)
                         end do
                     end do
                 end do
@@ -1543,7 +1544,9 @@ contains
 
         ! Deallocating the WENO-stencil of the WENO-reconstructed variables
 
-        @:DEALLOCATE(v_rs_ws_x)
+        if (allocated(v_rs_ws)) then
+            @:DEALLOCATE(v_rs_ws)
+        end if
 
         ! Deallocating WENO coefficients in x-direction
         @:DEALLOCATE(poly_coef_cbL_x, poly_coef_cbR_x)
@@ -1553,16 +1556,12 @@ contains
         ! Deallocating WENO coefficients in y-direction
         if (n == 0) return
 
-        @:DEALLOCATE(v_rs_ws_y)
-
         @:DEALLOCATE(poly_coef_cbL_y, poly_coef_cbR_y)
         @:DEALLOCATE(d_cbL_y, d_cbR_y)
         @:DEALLOCATE(beta_coef_y)
 
         ! Deallocating WENO coefficients in z-direction
         if (p == 0) return
-
-        @:DEALLOCATE(v_rs_ws_z)
 
         @:DEALLOCATE(poly_coef_cbL_z, poly_coef_cbR_z)
         @:DEALLOCATE(d_cbL_z, d_cbR_z)

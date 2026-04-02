@@ -31,9 +31,10 @@ module m_muscl
     !! right (R) results of the characteristic decomposition are stored in custom-constructed muscl- stencils (WS) that are annexed
     !! to each position of a given scalar field.
     !> @{
-    real(wp), allocatable, dimension(:,:,:,:) :: v_rs_ws_x_muscl, v_rs_ws_y_muscl, v_rs_ws_z_muscl
+    real(wp), allocatable, dimension(:,:,:,:) :: v_rs_ws_muscl
+    integer                                   :: v_rs_ws_muscl_dir = 0
     !> @}
-    $:GPU_DECLARE(create='[v_rs_ws_x_muscl, v_rs_ws_y_muscl, v_rs_ws_z_muscl]')
+    $:GPU_DECLARE(create='[v_rs_ws_muscl]')
 
 contains
 
@@ -58,50 +59,21 @@ contains
 
         is3_muscl%end = p - is3_muscl%beg
 
-        @:ALLOCATE(v_rs_ws_x_muscl(is1_muscl%beg:is1_muscl%end, is2_muscl%beg:is2_muscl%end, is3_muscl%beg:is3_muscl%end, &
-                   & 1:sys_size))
-
-        if (n == 0) return
-
-        ! initializing in y-direction
-        is2_muscl%beg = -buff_size; is2_muscl%end = n - is2_muscl%beg
-        is1_muscl%beg = -buff_size; is1_muscl%end = m - is1_muscl%beg
-
-        if (p == 0) then
-            is3_muscl%beg = 0
-        else
-            is3_muscl%beg = -buff_size
-        end if
-
-        is3_muscl%end = p - is3_muscl%beg
-
-        @:ALLOCATE(v_rs_ws_y_muscl(is2_muscl%beg:is2_muscl%end, is1_muscl%beg:is1_muscl%end, is3_muscl%beg:is3_muscl%end, &
-                   & 1:sys_size))
-
-        if (p == 0) return
-
-        ! initializing in z-direction
-        is2_muscl%beg = -buff_size; is2_muscl%end = n - is2_muscl%beg
-        is1_muscl%beg = -buff_size; is1_muscl%end = m - is1_muscl%beg
-        is3_muscl%beg = -buff_size; is3_muscl%end = p - is3_muscl%beg
-
-        @:ALLOCATE(v_rs_ws_z_muscl(is3_muscl%beg:is3_muscl%end, is2_muscl%beg:is2_muscl%end, is1_muscl%beg:is1_muscl%end, &
-                   & 1:sys_size))
+        ! v_rs_ws_muscl is allocated on-demand in s_initialize_muscl
 
     end subroutine s_initialize_muscl_module
 
     !> Perform MUSCL reconstruction of left and right cell-boundary values from cell-averaged variables
-    subroutine s_muscl(v_vf, vL_rs_vf_x, vL_rs_vf_y, vL_rs_vf_z, vR_rs_vf_x, vR_rs_vf_y, vR_rs_vf_z, muscl_dir, is1_muscl_d, &
+    subroutine s_muscl(v_vf, vL_rs_vf, vR_rs_vf, muscl_dir, is1_muscl_d, &
 
         & is2_muscl_d, is3_muscl_d)
 
-        type(scalar_field), dimension(1:), intent(in)                                          :: v_vf
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf_x, vL_rs_vf_y, &
-             & vL_rs_vf_z, vR_rs_vf_x, vR_rs_vf_y, vR_rs_vf_z
-        integer, intent(in)               :: muscl_dir
+        type(scalar_field), dimension(1:), intent(in) :: v_vf
+        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf, vR_rs_vf
+        integer, intent(in) :: muscl_dir
         type(int_bounds_info), intent(in) :: is1_muscl_d, is2_muscl_d, is3_muscl_d
-        integer                           :: j, k, l, i
-        real(wp)                          :: slopeL, slopeR, slope
+        integer :: j, k, l, i
+        real(wp) :: slopeL, slopeR, slope
 
         is1_muscl = is1_muscl_d
         is2_muscl = is2_muscl_d
@@ -120,8 +92,8 @@ contains
                     do l = is3_muscl%beg, is3_muscl%end
                         do k = is2_muscl%beg, is2_muscl%end
                             do j = is1_muscl%beg, is1_muscl%end
-                                vL_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
-                                vR_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
+                                vL_rs_vf(j, k, l, i) = v_vf(i)%sf(j, k, l)
+                                vR_rs_vf(j, k, l, i) = v_vf(i)%sf(j, k, l)
                             end do
                         end do
                     end do
@@ -133,8 +105,8 @@ contains
                     do l = is3_muscl%beg, is3_muscl%end
                         do k = is2_muscl%beg, is2_muscl%end
                             do j = is1_muscl%beg, is1_muscl%end
-                                vL_rs_vf_y(j, k, l, i) = v_vf(i)%sf(k, j, l)
-                                vR_rs_vf_y(j, k, l, i) = v_vf(i)%sf(k, j, l)
+                                vL_rs_vf(j, k, l, i) = v_vf(i)%sf(k, j, l)
+                                vR_rs_vf(j, k, l, i) = v_vf(i)%sf(k, j, l)
                             end do
                         end do
                     end do
@@ -146,8 +118,8 @@ contains
                     do l = is3_muscl%beg, is3_muscl%end
                         do k = is2_muscl%beg, is2_muscl%end
                             do j = is1_muscl%beg, is1_muscl%end
-                                vL_rs_vf_z(j, k, l, i) = v_vf(i)%sf(l, k, j)
-                                vR_rs_vf_z(j, k, l, i) = v_vf(i)%sf(l, k, j)
+                                vL_rs_vf(j, k, l, i) = v_vf(i)%sf(l, k, j)
+                                vR_rs_vf(j, k, l, i) = v_vf(i)%sf(l, k, j)
                             end do
                         end do
                     end do
@@ -165,8 +137,8 @@ contains
                         do k = is2_muscl%beg, is2_muscl%end
                             do j = is1_muscl%beg, is1_muscl%end
                                 do i = 1, v_size
-                                    slopeL = v_rs_ws_${XYZ}$_muscl(j + 1, k, l, i) - v_rs_ws_${XYZ}$_muscl(j, k, l, i)
-                                    slopeR = v_rs_ws_${XYZ}$_muscl(j, k, l, i) - v_rs_ws_${XYZ}$_muscl(j - 1, k, l, i)
+                                    slopeL = v_rs_ws_muscl(j + 1, k, l, i) - v_rs_ws_muscl(j, k, l, i)
+                                    slopeR = v_rs_ws_muscl(j, k, l, i) - v_rs_ws_muscl(j - 1, k, l, i)
                                     slope = 0._wp
 
                                     if (muscl_lim == 1) then  ! minmod
@@ -197,10 +169,10 @@ contains
                                     end if
 
                                     ! reconstruct from left side
-                                    vL_rs_vf_${XYZ}$ (j, k, l, i) = v_rs_ws_${XYZ}$_muscl(j, k, l, i) - (5.e-1_wp*slope)
+                                    vL_rs_vf (j, k, l, i) = v_rs_ws_muscl(j, k, l, i) - (5.e-1_wp*slope)
 
                                     ! reconstruct from the right side
-                                    vR_rs_vf_${XYZ}$ (j, k, l, i) = v_rs_ws_${XYZ}$_muscl(j, k, l, i) + (5.e-1_wp*slope)
+                                    vR_rs_vf (j, k, l, i) = v_rs_ws_muscl(j, k, l, i) + (5.e-1_wp*slope)
                                 end do
                             end do
                         end do
@@ -211,23 +183,21 @@ contains
         end if
 
         if (int_comp) then
-            call s_interface_compression(vL_rs_vf_x, vL_rs_vf_y, vL_rs_vf_z, vR_rs_vf_x, vR_rs_vf_y, vR_rs_vf_z, muscl_dir, &
-                                         & is1_muscl_d, is2_muscl_d, is3_muscl_d)
+            call s_interface_compression(vL_rs_vf, vR_rs_vf, muscl_dir, is1_muscl_d, is2_muscl_d, is3_muscl_d)
         end if
 
     end subroutine s_muscl
 
     !> Apply THINC interface-compression to sharpen volume-fraction reconstructions at material interfaces
-    subroutine s_interface_compression(vL_rs_vf_x, vL_rs_vf_y, vL_rs_vf_z, vR_rs_vf_x, vR_rs_vf_y, vR_rs_vf_z, muscl_dir, &
+    subroutine s_interface_compression(vL_rs_vf, vR_rs_vf, muscl_dir, &
 
         & is1_muscl_d, is2_muscl_d, is3_muscl_d)
 
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf_x, vL_rs_vf_y, &
-             & vL_rs_vf_z, vR_rs_vf_x, vR_rs_vf_y, vR_rs_vf_z
-        integer, intent(in)               :: muscl_dir
+        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf, vR_rs_vf
+        integer, intent(in) :: muscl_dir
         type(int_bounds_info), intent(in) :: is1_muscl_d, is2_muscl_d, is3_muscl_d
-        integer                           :: j, k, l
-        real(wp)                          :: aCL, aCR, aC, aTHINC, qmin, qmax, A, B, C, sign, moncon
+        integer :: j, k, l
+        real(wp) :: aCL, aCR, aC, aTHINC, qmin, qmax, A, B, C, sign, moncon
 
         #:for MUSCL_DIR, XYZ in [(1, 'x'), (2, 'y'), (3, 'z')]
             if (muscl_dir == ${MUSCL_DIR}$) then
@@ -235,9 +205,9 @@ contains
                 do l = is3_muscl%beg, is3_muscl%end
                     do k = is2_muscl%beg, is2_muscl%end
                         do j = is1_muscl%beg, is1_muscl%end
-                            aCL = v_rs_ws_${XYZ}$_muscl(j - 1, k, l, advxb)
-                            aC = v_rs_ws_${XYZ}$_muscl(j, k, l, advxb)
-                            aCR = v_rs_ws_${XYZ}$_muscl(j + 1, k, l, advxb)
+                            aCL = v_rs_ws_muscl(j - 1, k, l, advxb)
+                            aC = v_rs_ws_muscl(j, k, l, advxb)
+                            aCR = v_rs_ws_muscl(j + 1, k, l, advxb)
 
                             moncon = (aCR - aC)*(aC - aCL)
 
@@ -260,23 +230,21 @@ contains
                                 aTHINC = qmin + 5e-1_wp*qmax*(1._wp + sign*A)
                                 if (aTHINC < ic_eps) aTHINC = ic_eps
                                 if (aTHINC > 1 - ic_eps) aTHINC = 1 - ic_eps
-                                vL_rs_vf_${XYZ}$ (j, k, l, contxb) = vL_rs_vf_${XYZ}$ (j, k, l, contxb)/vL_rs_vf_${XYZ}$ (j, k, &
-                                                  & l, advxb)*aTHINC
-                                vL_rs_vf_${XYZ}$ (j, k, l, contxe) = vL_rs_vf_${XYZ}$ (j, k, l, &
-                                                  & contxe)/(1._wp - vL_rs_vf_${XYZ}$ (j, k, l, advxb))*(1._wp - aTHINC)
-                                vL_rs_vf_${XYZ}$ (j, k, l, advxb) = aTHINC
-                                vL_rs_vf_${XYZ}$ (j, k, l, advxe) = 1 - aTHINC
+                                vL_rs_vf (j, k, l, contxb) = vL_rs_vf (j, k, l, contxb)/vL_rs_vf (j, k, l, advxb)*aTHINC
+                                vL_rs_vf (j, k, l, contxe) = vL_rs_vf (j, k, l, contxe)/(1._wp - vL_rs_vf (j, k, l, &
+                                          & advxb))*(1._wp - aTHINC)
+                                vL_rs_vf (j, k, l, advxb) = aTHINC
+                                vL_rs_vf (j, k, l, advxe) = 1 - aTHINC
 
                                 ! Right reconstruction
                                 aTHINC = qmin + 5e-1_wp*qmax*(1._wp + sign*(tanh(ic_beta) + A)/(1._wp + A*tanh(ic_beta)))
                                 if (aTHINC < ic_eps) aTHINC = ic_eps
                                 if (aTHINC > 1 - ic_eps) aTHINC = 1 - ic_eps
-                                vR_rs_vf_${XYZ}$ (j, k, l, contxb) = vL_rs_vf_${XYZ}$ (j, k, l, contxb)/vL_rs_vf_${XYZ}$ (j, k, &
-                                                  & l, advxb)*aTHINC
-                                vR_rs_vf_${XYZ}$ (j, k, l, contxe) = vL_rs_vf_${XYZ}$ (j, k, l, &
-                                                  & contxe)/(1._wp - vL_rs_vf_${XYZ}$ (j, k, l, advxb))*(1._wp - aTHINC)
-                                vR_rs_vf_${XYZ}$ (j, k, l, advxb) = aTHINC
-                                vR_rs_vf_${XYZ}$ (j, k, l, advxe) = 1 - aTHINC
+                                vR_rs_vf (j, k, l, contxb) = vL_rs_vf (j, k, l, contxb)/vL_rs_vf (j, k, l, advxb)*aTHINC
+                                vR_rs_vf (j, k, l, contxe) = vL_rs_vf (j, k, l, contxe)/(1._wp - vL_rs_vf (j, k, l, &
+                                          & advxb))*(1._wp - aTHINC)
+                                vR_rs_vf (j, k, l, advxb) = aTHINC
+                                vR_rs_vf (j, k, l, advxe) = 1 - aTHINC
                             end if
                         end do
                     end do
@@ -298,13 +266,23 @@ contains
         v_size = ubound(v_vf, 1)
         $:GPU_UPDATE(device='[v_size]')
 
+        ! Reallocate workspace if direction changed (saves GPU memory by sharing one array across all three directions)
+        if (v_rs_ws_muscl_dir /= muscl_dir) then
+            if (allocated(v_rs_ws_muscl)) then
+                @:DEALLOCATE(v_rs_ws_muscl)
+            end if
+            @:ALLOCATE(v_rs_ws_muscl(is1_muscl%beg - muscl_polyn:is1_muscl%end + muscl_polyn, is2_muscl%beg:is2_muscl%end, &
+                       & is3_muscl%beg:is3_muscl%end, 1:sys_size))
+            v_rs_ws_muscl_dir = muscl_dir
+        end if
+
         if (muscl_dir == 1) then
             $:GPU_PARALLEL_LOOP(private='[j, k, l, q]', collapse=4)
             do j = 1, v_size
                 do q = is3_muscl%beg, is3_muscl%end
                     do l = is2_muscl%beg, is2_muscl%end
                         do k = is1_muscl%beg - muscl_polyn, is1_muscl%end + muscl_polyn
-                            v_rs_ws_x_muscl(k, l, q, j) = v_vf(j)%sf(k, l, q)
+                            v_rs_ws_muscl(k, l, q, j) = v_vf(j)%sf(k, l, q)
                         end do
                     end do
                 end do
@@ -321,7 +299,7 @@ contains
                 do q = is3_muscl%beg, is3_muscl%end
                     do l = is2_muscl%beg, is2_muscl%end
                         do k = is1_muscl%beg - muscl_polyn, is1_muscl%end + muscl_polyn
-                            v_rs_ws_y_muscl(k, l, q, j) = v_vf(j)%sf(l, k, q)
+                            v_rs_ws_muscl(k, l, q, j) = v_vf(j)%sf(l, k, q)
                         end do
                     end do
                 end do
@@ -337,7 +315,7 @@ contains
                 do q = is3_muscl%beg, is3_muscl%end
                     do l = is2_muscl%beg, is2_muscl%end
                         do k = is1_muscl%beg - muscl_polyn, is1_muscl%end + muscl_polyn
-                            v_rs_ws_z_muscl(k, l, q, j) = v_vf(j)%sf(q, l, k)
+                            v_rs_ws_muscl(k, l, q, j) = v_vf(j)%sf(q, l, k)
                         end do
                     end do
                 end do
@@ -350,15 +328,9 @@ contains
     !> Finalize the MUSCL module
     subroutine s_finalize_muscl_module()
 
-        @:DEALLOCATE(v_rs_ws_x_muscl)
-
-        if (n == 0) return
-
-        @:DEALLOCATE(v_rs_ws_y_muscl)
-
-        if (p == 0) return
-
-        @:DEALLOCATE(v_rs_ws_z_muscl)
+        if (allocated(v_rs_ws_muscl)) then
+            @:DEALLOCATE(v_rs_ws_muscl)
+        end if
 
     end subroutine s_finalize_muscl_module
 
