@@ -16,7 +16,6 @@ module m_muscl
 
     use m_mpi_proxy
     use m_helper
-    use m_riemann_solvers, only: v_rs_ws_muscl => flux_rs_vf
 
     private; public :: s_initialize_muscl_module, s_muscl, s_finalize_muscl_module, s_interface_compression
 
@@ -25,6 +24,17 @@ module m_muscl
 
     type(int_bounds_info) :: is1_muscl, is2_muscl, is3_muscl
     $:GPU_DECLARE(create='[is1_muscl, is2_muscl, is3_muscl]')
+
+    !> @name The cell-average variables that will be MUSCL-reconstructed. Formerly, they are stored in v_vf. However, they are
+    !! transferred to v_rs_wsL and v_rs_wsR as to be reshaped (RS) and/or characteristically decomposed. The reshaping allows the
+    !! muscl procedure to be independent of the coordinate direction of the reconstruction. Lastly, notice that the left (L) and
+    !! right (R) results of the characteristic decomposition are stored in custom-constructed muscl- stencils (WS) that are annexed
+    !! to each position of a given scalar field.
+    !> @{
+    real(wp), allocatable, dimension(:,:,:,:) :: v_rs_ws_muscl
+    integer                                   :: v_rs_ws_muscl_dir = 0
+    !> @}
+    $:GPU_DECLARE(create='[v_rs_ws_muscl]')
 
 contains
 
@@ -48,6 +58,8 @@ contains
         end if
 
         is3_muscl%end = p - is3_muscl%beg
+
+        ! v_rs_ws_muscl is allocated on-demand in s_initialize_muscl
 
     end subroutine s_initialize_muscl_module
 
@@ -254,6 +266,12 @@ contains
         v_size = ubound(v_vf, 1)
         $:GPU_UPDATE(device='[v_size]')
 
+        ! Allocate workspace once with max-bounds shape (covers all directions)
+        if (.not. allocated(v_rs_ws_muscl)) then
+            @:ALLOCATE(v_rs_ws_muscl( -buff_size - muscl_polyn:max(m, n, p) + buff_size + muscl_polyn, -buff_size:max(m, n, &
+                       & p) + buff_size, -buff_size:max(m, n, p) + buff_size, 1:sys_size))
+        end if
+
         if (muscl_dir == 1) then
             $:GPU_PARALLEL_LOOP(private='[j, k, l, q]', collapse=4)
             do j = 1, v_size
@@ -305,6 +323,10 @@ contains
 
     !> Finalize the MUSCL module
     subroutine s_finalize_muscl_module()
+
+        if (allocated(v_rs_ws_muscl)) then
+            @:DEALLOCATE(v_rs_ws_muscl)
+        end if
 
     end subroutine s_finalize_muscl_module
 
