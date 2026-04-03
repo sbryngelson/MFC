@@ -474,10 +474,17 @@ contains
         integer             :: beg_d, end_d
 
         if (.not. allocated(qL_rs_vf)) then
-            beg_d = min(idwbuff(1)%beg, idwbuff(2)%beg, idwbuff(3)%beg)
-            end_d = max(idwbuff(1)%end, idwbuff(2)%end, idwbuff(3)%end)
-            @:ALLOCATE(qL_rs_vf(beg_d:end_d, beg_d:end_d, beg_d:end_d, 1:sys_size))
-            @:ALLOCATE(qR_rs_vf(beg_d:end_d, beg_d:end_d, beg_d:end_d, 1:sys_size))
+            if (weno_order == 5 .and. .not. viscous) then
+                ! Fused WENO5+Riemann path uses local register arrays.
+                ! Allocate tiny dummies so the Riemann solver signature is satisfied.
+                @:ALLOCATE(qL_rs_vf(0:0, 0:0, 0:0, 1:1))
+                @:ALLOCATE(qR_rs_vf(0:0, 0:0, 0:0, 1:1))
+            else
+                beg_d = min(idwbuff(1)%beg, idwbuff(2)%beg, idwbuff(3)%beg)
+                end_d = max(idwbuff(1)%end, idwbuff(2)%end, idwbuff(3)%end)
+                @:ALLOCATE(qL_rs_vf(beg_d:end_d, beg_d:end_d, beg_d:end_d, 1:sys_size))
+                @:ALLOCATE(qR_rs_vf(beg_d:end_d, beg_d:end_d, beg_d:end_d, 1:sys_size))
+            end if
         end if
 
     end subroutine s_ensure_rs_allocated
