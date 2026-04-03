@@ -14,7 +14,9 @@ module m_weno
 
     use m_mpi_proxy
     use m_muscl
-    private; public :: s_initialize_weno_module, s_initialize_weno, s_finalize_weno_module, s_weno
+    private; public :: s_initialize_weno_module, s_initialize_weno, s_finalize_weno_module, s_weno, v_rs_ws, poly_coef_cbL_x, &
+        & poly_coef_cbL_y, poly_coef_cbL_z, poly_coef_cbR_x, poly_coef_cbR_y, poly_coef_cbR_z, d_cbL_x, d_cbL_y, d_cbL_z, &
+        & d_cbR_x, d_cbR_y, d_cbR_z, beta_coef_x, beta_coef_y, beta_coef_z
 
     !> @name The cell-average variables that will be WENO-reconstructed. Formerly, they are stored in v_vf. However, they are
     !! transferred to v_rs_wsL and v_rs_wsR as to be reshaped (RS) and/or characteristically decomposed. The reshaping allows the
