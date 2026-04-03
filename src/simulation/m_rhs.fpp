@@ -477,9 +477,11 @@ contains
             if (weno_order == 5 .and. .not. viscous) then
                 ! Fused WENO5+Riemann path uses local register arrays.
                 ! Allocate tiny dummies so the Riemann solver signature is satisfied.
+                ! Fused WENO5+Riemann path: tiny dummies
                 @:ALLOCATE(qL_rs_vf(0:0, 0:0, 0:0, 1:1))
                 @:ALLOCATE(qR_rs_vf(0:0, 0:0, 0:0, 1:1))
             else
+                ! Non-fused path: full allocation
                 beg_d = min(idwbuff(1)%beg, idwbuff(2)%beg, idwbuff(3)%beg)
                 end_d = max(idwbuff(1)%end, idwbuff(2)%end, idwbuff(3)%end)
                 @:ALLOCATE(qL_rs_vf(beg_d:end_d, beg_d:end_d, beg_d:end_d, 1:sys_size))
