@@ -22,7 +22,7 @@ module m_riemann_solvers
     use m_chemistry
     use m_thermochem, only: gas_constant, get_mixture_molecular_weight, get_mixture_specific_heat_cv_mass, &
         & get_mixture_energy_mass, get_species_specific_heats_r, get_species_enthalpies_rt, get_mixture_specific_heat_cp_mass
-    use m_weno, only: v_rs_ws, poly_coef_cbL_x, poly_coef_cbL_y, poly_coef_cbL_z, poly_coef_cbR_x, poly_coef_cbR_y, &
+    use m_weno, only: poly_coef_cbL_x, poly_coef_cbL_y, poly_coef_cbL_z, poly_coef_cbR_x, poly_coef_cbR_y, &
         & poly_coef_cbR_z, d_cbL_x, d_cbL_y, d_cbL_z, d_cbR_x, d_cbR_y, d_cbR_z, beta_coef_x, beta_coef_y, beta_coef_z
 
     #:if USING_AMD
@@ -2806,18 +2806,20 @@ contains
                             do k = is2%beg, is2%end
                                 do j = is1%beg, is1%end
                                     ! Inline WENO5 reconstruction: left state at face j
+                                    ! Reads directly from q_prim_vf scalar fields (no v_rs_ws workspace)
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do iv = 1, sys_size
-                                        @:INLINE_WENO5_RECONSTRUCT(v_rs_ws, j, k, l, iv, poly_coef_cbL_${XYZ}$, &
-                                                                   & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, d_cbR_${XYZ}$, &
-                                                                   & beta_coef_${XYZ}$, qL_local(iv), w5_dummy)
+                                        @:INLINE_WENO5_QPRIM(${NORM_DIR}$, j, iv, poly_coef_cbL_${XYZ}$, &
+                                                             & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, d_cbR_${XYZ}$, &
+                                                             & beta_coef_${XYZ}$, qL_local(iv), w5_dummy)
                                     end do
                                     ! Inline WENO5 reconstruction: right state at face j
+                                    ! Reads directly from q_prim_vf scalar fields (no v_rs_ws workspace)
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do iv = 1, sys_size
-                                        @:INLINE_WENO5_RECONSTRUCT(v_rs_ws, j + 1, k, l, iv, poly_coef_cbL_${XYZ}$, &
-                                                                   & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, d_cbR_${XYZ}$, &
-                                                                   & beta_coef_${XYZ}$, w5_dummy, qR_local(iv))
+                                        @:INLINE_WENO5_QPRIM(${NORM_DIR}$, j + 1, iv, poly_coef_cbL_${XYZ}$, &
+                                                             & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, d_cbR_${XYZ}$, &
+                                                             & beta_coef_${XYZ}$, w5_dummy, qR_local(iv))
                                     end do
 
                                     ! Boundary condition fixup for Riemann extrapolation

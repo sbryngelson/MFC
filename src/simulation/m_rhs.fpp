@@ -684,37 +684,44 @@ contains
 
                 call s_ensure_rs_allocated(id)
 
-                if (.not. surface_tension) then
-                    if (all(Re_size == 0)) then
-                        ! Reconstruct densitiess
-                        iv%beg = 1; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(1:sys_size), qL_rs_vf, qR_rs_vf, id)
+                ! Skip separate WENO reconstruction when fused WENO5+HLLC
+                ! path handles it inside the Riemann solver kernel
+                if (.not. (riemann_solver == 2 .and. weno_order == 5 &
+                    & .and. .not. viscous &
+                    & .and. model_eqns /= 3 .and. model_eqns /= 4 &
+                    & .and. .not. (model_eqns == 2 .and. bubbles_euler))) then
+                    if (.not. surface_tension) then
+                        if (all(Re_size == 0)) then
+                            ! Reconstruct densitiess
+                            iv%beg = 1; iv%end = sys_size
+                            call s_reconstruct_cell_boundary_values(q_prim_qp%vf(1:sys_size), qL_rs_vf, qR_rs_vf, id)
+                        else
+                            iv%beg = 1; iv%end = contxe
+                            call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
+
+                            iv%beg = E_idx; iv%end = sys_size
+                            call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
+                        end if
                     else
-                        iv%beg = 1; iv%end = contxe
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
+                        if (all(Re_size == 0)) then
+                            iv%beg = 1; iv%end = E_idx - 1
+                            call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
 
-                        iv%beg = E_idx; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
-                    end if
-                else
-                    if (all(Re_size == 0)) then
-                        iv%beg = 1; iv%end = E_idx - 1
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
+                            iv%beg = E_idx; iv%end = E_idx
+                            call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(E_idx), qL_rs_vf, qR_rs_vf, id)
 
-                        iv%beg = E_idx; iv%end = E_idx
-                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(E_idx), qL_rs_vf, qR_rs_vf, id)
+                            iv%beg = E_idx + 1; iv%end = sys_size
+                            call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
+                        else
+                            iv%beg = 1; iv%end = contxe
+                            call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
 
-                        iv%beg = E_idx + 1; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
-                    else
-                        iv%beg = 1; iv%end = contxe
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
+                            iv%beg = E_idx; iv%end = E_idx
+                            call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(E_idx), qL_rs_vf, qR_rs_vf, id)
 
-                        iv%beg = E_idx; iv%end = E_idx
-                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(E_idx), qL_rs_vf, qR_rs_vf, id)
-
-                        iv%beg = E_idx + 1; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
+                            iv%beg = E_idx + 1; iv%end = sys_size
+                            call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rs_vf, qR_rs_vf, id)
+                        end if
                     end if
                 end if
 
