@@ -47,16 +47,16 @@ contains
         @:ALLOCATE(bc_buffers(1:3, 1:2))
 
         if (bc_io) then
-            allocate (bc_buffers(1, 1)%sf(1:sys_size, 0:n, 0:p))
-            allocate (bc_buffers(1, 2)%sf(1:sys_size, 0:n, 0:p))
+            allocate (bc_buffers(1, 1)%sf(1:sys_size,0:n,0:p))
+            allocate (bc_buffers(1, 2)%sf(1:sys_size,0:n,0:p))
             #:if not MFC_CASE_OPTIMIZATION or num_dims > 1
                 if (n > 0) then
-                    allocate (bc_buffers(2, 1)%sf(-buff_size:m + buff_size, 1:sys_size, 0:p))
-                    allocate (bc_buffers(2, 2)%sf(-buff_size:m + buff_size, 1:sys_size, 0:p))
+                    allocate (bc_buffers(2, 1)%sf(-buff_size:m + buff_size,1:sys_size,0:p))
+                    allocate (bc_buffers(2, 2)%sf(-buff_size:m + buff_size,1:sys_size,0:p))
                     #:if not MFC_CASE_OPTIMIZATION or num_dims > 2
                         if (p > 0) then
-                            allocate (bc_buffers(3, 1)%sf(-buff_size:m + buff_size, -buff_size:n + buff_size, 1:sys_size))
-                            allocate (bc_buffers(3, 2)%sf(-buff_size:m + buff_size, -buff_size:n + buff_size, 1:sys_size))
+                            allocate (bc_buffers(3, 1)%sf(-buff_size:m + buff_size,-buff_size:n + buff_size,1:sys_size))
+                            allocate (bc_buffers(3, 2)%sf(-buff_size:m + buff_size,-buff_size:n + buff_size,1:sys_size))
                         end if
                     #:endif
                 end if

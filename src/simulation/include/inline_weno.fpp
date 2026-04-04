@@ -90,18 +90,16 @@
     ${QR_VAR}$ = w5_omega(0)*w5_poly(0) + w5_omega(1)*w5_poly(1) + w5_omega(2)*w5_poly(2)
 #:enddef INLINE_WENO5_RECONSTRUCT
 
-!> Reconstruct from q_prim_vf scalar fields directly (no v_rs_ws workspace).
-!! NORM_DIR selects the index mapping (1=x, 2=y, 3=z).
-!! J is the face position along the reconstruction direction; k, l are
-!! the transverse loop indices. IV is the variable index.
+!> Reconstruct from q_prim_vf scalar fields directly (no v_rs_ws workspace). NORM_DIR selects the index mapping (1=x, 2=y, 3=z). J
+!! is the face position along the reconstruction direction; k, l are the transverse loop indices. IV is the variable index.
 #:def INLINE_WENO5_QPRIM(NORM_DIR, J, IV, POLY_CBL, POLY_CBR, D_CBL, D_CBR, BETA_C, QL_VAR, QR_VAR)
-  #:if int(NORM_DIR) == 1
-    #:set _rd = lambda iv, j, off: 'q_prim_vf(' + iv + ')%sf(' + j + ' + (' + str(off) + '), k, l)'
-  #:elif int(NORM_DIR) == 2
-    #:set _rd = lambda iv, j, off: 'q_prim_vf(' + iv + ')%sf(k, ' + j + ' + (' + str(off) + '), l)'
-  #:else
-    #:set _rd = lambda iv, j, off: 'q_prim_vf(' + iv + ')%sf(l, k, ' + j + ' + (' + str(off) + '))'
-  #:endif
+    #:if int(NORM_DIR) == 1
+        #:set _rd = lambda iv, j, off: 'q_prim_vf(' + iv + ')%sf(' + j + ' + (' + str(off) + '), k, l)'
+    #:elif int(NORM_DIR) == 2
+        #:set _rd = lambda iv, j, off: 'q_prim_vf(' + iv + ')%sf(k, ' + j + ' + (' + str(off) + '), l)'
+    #:else
+        #:set _rd = lambda iv, j, off: 'q_prim_vf(' + iv + ')%sf(l, k, ' + j + ' + (' + str(off) + '))'
+    #:endif
     w5_dvd(1) = ${_rd(IV, J, 2)}$ - ${_rd(IV, J, 1)}$
     w5_dvd(0) = ${_rd(IV, J, 1)}$ - ${_rd(IV, J, 0)}$
     w5_dvd(-1) = ${_rd(IV, J, 0)}$ - ${_rd(IV, J, -1)}$

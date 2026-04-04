@@ -22,8 +22,8 @@ module m_riemann_solvers
     use m_chemistry
     use m_thermochem, only: gas_constant, get_mixture_molecular_weight, get_mixture_specific_heat_cv_mass, &
         & get_mixture_energy_mass, get_species_specific_heats_r, get_species_enthalpies_rt, get_mixture_specific_heat_cp_mass
-    use m_weno, only: poly_coef_cbL_x, poly_coef_cbL_y, poly_coef_cbL_z, poly_coef_cbR_x, poly_coef_cbR_y, &
-        & poly_coef_cbR_z, d_cbL_x, d_cbL_y, d_cbL_z, d_cbR_x, d_cbR_y, d_cbR_z, beta_coef_x, beta_coef_y, beta_coef_z
+    use m_weno, only: poly_coef_cbL_x, poly_coef_cbL_y, poly_coef_cbL_z, poly_coef_cbR_x, poly_coef_cbR_y, poly_coef_cbR_z, &
+        & d_cbL_x, d_cbL_y, d_cbL_z, d_cbR_x, d_cbR_y, d_cbR_z, beta_coef_x, beta_coef_y, beta_coef_z
 
     #:if USING_AMD
         use m_chemistry, only: molecular_weights_nonparameter
@@ -32,7 +32,7 @@ module m_riemann_solvers
     implicit none
 
     private; public :: s_initialize_riemann_solvers_module, s_riemann_solver, s_hll_riemann_solver, s_hllc_riemann_solver, &
-        & s_hlld_riemann_solver, s_lf_riemann_solver, s_finalize_riemann_solvers_module
+        & s_hlld_riemann_solver, s_lf_riemann_solver, s_finalize_riemann_solvers_module, flux_rs_vf, flux_src_rs_vf
 
     !> The cell-boundary values of the fluxes (src - source) that are computed through the chosen Riemann problem solver, and the
     !! direct evaluation of source terms, by using the left and right states given in qK_prim_rs_vf, dqK_prim_ds_vf where ds = dx,
@@ -2805,16 +2805,16 @@ contains
                         do l = is3%beg, is3%end
                             do k = is2%beg, is2%end
                                 do j = is1%beg, is1%end
-                                    ! Inline WENO5 reconstruction: left state at face j
-                                    ! Reads directly from q_prim_vf scalar fields (no v_rs_ws workspace)
+                                    ! Inline WENO5 reconstruction: left state at face j Reads directly from q_prim_vf scalar fields
+                                    ! (no v_rs_ws workspace)
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do iv = 1, sys_size
-                                        @:INLINE_WENO5_QPRIM(${NORM_DIR}$, j, iv, poly_coef_cbL_${XYZ}$, &
-                                                             & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, d_cbR_${XYZ}$, &
-                                                             & beta_coef_${XYZ}$, qL_local(iv), w5_dummy)
+                                        @:INLINE_WENO5_QPRIM(${NORM_DIR}$, j, iv, poly_coef_cbL_${XYZ}$, poly_coef_cbR_${XYZ}$, &
+                                                             & d_cbL_${XYZ}$, d_cbR_${XYZ}$, beta_coef_${XYZ}$, qL_local(iv), &
+                                                                 & w5_dummy)
                                     end do
-                                    ! Inline WENO5 reconstruction: right state at face j
-                                    ! Reads directly from q_prim_vf scalar fields (no v_rs_ws workspace)
+                                    ! Inline WENO5 reconstruction: right state at face j Reads directly from q_prim_vf scalar fields
+                                    ! (no v_rs_ws workspace)
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do iv = 1, sys_size
                                         @:INLINE_WENO5_QPRIM(${NORM_DIR}$, j + 1, iv, poly_coef_cbL_${XYZ}$, &
@@ -3742,7 +3742,13 @@ contains
             call s_compute_capillary_source_flux(vel_src_rs_vf, flux_src_vf, norm_dir, isx, isy, isz)
         end if
 
-        call s_finalize_riemann_solver(flux_vf, flux_src_vf, flux_gsrc_vf, norm_dir)
+        ! Fused WENO5+HLLC path: skip flux_vf de-transposition (reads flux_rs_vf directly in m_rhs), only de-transpose flux_src_vf.
+        ! Detect fused path by checking if flux_vf storage is allocated.
+        if (.not. associated(flux_vf(1)%sf)) then
+            call s_finalize_riemann_solver_flux_src_only(flux_src_vf, norm_dir)
+        else
+            call s_finalize_riemann_solver(flux_vf, flux_src_vf, flux_gsrc_vf, norm_dir)
+        end if
 
     end subroutine s_hllc_riemann_solver
 
@@ -5016,6 +5022,48 @@ contains
         end if
 
     end subroutine s_finalize_riemann_solver
+
+    !> De-transpose only the source flux (flux_src_vf) from Riemann-solver transposed storage. Used by the fused WENO5+HLLC path
+    !! which reads flux_rs_vf directly and skips the full flux de-transposition.
+    subroutine s_finalize_riemann_solver_flux_src_only(flux_src_vf, norm_dir)
+
+        type(scalar_field), dimension(sys_size), intent(inout) :: flux_src_vf
+        integer, intent(in)                                    :: norm_dir
+        integer                                                :: j, k, l
+
+        if (norm_dir == 2) then
+            $:GPU_PARALLEL_LOOP(collapse=3)
+            do l = is3%beg, is3%end
+                do j = is1%beg, is1%end
+                    do k = is2%beg, is2%end
+                        flux_src_vf(advxb)%sf(k, j, l) = flux_src_rs_vf(j, k, l, advxb)
+                    end do
+                end do
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        else if (norm_dir == 3) then
+            $:GPU_PARALLEL_LOOP(collapse=3)
+            do j = is1%beg, is1%end
+                do k = is2%beg, is2%end
+                    do l = is3%beg, is3%end
+                        flux_src_vf(advxb)%sf(l, k, j) = flux_src_rs_vf(j, k, l, advxb)
+                    end do
+                end do
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        else
+            $:GPU_PARALLEL_LOOP(collapse=3)
+            do l = is3%beg, is3%end
+                do k = is2%beg, is2%end
+                    do j = is1%beg, is1%end
+                        flux_src_vf(advxb)%sf(j, k, l) = flux_src_rs_vf(j, k, l, advxb)
+                    end do
+                end do
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        end if
+
+    end subroutine s_finalize_riemann_solver_flux_src_only
 
     !> Module deallocation and/or disassociation procedures
     impure subroutine s_finalize_riemann_solvers_module
