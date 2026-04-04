@@ -15,6 +15,7 @@ module m_start_up
     use m_variables_conversion
     use m_weno
     use m_muscl
+    use m_fused_kernels
     use m_riemann_solvers
     use m_cbc
     use m_boundary_common
@@ -928,6 +929,7 @@ contains
             end if
             call s_initialize_cbc_module()
             call s_initialize_riemann_solvers_module()
+            call s_initialize_fused_kernels_module()
         end if
 
         call s_initialize_derived_variables()
@@ -1092,6 +1094,7 @@ contains
         else
             call s_finalize_cbc_module()
             call s_finalize_riemann_solvers_module()
+            call s_finalize_fused_kernels_module()
             if (recon_type == WENO_TYPE) then
                 call s_finalize_weno_module()
             else if (recon_type == MUSCL_TYPE) then

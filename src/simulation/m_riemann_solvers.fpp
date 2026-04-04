@@ -24,6 +24,7 @@ module m_riemann_solvers
         & get_mixture_energy_mass, get_species_specific_heats_r, get_species_enthalpies_rt, get_mixture_specific_heat_cp_mass
     use m_weno, only: poly_coef_cbL_x, poly_coef_cbL_y, poly_coef_cbL_z, poly_coef_cbR_x, poly_coef_cbR_y, poly_coef_cbR_z, &
         & d_cbL_x, d_cbL_y, d_cbL_z, d_cbR_x, d_cbR_y, d_cbR_z, beta_coef_x, beta_coef_y, beta_coef_z
+    use m_fused_kernels, only: s_fused_weno_riemann_rhs
 
     #:if USING_AMD
         use m_chemistry, only: molecular_weights_nonparameter
@@ -2813,121 +2814,9 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
                 else
                     if (weno_order == 5 .and. .not. viscous) then
-                        ! Per-cell fused WENO5+HLLC+flux_diff: compute both adjacent face fluxes and accumulate directly into
-                        ! rhs_vf, eliminating flux_rs_vf storage. Loop variable mapping (matches INLINE_WENO5_CONS expectations): j
-                        ! = reconstruction direction, k = transverse1, l = transverse2 Physical write coords: norm_dir=1 -> (j,k,l),
-                        ! 2 -> (k,j,l), 3 -> (l,k,j)
-                        $:GPU_PARALLEL_LOOP(collapse=3, private='[i, q, T_L, T_R, vel_L_rms, vel_R_rms, pres_L, pres_R, rho_L, &
-                                            & gamma_L, pi_inf_L, qv_L, rho_R, gamma_R, pi_inf_R, qv_R, alpha_L_sum, alpha_R_sum, &
-                                            & E_L, E_R, H_L, H_R, qv_avg, rho_avg, gamma_avg, H_avg, c_L, c_R, c_avg, s_P, s_M, &
-                                            & xi_P, xi_M, xi_L, xi_R, Ms_L, Ms_R, pres_SL, pres_SR, vel_L, vel_R, alpha_L, &
-                                            & alpha_R, s_L, s_R, s_S, vel_avg_rms, pcorr, zcoef, vel_L_tmp, vel_R_tmp, tau_e_L, &
-                                            & tau_e_R, xi_field_L, xi_field_R, G_L, G_R, flux_ene_e, w5_dvd, w5_poly, w5_beta, &
-                                            & w5_alpha, w5_omega, w5_tau, w5_delta, w5_dummy, w5_idx, iv, qL_local, qR_local, &
-                                            & flux_left, flux_right, vel_src_left, vel_src_right, inv_ds, j_adv, &
-                                            & w5c_stencil, w5c_rho, w5c_vel_sqr, w5c_gamma, w5c_pi_inf, w5c_qv]')
-                        #:if NORM_DIR == 1
-                            do l = 0, p
-                                do k = 0, n
-                                    do j = 0, m
-                                        inv_ds = 1._wp/dx(j)
-                                    #:elif NORM_DIR == 2
-                                        do l = 0, p
-                                            do j = 0, n
-                                                do k = 0, m
-                                                    inv_ds = 1._wp/dy(j)
-                                                #:else
-                                                    do j = 0, p
-                                                        do k = 0, n
-                                                            do l = 0, m
-                                                                inv_ds = 1._wp/dz(j)
-                                                            #:endif
-
-                                                            ! Left face (face j-1): WENO reconstruct qL at j-1 (left-biased) and qR
-                                                            ! at j (right-biased)
-                                                            $:GPU_LOOP(parallelism='[seq]')
-                                                            do iv = 1, sys_size
-                                                                @:INLINE_WENO5_CONS(${NORM_DIR}$, j - 1, iv, &
-                                                                                    & poly_coef_cbL_${XYZ}$, &
-                                                                                    & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
-                                                                                    & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
-                                                                                    & qL_local(iv), w5_dummy)
-                                                            end do
-                                                            $:GPU_LOOP(parallelism='[seq]')
-                                                            do iv = 1, sys_size
-                                                                @:INLINE_WENO5_CONS(${NORM_DIR}$, j, iv, poly_coef_cbL_${XYZ}$, &
-                                                                                    & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
-                                                                                    & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
-                                                                                    & w5_dummy, qR_local(iv))
-                                                            end do
-                                                            ! HLLC solve for left face -> flux_left, vel_src_left
-                                                            @:INLINE_HLLC_FLUX(flux_left, vel_src_left)
-
-                                                            ! Right face (face j): WENO reconstruct qL at j (left-biased) and qR at
-                                                            ! j+1 (right-biased)
-                                                            $:GPU_LOOP(parallelism='[seq]')
-                                                            do iv = 1, sys_size
-                                                                @:INLINE_WENO5_CONS(${NORM_DIR}$, j, iv, poly_coef_cbL_${XYZ}$, &
-                                                                                    & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
-                                                                                    & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
-                                                                                    & qL_local(iv), w5_dummy)
-                                                            end do
-                                                            $:GPU_LOOP(parallelism='[seq]')
-                                                            do iv = 1, sys_size
-                                                                @:INLINE_WENO5_CONS(${NORM_DIR}$, j + 1, iv, &
-                                                                                    & poly_coef_cbL_${XYZ}$, &
-                                                                                    & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
-                                                                                    & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
-                                                                                    & w5_dummy, qR_local(iv))
-                                                            end do
-                                                            ! HLLC solve for right face -> flux_right, vel_src_right
-                                                            @:INLINE_HLLC_FLUX(flux_right, vel_src_right)
-
-                                                            ! Accumulate flux difference directly into rhs_vf (no intermediate
-                                                            ! storage)
-                                                            #:if NORM_DIR == 1
-                                                                $:GPU_LOOP(parallelism='[seq]')
-                                                                do i = 1, sys_size
-                                                                    rhs_vf(i)%sf(j, k, l) = rhs_vf(i)%sf(j, k, &
-                                                                           & l) + inv_ds*(flux_left(i) - flux_right(i))
-                                                                end do
-                                                                ! Advection source: q_cons * (vel_src_right - vel_src_left) / ds
-                                                                $:GPU_LOOP(parallelism='[seq]')
-                                                                do j_adv = advxb, advxe
-                                                                    rhs_vf(j_adv)%sf(j, k, l) = rhs_vf(j_adv)%sf(j, k, &
-                                                                           & l) + inv_ds*q_cons_vf_arg%vf(j_adv)%sf(j, k, &
-                                                                           & l)*(vel_src_right - vel_src_left)
-                                                                end do
-                                                            #:elif NORM_DIR == 2
-                                                                $:GPU_LOOP(parallelism='[seq]')
-                                                                do i = 1, sys_size
-                                                                    rhs_vf(i)%sf(k, j, l) = rhs_vf(i)%sf(k, j, &
-                                                                           & l) + inv_ds*(flux_left(i) - flux_right(i))
-                                                                end do
-                                                                $:GPU_LOOP(parallelism='[seq]')
-                                                                do j_adv = advxb, advxe
-                                                                    rhs_vf(j_adv)%sf(k, j, l) = rhs_vf(j_adv)%sf(k, j, &
-                                                                           & l) + inv_ds*q_cons_vf_arg%vf(j_adv)%sf(k, j, &
-                                                                           & l)*(vel_src_right - vel_src_left)
-                                                                end do
-                                                            #:else
-                                                                $:GPU_LOOP(parallelism='[seq]')
-                                                                do i = 1, sys_size
-                                                                    rhs_vf(i)%sf(l, k, j) = rhs_vf(i)%sf(l, k, &
-                                                                           & j) + inv_ds*(flux_left(i) - flux_right(i))
-                                                                end do
-                                                                $:GPU_LOOP(parallelism='[seq]')
-                                                                do j_adv = advxb, advxe
-                                                                    rhs_vf(j_adv)%sf(l, k, j) = rhs_vf(j_adv)%sf(l, k, &
-                                                                           & j) + inv_ds*q_cons_vf_arg%vf(j_adv)%sf(l, k, &
-                                                                           & j)*(vel_src_right - vel_src_left)
-                                                                end do
-                                                            #:endif
-                                                        end do
-                                                    end do
-                                                end do
-                                                $:END_GPU_PARALLEL_LOOP()
-                                                per_cell_active = .true.
+                        ! Per-cell fused WENO5+HLLC+flux_diff via m_fused_kernels
+                        call s_fused_weno_riemann_rhs(q_cons_vf_arg, rhs_vf, norm_dir)
+                        per_cell_active = .true.
                                             else
                                                 ! 5-equation model (model_eqns=2): mixture total energy, volume fraction advection
                                                 ! (non-fused fallback)
