@@ -47,16 +47,16 @@ contains
         @:ALLOCATE(bc_buffers(1:3, 1:2))
 
         if (bc_io) then
-            @:ALLOCATE(bc_buffers(1, 1)%sf(1:sys_size, 0:n, 0:p))
-            @:ALLOCATE(bc_buffers(1, 2)%sf(1:sys_size, 0:n, 0:p))
+            allocate (bc_buffers(1, 1)%sf(1:sys_size, 0:n, 0:p))
+            allocate (bc_buffers(1, 2)%sf(1:sys_size, 0:n, 0:p))
             #:if not MFC_CASE_OPTIMIZATION or num_dims > 1
                 if (n > 0) then
-                    @:ALLOCATE(bc_buffers(2,1)%sf(-buff_size:m+buff_size,1:sys_size,0:p))
-                    @:ALLOCATE(bc_buffers(2,2)%sf(-buff_size:m+buff_size,1:sys_size,0:p))
+                    allocate (bc_buffers(2, 1)%sf(-buff_size:m + buff_size, 1:sys_size, 0:p))
+                    allocate (bc_buffers(2, 2)%sf(-buff_size:m + buff_size, 1:sys_size, 0:p))
                     #:if not MFC_CASE_OPTIMIZATION or num_dims > 2
                         if (p > 0) then
-                            @:ALLOCATE(bc_buffers(3,1)%sf(-buff_size:m+buff_size,-buff_size:n+buff_size,1:sys_size))
-                            @:ALLOCATE(bc_buffers(3,2)%sf(-buff_size:m+buff_size,-buff_size:n+buff_size,1:sys_size))
+                            allocate (bc_buffers(3, 1)%sf(-buff_size:m + buff_size, -buff_size:n + buff_size, 1:sys_size))
+                            allocate (bc_buffers(3, 2)%sf(-buff_size:m + buff_size, -buff_size:n + buff_size, 1:sys_size))
                         end if
                     #:endif
                 end if
@@ -1708,7 +1708,7 @@ contains
         do dir = 1, num_dims
             do loc = 1, 2
                 read (1) bc_buffers(dir, loc)%sf
-                $:GPU_UPDATE(device='[bc_buffers(dir, loc)%sf]')
+                ! bc_buffers is host-only; no GPU update needed
             end do
         end do
         close (1)
@@ -1771,7 +1771,7 @@ contains
             do loc = 1, 2
                 nelements = sizeof(bc_buffers(dir, loc)%sf)*mpi_io_type/stp
                 call MPI_File_read_all(file_id, bc_buffers(dir, loc)%sf, nelements, mpi_io_p, MPI_STATUS_IGNORE, ierr)
-                $:GPU_UPDATE(device='[bc_buffers(dir, loc)%sf]')
+                ! bc_buffers is host-only; no GPU update needed
             end do
         end do
 
