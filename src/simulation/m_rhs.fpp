@@ -220,31 +220,33 @@ contains
                         end do
                     end if
 
-                    if (viscous .or. surface_tension) then
-                        do l = mom_idx%beg, E_idx
-                            @:ALLOCATE(flux_src_n(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                       & idwbuff(3)%beg:idwbuff(3)%end))
-                        end do
-                    end if
+                    if (.not. fused_weno_hllc) then
+                        if (viscous .or. surface_tension) then
+                            do l = mom_idx%beg, E_idx
+                                @:ALLOCATE(flux_src_n(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                                           & idwbuff(3)%beg:idwbuff(3)%end))
+                            end do
+                        end if
 
-                    @:ALLOCATE(flux_src_n(i)%vf(adv_idx%beg)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                               & idwbuff(3)%beg:idwbuff(3)%end))
+                        @:ALLOCATE(flux_src_n(i)%vf(adv_idx%beg)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                                   & idwbuff(3)%beg:idwbuff(3)%end))
 
-                    if (riemann_solver == 1 .or. riemann_solver == 4) then
-                        do l = adv_idx%beg + 1, adv_idx%end
-                            @:ALLOCATE(flux_src_n(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                       & idwbuff(3)%beg:idwbuff(3)%end))
-                        end do
-                    end if
+                        if (riemann_solver == 1 .or. riemann_solver == 4) then
+                            do l = adv_idx%beg + 1, adv_idx%end
+                                @:ALLOCATE(flux_src_n(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                                           & idwbuff(3)%beg:idwbuff(3)%end))
+                            end do
+                        end if
 
-                    if (chemistry) then
-                        do l = chemxb, chemxe
-                            @:ALLOCATE(flux_src_n(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                       & idwbuff(3)%beg:idwbuff(3)%end))
-                        end do
-                        if (chem_params%diffusion .and. .not. viscous) then
-                            @:ALLOCATE(flux_src_n(i)%vf(E_idx)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                       & idwbuff(3)%beg:idwbuff(3)%end))
+                        if (chemistry) then
+                            do l = chemxb, chemxe
+                                @:ALLOCATE(flux_src_n(i)%vf(l)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                                           & idwbuff(3)%beg:idwbuff(3)%end))
+                            end do
+                            if (chem_params%diffusion .and. .not. viscous) then
+                                @:ALLOCATE(flux_src_n(i)%vf(E_idx)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                                           & idwbuff(3)%beg:idwbuff(3)%end))
+                            end if
                         end if
                     end if
                 end if
@@ -255,26 +257,26 @@ contains
                     @:ACC_SETUP_VFs(flux_gsrc_n(i))
                 end if
 
-                if (i == 1) then
-                    if (riemann_solver /= 1) then
-                        do l = adv_idx%beg + 1, adv_idx%end
-                            flux_src_n(i)%vf(l)%sf => flux_src_n(i)%vf(adv_idx%beg)%sf
-                            $:GPU_ENTER_DATA(attach='[flux_src_n(i)%vf(l)%sf]')
-                        end do
-                    end if
-                else
-                    do l = 1, sys_size
-                        if (.not. fused_weno_hllc) then
+                if (.not. fused_weno_hllc) then
+                    if (i == 1) then
+                        if (riemann_solver /= 1) then
+                            do l = adv_idx%beg + 1, adv_idx%end
+                                flux_src_n(i)%vf(l)%sf => flux_src_n(i)%vf(adv_idx%beg)%sf
+                                $:GPU_ENTER_DATA(attach='[flux_src_n(i)%vf(l)%sf]')
+                            end do
+                        end if
+                    else
+                        do l = 1, sys_size
                             flux_n(i)%vf(l)%sf => flux_n(1)%vf(l)%sf
                             $:GPU_ENTER_DATA(attach='[flux_n(i)%vf(l)%sf]')
-                        end if
-                        flux_src_n(i)%vf(l)%sf => flux_src_n(1)%vf(l)%sf
-                        $:GPU_ENTER_DATA(attach='[flux_src_n(i)%vf(l)%sf]')
-                        if (cyl_coord) then
-                            flux_gsrc_n(i)%vf(l)%sf => flux_gsrc_n(1)%vf(l)%sf
-                            $:GPU_ENTER_DATA(attach='[flux_gsrc_n(i)%vf(l)%sf]')
-                        end if
-                    end do
+                            flux_src_n(i)%vf(l)%sf => flux_src_n(1)%vf(l)%sf
+                            $:GPU_ENTER_DATA(attach='[flux_src_n(i)%vf(l)%sf]')
+                            if (cyl_coord) then
+                                flux_gsrc_n(i)%vf(l)%sf => flux_gsrc_n(1)%vf(l)%sf
+                                $:GPU_ENTER_DATA(attach='[flux_gsrc_n(i)%vf(l)%sf]')
+                            end if
+                        end do
+                    end if
                 end if
             end do
         end if
