@@ -160,6 +160,9 @@ contains
             end if
         end if
 
+        ! Per-cell fused path eliminates flux_rs_vf, flux_src_rs_vf, vel_src_rs_vf
+        skip_flux_rs_alloc = fused_weno_hllc
+
         @:ALLOCATE(q_cons_qp%vf(1:sys_size))
         @:ALLOCATE(q_prim_qp%vf(1:sys_size))
 
@@ -783,15 +786,13 @@ contains
                 call s_riemann_solver(qR_rs_vf, dqR_prim_dx_n(id)%vf, dqR_prim_dy_n(id)%vf, dqR_prim_dz_n(id)%vf, qR_prim(id)%vf, &
                                       & qL_rs_vf, dqL_prim_dx_n(id)%vf, dqL_prim_dy_n(id)%vf, dqL_prim_dz_n(id)%vf, &
                                       & qL_prim(id)%vf, q_prim_qp%vf, flux_n(id)%vf, flux_src_n(id)%vf, flux_gsrc_n(id)%vf, id, &
-                                      & irx, iry, irz)
+                                      & irx, iry, irz, rhs_vf, q_cons_qp)
                 call nvtxEndRange
 
-                ! Additional physics and source terms RHS addition for advection source
+                ! Additional physics and source terms RHS addition for advection source Per-cell fused path: flux differencing and
+                ! advection source already accumulated in rhs_vf inside the Riemann solver kernel, so skip entirely.
                 call nvtxStartRange("RHS-ADVECTION-SRC")
-                if (fused_weno_hllc) then
-                    ! Fused path: read flux_rs_vf directly with inline de-transposition, avoiding the flux_n intermediate
-                    call s_compute_fused_flux_diff(id, rhs_vf, q_cons_qp, q_prim_qp, flux_src_n(id))
-                else
+                if (.not. fused_weno_hllc) then
                     call s_compute_advection_source_term(id, rhs_vf, q_cons_qp, q_prim_qp, flux_src_n(id))
                 end if
                 call nvtxEndRange
