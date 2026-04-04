@@ -640,13 +640,17 @@ contains
             call nvtxEndRange
         end if
         if (.not. igr .or. dummy) then
-            call nvtxStartRange("RHS-CONVERT")
-            call s_convert_conservative_to_primitive_variables(q_cons_qp%vf, q_T_sf, q_prim_qp%vf, idwint)
-            call nvtxEndRange
+            if (.not. fused_weno_hllc) then
+                ! Non-fused path: convert conservatives to primitives globally
+                call nvtxStartRange("RHS-CONVERT")
+                call s_convert_conservative_to_primitive_variables(q_cons_qp%vf, q_T_sf, q_prim_qp%vf, idwint)
+                call nvtxEndRange
 
-            call nvtxStartRange("RHS-COMMUNICATION")
-            call s_populate_variables_buffers(bc_type, q_prim_qp%vf, pb_in, mv_in)
-            call nvtxEndRange
+                call nvtxStartRange("RHS-COMMUNICATION")
+                call s_populate_variables_buffers(bc_type, q_prim_qp%vf, pb_in, mv_in)
+                call nvtxEndRange
+            end if
+            ! Fused path: primitives computed on-the-fly in WENO stencil reads
         end if
 
         call nvtxStartRange("RHS-ELASTIC")

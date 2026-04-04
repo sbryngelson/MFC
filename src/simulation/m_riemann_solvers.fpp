@@ -1768,6 +1768,8 @@ contains
         real(wp) :: w5_dvd(-2:1), w5_poly(0:2), w5_beta(0:2)
         real(wp) :: w5_alpha(0:2), w5_omega(0:2), w5_tau, w5_delta(0:2)
         real(wp) :: w5_dummy
+        ! INLINE_WENO5_CONS locals: on-the-fly primitive reconstruction from conservative data
+        real(wp) :: w5c_stencil(-2:2), w5c_rho, w5c_vel_sqr, w5c_gamma, w5c_pi_inf, w5c_qv
         integer  :: w5_idx, iv
         real(wp) :: qL_local(sys_size), qR_local(sys_size)
         ! Per-cell fused kernel locals: flux at left/right faces, advection velocity, cell spacing
@@ -2812,7 +2814,7 @@ contains
                 else
                     if (weno_order == 5 .and. .not. viscous) then
                         ! Per-cell fused WENO5+HLLC+flux_diff: compute both adjacent face fluxes and accumulate directly into
-                        ! rhs_vf, eliminating flux_rs_vf storage. Loop variable mapping (matches INLINE_WENO5_QPRIM expectations): j
+                        ! rhs_vf, eliminating flux_rs_vf storage. Loop variable mapping (matches INLINE_WENO5_CONS expectations): j
                         ! = reconstruction direction, k = transverse1, l = transverse2 Physical write coords: norm_dir=1 -> (j,k,l),
                         ! 2 -> (k,j,l), 3 -> (l,k,j)
                         $:GPU_PARALLEL_LOOP(collapse=3, private='[i, q, T_L, T_R, vel_L_rms, vel_R_rms, pres_L, pres_R, rho_L, &
@@ -2822,7 +2824,8 @@ contains
                                             & alpha_R, s_L, s_R, s_S, vel_avg_rms, pcorr, zcoef, vel_L_tmp, vel_R_tmp, tau_e_L, &
                                             & tau_e_R, xi_field_L, xi_field_R, G_L, G_R, flux_ene_e, w5_dvd, w5_poly, w5_beta, &
                                             & w5_alpha, w5_omega, w5_tau, w5_delta, w5_dummy, w5_idx, iv, qL_local, qR_local, &
-                                            & flux_left, flux_right, vel_src_left, vel_src_right, inv_ds, j_adv]')
+                                            & flux_left, flux_right, vel_src_left, vel_src_right, inv_ds, j_adv, &
+                                            & w5c_stencil, w5c_rho, w5c_vel_sqr, w5c_gamma, w5c_pi_inf, w5c_qv]')
                         #:if NORM_DIR == 1
                             do l = 0, p
                                 do k = 0, n
@@ -2844,18 +2847,18 @@ contains
                                                             ! at j (right-biased)
                                                             $:GPU_LOOP(parallelism='[seq]')
                                                             do iv = 1, sys_size
-                                                                @:INLINE_WENO5_QPRIM(${NORM_DIR}$, j - 1, iv, &
-                                                                                     & poly_coef_cbL_${XYZ}$, &
-                                                                                     & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
-                                                                                     & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
-                                                                                     & qL_local(iv), w5_dummy)
+                                                                @:INLINE_WENO5_CONS(${NORM_DIR}$, j - 1, iv, &
+                                                                                    & poly_coef_cbL_${XYZ}$, &
+                                                                                    & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
+                                                                                    & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
+                                                                                    & qL_local(iv), w5_dummy)
                                                             end do
                                                             $:GPU_LOOP(parallelism='[seq]')
                                                             do iv = 1, sys_size
-                                                                @:INLINE_WENO5_QPRIM(${NORM_DIR}$, j, iv, poly_coef_cbL_${XYZ}$, &
-                                                                                     & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
-                                                                                     & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
-                                                                                     & w5_dummy, qR_local(iv))
+                                                                @:INLINE_WENO5_CONS(${NORM_DIR}$, j, iv, poly_coef_cbL_${XYZ}$, &
+                                                                                    & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
+                                                                                    & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
+                                                                                    & w5_dummy, qR_local(iv))
                                                             end do
                                                             ! HLLC solve for left face -> flux_left, vel_src_left
                                                             @:INLINE_HLLC_FLUX(flux_left, vel_src_left)
@@ -2864,18 +2867,18 @@ contains
                                                             ! j+1 (right-biased)
                                                             $:GPU_LOOP(parallelism='[seq]')
                                                             do iv = 1, sys_size
-                                                                @:INLINE_WENO5_QPRIM(${NORM_DIR}$, j, iv, poly_coef_cbL_${XYZ}$, &
-                                                                                     & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
-                                                                                     & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
-                                                                                     & qL_local(iv), w5_dummy)
+                                                                @:INLINE_WENO5_CONS(${NORM_DIR}$, j, iv, poly_coef_cbL_${XYZ}$, &
+                                                                                    & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
+                                                                                    & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
+                                                                                    & qL_local(iv), w5_dummy)
                                                             end do
                                                             $:GPU_LOOP(parallelism='[seq]')
                                                             do iv = 1, sys_size
-                                                                @:INLINE_WENO5_QPRIM(${NORM_DIR}$, j + 1, iv, &
-                                                                                     & poly_coef_cbL_${XYZ}$, &
-                                                                                     & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
-                                                                                     & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
-                                                                                     & w5_dummy, qR_local(iv))
+                                                                @:INLINE_WENO5_CONS(${NORM_DIR}$, j + 1, iv, &
+                                                                                    & poly_coef_cbL_${XYZ}$, &
+                                                                                    & poly_coef_cbR_${XYZ}$, d_cbL_${XYZ}$, &
+                                                                                    & d_cbR_${XYZ}$, beta_coef_${XYZ}$, &
+                                                                                    & w5_dummy, qR_local(iv))
                                                             end do
                                                             ! HLLC solve for right face -> flux_right, vel_src_right
                                                             @:INLINE_HLLC_FLUX(flux_right, vel_src_right)

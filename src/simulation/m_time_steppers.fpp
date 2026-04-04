@@ -237,8 +237,15 @@ contains
                 @:ACC_SETUP_SFs(q_prim_vf(i))
             end do
             do i = mom_idx%beg, E_idx
-                @:ALLOCATE(q_prim_vf(i)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                           & idwbuff(3)%beg:idwbuff(3)%end))
+                if (riemann_solver == 2 .and. weno_order == 5 .and. .not. viscous .and. &
+                    & model_eqns /= 3 .and. model_eqns /= 4 .and. &
+                    & .not. (model_eqns == 2 .and. bubbles_euler)) then
+                    ! Fused path: primitives computed on the fly from conservatives
+                    @:ALLOCATE(q_prim_vf(i)%sf(0:0, 0:0, 0:0))
+                else
+                    @:ALLOCATE(q_prim_vf(i)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                               & idwbuff(3)%beg:idwbuff(3)%end))
+                end if
                 @:ACC_SETUP_SFs(q_prim_vf(i))
             end do
             do i = adv_idx%beg, adv_idx%end
@@ -693,9 +700,14 @@ contains
         integer                :: j, k, l  !< Generic loop iterators
 
         if (.not. igr .or. dummy) then
-            call s_convert_conservative_to_primitive_variables(q_cons_ts(1)%vf, q_T_sf, q_prim_vf, idwint)
+            if (.not. (riemann_solver == 2 .and. weno_order == 5 .and. .not. viscous .and. &
+                & model_eqns /= 3 .and. model_eqns /= 4 .and. &
+                & .not. (model_eqns == 2 .and. bubbles_euler))) then
+                call s_convert_conservative_to_primitive_variables(q_cons_ts(1)%vf, q_T_sf, q_prim_vf, idwint)
+            end if
         end if
 
+        ! For fused path: compute dt from conservatives directly
         $:GPU_PARALLEL_LOOP(collapse=3, private='[vel, alpha, Re, rho, vel_sum, pres, gamma, pi_inf, c, H, qv]')
         do l = 0, p
             do k = 0, n
