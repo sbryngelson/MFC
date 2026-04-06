@@ -83,8 +83,16 @@ END
 
 <%def name="mpi_cmd(nprocs, binary_path, extra_flags=[])">
 <%
-    b = mpi_config['binary']
-    all_flags = list(mpi_config.get('flags', [])) + list(extra_flags)
+    try:
+        _cfg = mpi_config
+    except NameError:
+        raise NameError(
+            "mpi_config is not defined in this template. "
+            "Add a mpi_config dict (with 'binary', 'flags', 'env' keys) "
+            "near the top of your .mako file. See phoenix.mako for an example."
+        )
+    b = _cfg['binary']
+    all_flags = list(_cfg.get('flags', [])) + list(extra_flags)
     flags_str = ' '.join(all_flags)
 %>\
 % if b == 'flux':
