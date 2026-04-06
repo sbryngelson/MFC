@@ -106,6 +106,7 @@ def _get_mpi_config() -> MPIConfig:
         if cfg is not None:
             _resolved_mpi_config = cfg
             return _resolved_mpi_config
+        print(f" Warning: -c {computer} specified but could not extract mpi_config from {computer}.mako. Falling back to auto-detection.")
 
     # Auto-detect: try common launchers in order
     for name in ["mpirun", "srun", "mpiexec"]:
@@ -128,7 +129,7 @@ def _mpi_cmd(cfg: MPIConfig, ppn: int, exe: str, gpu: bool = False) -> List[str]
         gpu_per_rs = "1" if gpu else "0"
         return [binary, "--nrs", str(ppn), "--cpu_per_rs", "1", "--gpu_per_rs", gpu_per_rs, "--tasks_per_rs", "1", *gf, *cfg.flags, exe]
     if binary == "flux":
-        return [binary, *cfg.flags, "--ntasks", str(ppn), *gf, exe]
+        return [binary, *cfg.flags, "--nodes", "1", "--ntasks", str(ppn), *gf, exe]
     return [binary, "-n", str(ppn), *gf, *cfg.flags, exe]
 
 
