@@ -3,7 +3,7 @@
 <%namespace name="helpers" file="helpers.mako"/>
 <%
 mpi_config = {
-    "binary": "srun",
+    "binary": "mpirun",
     "flags":  [],
     "env":    {},
 }
@@ -11,9 +11,8 @@ mpi_config = {
 
 % if engine == 'batch':
 #SBATCH --nodes=${nodes}
-#SBATCH --tasks-per-node=${tasks_per_node}
+#SBATCH --ntasks-per-node=${tasks_per_node}
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=4g
 #SBATCH --job-name="${name}"
 #SBATCH --time=${walltime}
 % if partition:
@@ -21,10 +20,6 @@ mpi_config = {
 % endif
 % if account:
 #SBATCH --account="${account}"
-% endif
-% if gpu_enabled:
-#SBATCH --gpu-bind=verbose,closest
-#SBATCH --gres=gpu:v100-16:${tasks_per_node}
 % endif
 #SBATCH --output="${name}.out"
 #SBATCH --error="${name}.err"
@@ -39,7 +34,7 @@ ${helpers.template_prologue()}
 
 ok ":) Loading modules:\n"
 cd "${MFC_ROOT_DIR}"
-. ./mfc.sh load -c o -m ${'g' if gpu_enabled else 'c'}
+. ./mfc.sh load -c pa -m ${'g' if gpu_enabled else 'c'}
 cd - > /dev/null
 echo
 

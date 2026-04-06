@@ -4,16 +4,15 @@
 <%
 mpi_config = {
     "binary": "srun",
-    "flags":  [],
+    "flags":  ["--mpi=pmi2"],
     "env":    {},
 }
 %>
 
 % if engine == 'batch':
 #SBATCH --nodes=${nodes}
-#SBATCH --tasks-per-node=${tasks_per_node}
+#SBATCH --ntasks-per-node=${tasks_per_node}
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=4g
 #SBATCH --job-name="${name}"
 #SBATCH --time=${walltime}
 % if partition:
@@ -22,16 +21,12 @@ mpi_config = {
 % if account:
 #SBATCH --account="${account}"
 % endif
-% if gpu_enabled:
-#SBATCH --gpu-bind=verbose,closest
-#SBATCH --gres=gpu:v100-16:${tasks_per_node}
-% endif
 #SBATCH --output="${name}.out"
 #SBATCH --error="${name}.err"
 #SBATCH --export=ALL
 % if email:
 #SBATCH --mail-user=${email}
-#SBATCH --mail-type="BEGIN, END, FAIL"
+#SBATCH --mail-type=BEGIN,END,FAIL
 % endif
 % endif
 
@@ -39,9 +34,10 @@ ${helpers.template_prologue()}
 
 ok ":) Loading modules:\n"
 cd "${MFC_ROOT_DIR}"
-. ./mfc.sh load -c o -m ${'g' if gpu_enabled else 'c'}
+. ./mfc.sh load -c t -m ${'g' if gpu_enabled else 'c'}
 cd - > /dev/null
 echo
+
 
 % for target in targets:
     ${helpers.run_prologue(target)}
