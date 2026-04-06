@@ -83,9 +83,8 @@ END
 
 <%def name="mpi_cmd(nprocs, binary_path, extra_flags=[])">
 <%
-    try:
-        _cfg = mpi_config
-    except NameError:
+    _cfg = context.get('mpi_config', None)
+    if _cfg is None or not isinstance(_cfg, dict):
         raise NameError(
             "mpi_config is not defined in this template. "
             "Add a mpi_config dict (with 'binary', 'flags', 'env' keys) "
