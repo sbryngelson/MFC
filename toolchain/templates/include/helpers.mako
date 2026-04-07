@@ -81,17 +81,17 @@ END
 % endif
 </%def>
 
-<%def name="mpi_cmd(nprocs, binary_path, extra_flags=[])">
+<%def name="mpi_cmd(nprocs, binary_path, mpi_config, extra_flags=[])">
 <%
-    _cfg = context.get('mpi_config', None)
-    if _cfg is None or not isinstance(_cfg, dict):
+    if mpi_config is None or not isinstance(mpi_config, dict):
         raise NameError(
-            "mpi_config is not defined in this template. "
-            "Add a mpi_config dict (with 'binary', 'flags', 'env' keys) "
-            "near the top of your .mako file. See phoenix.mako for an example."
+            "mpi_config must be passed to helpers.mpi_cmd(). "
+            "Define a mpi_config dict (with 'binary', 'flags', 'env' keys) "
+            "near the top of your .mako file and pass it as the 3rd arg. "
+            "See phoenix.mako for an example."
         )
-    b = _cfg['binary']
-    all_flags = list(_cfg.get('flags', [])) + list(extra_flags)
+    b = mpi_config['binary']
+    all_flags = list(mpi_config.get('flags', [])) + list(extra_flags)
     flags_str = ' '.join(all_flags)
 %>\
 % if b == 'flux':

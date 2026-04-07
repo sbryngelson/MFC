@@ -50,7 +50,7 @@ echo
     % else:
         mkdir -p /storage/scratch1/6/sbryngelson3/mytmp
         chmod 777 /storage/scratch1/6/sbryngelson3/mytmp
-    ${helpers.mpi_cmd(nodes*tasks_per_node, target.get_install_binpath(case), extra_flags=['--mca', 'orte_tmpdir_base', '/storage/scratch1/6/sbryngelson3/mytmp'])}
+    ${helpers.mpi_cmd(nodes*tasks_per_node, target.get_install_binpath(case), mpi_config, extra_flags=['--mca', 'orte_tmpdir_base', '/storage/scratch1/6/sbryngelson3/mytmp'])}
     % endif
 
     ${helpers.run_epilogue(target)}

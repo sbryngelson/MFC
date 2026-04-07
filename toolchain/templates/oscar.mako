@@ -49,7 +49,7 @@ echo
     % if not mpi:
         (set -x; ${profiler} "${target.get_install_binpath(case)}")
     % else:
-    ${helpers.mpi_cmd(nodes*tasks_per_node, target.get_install_binpath(case))}
+    ${helpers.mpi_cmd(nodes*tasks_per_node, target.get_install_binpath(case), mpi_config)}
     % endif
 
     ${helpers.run_epilogue(target)}
