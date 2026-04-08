@@ -81,8 +81,8 @@ END
 % endif
 </%def>
 
-<%def name="mpi_cmd(nprocs, binary_path, mpi_config, extra_flags=[])">
-<%
+<%!
+def _build_mpi_cmd_parts(mpi_config, extra_flags):
     if mpi_config is None or not isinstance(mpi_config, dict):
         raise NameError(
             "mpi_config must be passed to helpers.mpi_cmd(). "
@@ -92,7 +92,11 @@ END
         )
     b = mpi_config['binary']
     all_flags = list(mpi_config.get('flags', [])) + list(extra_flags)
-    flags_str = ' '.join(all_flags)
+    return b, ' '.join(all_flags)
+%>
+<%def name="mpi_cmd(nprocs, binary_path, mpi_config, extra_flags=[])">
+<%
+    b, flags_str = _build_mpi_cmd_parts(mpi_config, extra_flags)
 %>\
 % if b == 'flux':
         (set -x; ${profiler} flux ${flags_str} --ntasks=${nprocs} "${binary_path}")
