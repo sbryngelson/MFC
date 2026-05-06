@@ -18,6 +18,7 @@ parser.add_argument("--muscl", action="store_true", help="Use MUSCL instead of W
 parser.add_argument("--teno", action="store_true", help="Use TENO instead of WENO")
 parser.add_argument("--teno-ct", type=float, default=1e-6, help="TENO CT threshold (default: 1e-6)")
 parser.add_argument("--muscl-lim", type=int, default=0, help="MUSCL limiter: 0=unlimited 1=minmod ... (default: 0)")
+parser.add_argument("--cfl", type=float, default=0.4, help="CFL number (default: 0.4; use 0.005 for WENO7/TENO7 so temporal error is negligible)")
 args = parser.parse_args()
 
 gamma = 1.4
@@ -28,7 +29,7 @@ dx = 10.0 / N
 
 # Max wave speed: c_sound at ambient + max rotational velocity (at r~0.7 for exp(1-r^2))
 c_max = math.sqrt(gamma) + eps_vortex / (2.0 * math.pi)
-dt = 0.4 * dx / c_max
+dt = args.cfl * dx / c_max
 T_end = 2.0
 Nt = max(4, math.ceil(T_end / dt))
 dt = T_end / Nt  # adjust to land exactly on T_end

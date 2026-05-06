@@ -12,11 +12,13 @@ L2(rho(T) - rho(0)) measures accumulated scheme error; the comparison to rho(0)
 (the numerical IC) eliminates IC discretisation error, isolating the scheme error.
 
 WENO7/TENO7 require min N=64 per dimension (MFC constraint: N >= 5 * weno_order = 35).
-With only N=64 and N=128 available from the default resolution set, the fitted rate
-is a single pairwise value; thresholds are set conservatively.
+They also need CFL=0.005: at CFL=0.4 the RK3 temporal error dominates (ratio
+temporal/spatial >> 1 because (CFL*h)^3 >> h^7 for the tested h values), giving
+a spurious rate of ~3.  With CFL=0.005 the temporal error drops by (0.005/0.4)^3
+= 1/51200, making spatial error dominant and recovering rate ≈7.
 
 Usage:
-    python toolchain/mfc/test/run_convergence.py [--no-build] [--resolutions 32 64 128]
+    python toolchain/mfc/test/run_convergence.py [--resolutions 32 64 128]
 """
 
 import argparse
@@ -41,17 +43,17 @@ MFC = "./mfc.sh"
 #
 # WENO3: at N=32-128 the rate is ~2.0-2.2 (pre-asymptotic; approaches 3 at
 #   finer grids).  Threshold 1.8.
-# WENO7/TENO7: require N >= 35 (MFC stencil constraint), so min_N=64.  With
-#   only N=64,128 in the default set the rate is a single pairwise value;
-#   thresholds set conservatively pending actual run data.
+# WENO7/TENO7: require N >= 35 (MFC stencil constraint), so min_N=64.  Use
+#   CFL=0.005 to suppress RK3 temporal error (otherwise rate collapses to ~3).
+#   With N=64,128 the fitted rate is a single pairwise value; threshold >=6.0.
 SCHEMES = [
     ("WENO5", ["--order", "5"], 5, 1.0, 32, None),
     ("WENO3", ["--order", "3"], 3, 1.2, 32, None),
     ("WENO1", ["--order", "1"], 1, 0.4, 32, None),
     ("MUSCL2", ["--muscl"], 2, 0.5, 32, None),
     ("TENO5", ["--order", "5", "--teno", "--teno-ct", "1e-6"], 5, 1.0, 32, None),
-    ("WENO7", ["--order", "7"], 7, 4.0, 64, None),
-    ("TENO7", ["--order", "7", "--teno", "--teno-ct", "1e-9"], 7, 4.0, 64, None),
+    ("WENO7", ["--order", "7", "--cfl", "0.005"], 7, 1.0, 64, None),
+    ("TENO7", ["--order", "7", "--teno", "--teno-ct", "1e-9", "--cfl", "0.005"], 7, 1.0, 64, None),
 ]
 
 

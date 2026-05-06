@@ -7,9 +7,14 @@ After exactly one period (T=1, u=1, L=1), the exact solution equals the IC.
 L2(rho(T) - rho(0)) measures the accumulated scheme spatial truncation error.
 No non-conservative alpha equation — clean benchmark for all schemes.
 
-CFL=0.02 by default so that RK3 temporal error O(dt^3) is negligible relative
-to the spatial error at all tested resolutions, allowing WENO5/7 to show their
-true spatial rates.
+WENO5/TENO5 use CFL=0.02: RK3 temporal error O(dt^3) is then negligible
+relative to the O(h^5) spatial error at N=128-512.
+
+WENO7/TENO7 use CFL=0.005: at CFL=0.02 the RK3 temporal error (~3.4e-12 at
+N=128) is comparable to the spatial error (~4.4e-12), giving a spurious rate
+of ~3.7.  With CFL=0.005 the temporal error drops by (0.005/0.02)^3 = 1/64
+to ~5.3e-14, well below spatial, and the measured rate approaches 7.
+N is capped at 256 — the machine-precision floor is reached near N=512.
 
 WENO3-JS degrades to 2nd order at smooth extrema (Henrick et al. 2005).
 The expected rate for WENO3 here is therefore 2, not 3; the 2D isentropic
@@ -19,15 +24,8 @@ MUSCL2 uses muscl_lim=0 (unlimited central-difference) by default.  TVD
 limiters clip slopes to zero at smooth extrema and stall at 1st order on the
 sine wave; the unlimited limiter preserves 2nd-order convergence everywhere.
 
-TENO5 uses the same 5th-order stencil as WENO5 with threshold-based stencil
-selection (CT=1e-6).  On smooth problems all stencils are selected and the
-rate equals WENO5; TENO's advantage is sharper shock capturing.
-
-WENO7/TENO7: capped at N=256 — the machine-precision floor (~2e-15) is
-reached near N=512 for 7th-order schemes on this smooth problem.
-
 Usage:
-    python toolchain/mfc/test/run_convergence_1d.py [--no-build] [--resolutions 32 64 128]
+    python toolchain/mfc/test/run_convergence_1d.py [--resolutions 128 256 512 1024]
 """
 
 import argparse
@@ -46,6 +44,9 @@ CASE = "examples/1D_euler_convergence/case.py"
 MFC = "./mfc.sh"
 
 # (label, extra_args, expected_order, tolerance, min_N, max_N)
+# CFL is baked into each scheme's extra_args so that WENO7/TENO7 can use a
+# smaller CFL independently of all other schemes.
+#
 # Per-scheme resolution bounds let each scheme run over the range where its
 # asymptotic order is cleanly visible:
 #   WENO5  : cap at N=512 — double-precision floor kills the rate at N=1024
@@ -56,18 +57,17 @@ MFC = "./mfc.sh"
 #   WENO1  : full range [128,1024]; rate 0.97.
 #   MUSCL2 : full range [128,1024]; unlimited slope, rate exactly 2.00.
 #   TENO5  : same range as WENO5; CT=1e-6; rate matches WENO5 on smooth problems.
-#   WENO7  : cap at N=256; measured rate ~3.7 — spatial h^7 and RK3 temporal
-#            h^3 errors are comparable at these N; threshold set >=3.0 to
-#            confirm convergence without requiring a higher-order time integrator.
-#   TENO7  : same range and reasoning as WENO7; CT=1e-9.
+#   WENO7  : CFL=0.005, cap at N=256 — machine-precision floor near N=512;
+#            rate ≥6.5 (fits ≥6.0 threshold with tolerance 0.5 after temporal fix).
+#   TENO7  : same range and CFL as WENO7; CT=1e-9.
 SCHEMES = [
-    ("WENO5", ["--order", "5"], 5, 0.2, 128, 512),
-    ("WENO3", ["--order", "3"], 2, 0.2, 256, None),
-    ("WENO1", ["--order", "1"], 1, 0.05, 128, None),
-    ("MUSCL2", ["--muscl"], 2, 0.1, 128, None),
-    ("TENO5", ["--order", "5", "--teno", "--teno-ct", "1e-6"], 5, 0.2, 128, 512),
-    ("WENO7", ["--order", "7"], 7, 4.0, 128, 256),
-    ("TENO7", ["--order", "7", "--teno", "--teno-ct", "1e-9"], 7, 4.0, 128, 256),
+    ("WENO5", ["--order", "5", "--cfl", "0.02"], 5, 0.2, 128, 512),
+    ("WENO3", ["--order", "3", "--cfl", "0.02"], 2, 0.2, 256, None),
+    ("WENO1", ["--order", "1", "--cfl", "0.02"], 1, 0.05, 128, None),
+    ("MUSCL2", ["--muscl", "--cfl", "0.02"], 2, 0.1, 128, None),
+    ("TENO5", ["--order", "5", "--teno", "--teno-ct", "1e-6", "--cfl", "0.02"], 5, 0.2, 128, 512),
+    ("WENO7", ["--order", "7", "--cfl", "0.005"], 7, 0.5, 128, 256),
+    ("TENO7", ["--order", "7", "--teno", "--teno-ct", "1e-9", "--cfl", "0.005"], 7, 0.5, 128, 256),
 ]
 
 
@@ -196,18 +196,17 @@ def main():
         default=["WENO5", "WENO3", "WENO1", "MUSCL2", "TENO5", "WENO7", "TENO7"],
         help="Schemes to test",
     )
-    parser.add_argument("--cfl", type=float, default=0.02, help="CFL number (default: 0.02; small so RK3 temporal error is negligible)")
     parser.add_argument("--muscl-lim", type=int, default=0, help="MUSCL limiter (0=unlimited 1=minmod ...; default: 0)")
     args = parser.parse_args()
 
-    cfl_extra = ["--cfl", str(args.cfl), "--muscl-lim", str(args.muscl_lim)]
+    muscl_extra = ["--muscl-lim", str(args.muscl_lim)]
 
     results = {}
     for label, extra_args, expected_order, tol, min_N, max_N in SCHEMES:
         if label not in args.schemes:
             continue
         try:
-            passed = test_scheme(label, extra_args + cfl_extra, expected_order, tol, args.resolutions, min_N, max_N)
+            passed = test_scheme(label, extra_args + muscl_extra, expected_order, tol, args.resolutions, min_N, max_N)
         except Exception as e:
             print(f"  ERROR: {e}")
             passed = False
