@@ -29,6 +29,7 @@ jobs:
 
       - name: Run 1D convergence tests
         run: |
+          source build/venv/bin/activate
           python toolchain/mfc/test/run_convergence_1d.py \
             --resolutions 128 256 512 1024
 
@@ -56,5 +57,6 @@ jobs:
 
       - name: Run 2D convergence tests
         run: |
+          source build/venv/bin/activate
           python toolchain/mfc/test/run_convergence.py \
             --resolutions 32 64 128
