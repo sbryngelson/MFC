@@ -18,8 +18,10 @@ import math
 parser = argparse.ArgumentParser(description="1D Euler convergence case")
 parser.add_argument("--mfc", type=json.loads, default="{}", metavar="DICT")
 parser.add_argument("-N", type=int, default=64, help="Grid points (default: 64)")
-parser.add_argument("--order", type=int, default=5, help="WENO order: 1, 3, or 5")
+parser.add_argument("--order", type=int, default=5, help="WENO order: 1, 3, 5, or 7")
 parser.add_argument("--muscl", action="store_true", help="Use MUSCL-2 instead of WENO")
+parser.add_argument("--teno", action="store_true", help="Use TENO instead of WENO")
+parser.add_argument("--teno-ct", type=float, default=1e-6, help="TENO CT threshold (default: 1e-6)")
 parser.add_argument("--cfl", type=float, default=0.4, help="CFL number (default: 0.4)")
 parser.add_argument("--no-mapped", action="store_true", help="Disable mapped WENO")
 parser.add_argument("--muscl-lim", type=int, default=0, help="MUSCL limiter: 0=unlimited 1=minmod ... (default: 0)")
@@ -48,12 +50,14 @@ else:
     scheme_params = {
         "recon_type": 1,
         "weno_order": args.order,
-        "weno_eps": 1.0e-16,
+        "weno_eps": 1.0e-40,
         "weno_Re_flux": "F",
         "weno_avg": "F",
-        "mapped_weno": "F" if (args.order == 1 or args.no_mapped) else "T",
+        "mapped_weno": "F" if (args.order == 1 or args.no_mapped or args.teno) else "T",
         "null_weights": "F",
         "mp_weno": "F",
+        "teno": "T" if args.teno else "F",
+        **({"teno_CT": args.teno_ct} if args.teno else {}),
     }
 
 print(

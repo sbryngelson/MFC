@@ -7,19 +7,24 @@ After exactly one period (T=1, u=1, L=1), the exact solution equals the IC.
 L2(rho(T) - rho(0)) measures the accumulated scheme spatial truncation error.
 No non-conservative alpha equation — clean benchmark for all schemes.
 
-CFL=0.02 by default so that RK3 temporal error O(dt^3)~O(h^3) is negligible
-relative to the spatial error at all tested resolutions, allowing WENO5 to
-show its true 5th-order rate.
+CFL=0.02 by default so that RK3 temporal error O(dt^3) is negligible relative
+to the spatial error at all tested resolutions, allowing WENO5/7 to show their
+true spatial rates.
 
-WENO3-JS degrades to 2nd order at smooth extrema (Henrick et al. 2005, the
-Jiang-Shu smoothness indicators do not converge to optimal weights at critical
-points where f'=0).  The expected rate for WENO3 here is therefore 2, not 3;
-the 2D isentropic vortex test (run_convergence.py) verifies WENO3 rate 3 on
-a problem without smooth-extremum contamination.
+WENO3-JS degrades to 2nd order at smooth extrema (Henrick et al. 2005).
+The expected rate for WENO3 here is therefore 2, not 3; the 2D isentropic
+vortex test (run_convergence.py) verifies WENO3 rate 3.
 
 MUSCL2 uses muscl_lim=0 (unlimited central-difference) by default.  TVD
 limiters clip slopes to zero at smooth extrema and stall at 1st order on the
 sine wave; the unlimited limiter preserves 2nd-order convergence everywhere.
+
+TENO5 uses the same 5th-order stencil as WENO5 with threshold-based stencil
+selection (CT=1e-6).  On smooth problems all stencils are selected and the
+rate equals WENO5; TENO's advantage is sharper shock capturing.
+
+WENO7/TENO7: capped at N=256 — the machine-precision floor (~2e-15) is
+reached near N=512 for 7th-order schemes on this smooth problem.
 
 Usage:
     python toolchain/mfc/test/run_convergence_1d.py [--no-build] [--resolutions 32 64 128]
@@ -43,18 +48,25 @@ MFC = "./mfc.sh"
 # (label, extra_args, expected_order, tolerance, min_N, max_N)
 # Per-scheme resolution bounds let each scheme run over the range where its
 # asymptotic order is cleanly visible:
-#   WENO5 : cap at N=512 — double-precision floor kills the rate at N=1024
-#           (error ~2.6e-12, rate collapses to 0.69); [128,512] gives 4.99.
-#   WENO3 : start at N=256 — skips the coarsest pre-asymptotic points;
-#           WENO3-JS degrades to 2nd order at smooth extrema (Henrick 2005),
-#           asymptote confirmed 1.99 at N=4096; [256,1024] gives ~1.87.
-#   WENO1 : full range [128,1024]; rate 0.97.
-#   MUSCL2: full range [128,1024]; unlimited slope, rate exactly 2.00.
+#   WENO5  : cap at N=512 — double-precision floor kills the rate at N=1024
+#            (error ~2.6e-12, rate collapses to 0.69); [128,512] gives 4.99.
+#   WENO3  : start at N=256 — skips the coarsest pre-asymptotic points;
+#            WENO3-JS degrades to 2nd order at smooth extrema (Henrick 2005),
+#            asymptote confirmed 1.99 at N=4096; [256,1024] gives ~1.87.
+#   WENO1  : full range [128,1024]; rate 0.97.
+#   MUSCL2 : full range [128,1024]; unlimited slope, rate exactly 2.00.
+#   TENO5  : same range as WENO5; CT=1e-6; rate matches WENO5 on smooth problems.
+#   WENO7  : cap at N=256 — machine-precision floor (~2e-15) reached near N=512
+#            for 7th-order schemes on this smooth problem.
+#   TENO7  : same range as WENO7; CT=1e-9.
 SCHEMES = [
     ("WENO5", ["--order", "5"], 5, 0.2, 128, 512),
     ("WENO3", ["--order", "3"], 2, 0.2, 256, None),
     ("WENO1", ["--order", "1"], 1, 0.05, 128, None),
     ("MUSCL2", ["--muscl"], 2, 0.1, 128, None),
+    ("TENO5", ["--order", "5", "--teno", "--teno-ct", "1e-6"], 5, 0.2, 128, 512),
+    ("WENO7", ["--order", "7"], 7, 1.0, 128, 256),
+    ("TENO7", ["--order", "7", "--teno", "--teno-ct", "1e-9"], 7, 1.0, 128, 256),
 ]
 
 
@@ -182,7 +194,7 @@ def main():
     parser.add_argument(
         "--schemes",
         nargs="+",
-        default=["WENO5", "WENO3", "WENO1", "MUSCL2"],
+        default=["WENO5", "WENO3", "WENO1", "MUSCL2", "TENO5", "WENO7", "TENO7"],
         help="Schemes to test",
     )
     parser.add_argument("--cfl", type=float, default=0.02, help="CFL number (default: 0.02; small so RK3 temporal error is negligible)")

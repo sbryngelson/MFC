@@ -11,8 +11,12 @@ primitive-to-conserved covariance floor O(eps^3 * h^2).  For h > eps^(1/3)=0.22
 L2(rho(T) - rho(0)) measures accumulated scheme error; the comparison to rho(0)
 (the numerical IC) eliminates IC discretisation error, isolating the scheme error.
 
+WENO7/TENO7 require min N=64 per dimension (MFC constraint: N >= 5 * weno_order = 35).
+With only N=64 and N=128 available from the default resolution set, the fitted rate
+is a single pairwise value; thresholds are set conservatively.
+
 Usage:
-    python toolchain/mfc/test/run_convergence.py [--no-build] [--resolutions 16 32 64]
+    python toolchain/mfc/test/run_convergence.py [--no-build] [--resolutions 32 64 128]
 """
 
 import argparse
@@ -30,19 +34,24 @@ import numpy as np
 CASE = "examples/2D_isentropicvortex_convergence/case.py"
 MFC = "./mfc.sh"
 
-# (label, extra_args, expected_order, tolerance)
+# (label, extra_args, expected_order, tolerance, min_N, max_N)
 # With eps=0.01 and N=32..128 the prim->cons covariance error O(eps^3 h^2) is
 # well below the scheme's spatial error O(eps^2 h^p), so each scheme shows its
 # nominal rate.  The tolerance is the allowable shortfall from the nominal order.
 #
-# WENO3 note: at N=32-128 the rate is ~2.0-2.2 (pre-asymptotic; approaches 3
-# at finer grids) — still clearly above the 1D result (1.77, smooth-extremum
-# degradation), which is what this test is designed to show.  Threshold 1.8.
+# WENO3: at N=32-128 the rate is ~2.0-2.2 (pre-asymptotic; approaches 3 at
+#   finer grids).  Threshold 1.8.
+# WENO7/TENO7: require N >= 35 (MFC stencil constraint), so min_N=64.  With
+#   only N=64,128 in the default set the rate is a single pairwise value;
+#   thresholds set conservatively pending actual run data.
 SCHEMES = [
-    ("WENO5", ["--order", "5"], 5, 1.0),
-    ("WENO3", ["--order", "3"], 3, 1.2),
-    ("WENO1", ["--order", "1"], 1, 0.4),
-    ("MUSCL2", ["--muscl"], 2, 0.5),
+    ("WENO5", ["--order", "5"], 5, 1.0, 32, None),
+    ("WENO3", ["--order", "3"], 3, 1.2, 32, None),
+    ("WENO1", ["--order", "1"], 1, 0.4, 32, None),
+    ("MUSCL2", ["--muscl"], 2, 0.5, 32, None),
+    ("TENO5", ["--order", "5", "--teno", "--teno-ct", "1e-6"], 5, 1.0, 32, None),
+    ("WENO7", ["--order", "7"], 7, 3.0, 64, None),
+    ("TENO7", ["--order", "7", "--teno", "--teno-ct", "1e-9"], 7, 3.0, 64, None),
 ]
 
 
@@ -119,7 +128,11 @@ def run_case(tmpdir: str, N: int, extra_args: list):
     return Nt, os.path.join(tmpdir, f"N{N}")
 
 
-def test_scheme(label, extra_args, expected_order, tol, resolutions):
+def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None, max_N=None):
+    if min_N is not None:
+        resolutions = [N for N in resolutions if N >= min_N]
+    if max_N is not None:
+        resolutions = [N for N in resolutions if N <= max_N]
     print(f"\n{'=' * 60}")
     print(f"  {label}  (need rate >= {expected_order - tol:.1f})")
     print(f"{'=' * 60}")
@@ -166,7 +179,7 @@ def main():
     parser = argparse.ArgumentParser(description="MFC convergence-rate verification")
     parser.add_argument("--no-build", action="store_true", help="Skip build step")
     parser.add_argument("--resolutions", type=int, nargs="+", default=[32, 64, 128], help="Grid resolutions (default: 32 64 128; N<32 unsupported for WENO5)")
-    parser.add_argument("--schemes", nargs="+", default=["WENO5", "WENO3", "WENO1", "MUSCL2"], help="Schemes to test (default: all)")
+    parser.add_argument("--schemes", nargs="+", default=["WENO5", "WENO3", "WENO1", "MUSCL2", "TENO5", "WENO7", "TENO7"], help="Schemes to test (default: all)")
     args = parser.parse_args()
 
     if not args.no_build:
@@ -180,11 +193,11 @@ def main():
             sys.exit(1)
 
     results = {}
-    for label, extra_args, expected_order, tol in SCHEMES:
+    for label, extra_args, expected_order, tol, min_N, max_N in SCHEMES:
         if label not in args.schemes:
             continue
         try:
-            passed = test_scheme(label, extra_args, expected_order, tol, args.resolutions)
+            passed = test_scheme(label, extra_args, expected_order, tol, args.resolutions, min_N, max_N)
         except Exception as e:
             print(f"  ERROR: {e}")
             passed = False
