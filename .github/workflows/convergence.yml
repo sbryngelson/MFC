@@ -37,4 +37,4 @@ jobs:
       - name: Run convergence tests
         run: |
           python toolchain/mfc/test/run_convergence.py \
-            --resolutions 32 64 128
+            --resolutions 16 32 64

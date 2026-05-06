@@ -2,15 +2,17 @@
 """
 Convergence-rate verification for MFC's 2D isentropic vortex problem.
 
-Uses hcid=283: 3-pt Gauss-Legendre primitive-variable cell averages as the IC.
-With periodic BCs and a stationary vortex, L2(rho(T)-rho(0)) measures the
-scheme's dissipation error. An O(h^2) acoustic floor (from the gradient of
-cell-averaged pressure) limits high-order WENO schemes to observed rates near 2
-for practical resolutions (N=32-128); expected rates are only achieved at N>450.
-Tolerances are set to reflect empirically achievable rates.
+Uses hcid=283: 3-pt Gauss-Legendre cell averages of conserved variables as IC.
+The vortex strength eps=0.01 (set in case.py) is chosen so that the dominant
+error source is the WENO spatial truncation error O(eps^2 * h^p), not the
+primitive-to-conserved covariance floor O(eps^3 * h^2).  For h > eps^(1/3)=0.22
+(i.e., N < 46 per dimension), the p-th order scheme shows rate p.
+
+L2(rho(T) - rho(0)) measures accumulated scheme error; the comparison to rho(0)
+(the numerical IC) eliminates IC discretisation error, isolating the scheme error.
 
 Usage:
-    python toolchain/mfc/test/run_convergence.py [--no-build] [--resolutions 32 64 128]
+    python toolchain/mfc/test/run_convergence.py [--no-build] [--resolutions 16 32 64]
 """
 
 import argparse
@@ -29,18 +31,12 @@ CASE = "examples/2D_isentropicvortex_convergence/case.py"
 MFC = "./mfc.sh"
 
 # (label, extra_args, expected_order, tolerance)
-# The stationary isentropic vortex has an O(h^2) acoustic floor: the gradient
-# of cell-averaged pressure on a Cartesian grid differs from the true gradient
-# by O(h^2), driving acoustic oscillations at that amplitude. This floor limits
-# high-order schemes (WENO3/5) to observed rates near 2 for practical N (32-128).
-# Tolerances below reflect the achievable rates from empirical testing:
-#   WENO5:  rate ~2.1  (floor dominates for N < ~450)
-#   WENO3:  rate ~2.4  (approaching floor)
-#   WENO1:  rate ~0.64
-#   MUSCL2: rate ~1.85
+# With eps=0.01 and N=16..64 the prim->cons covariance error O(eps^3 h^2) is
+# well below the scheme's spatial error O(eps^2 h^p), so each scheme shows its
+# nominal rate.  The tolerance is the allowable shortfall from the nominal order.
 SCHEMES = [
-    ("WENO5", ["--order", "5"], 5, 3.5),  # acoustic floor limits rate to ~2
-    ("WENO3", ["--order", "3"], 3, 0.75),  # approaching acoustic floor, rate ~2.4
+    ("WENO5", ["--order", "5"], 5, 1.0),
+    ("WENO3", ["--order", "3"], 3, 0.75),
     ("WENO1", ["--order", "1"], 1, 0.4),
     ("MUSCL2", ["--muscl"], 2, 0.5),
 ]
@@ -165,7 +161,7 @@ def test_scheme(label, extra_args, expected_order, tol, resolutions):
 def main():
     parser = argparse.ArgumentParser(description="MFC convergence-rate verification")
     parser.add_argument("--no-build", action="store_true", help="Skip build step")
-    parser.add_argument("--resolutions", type=int, nargs="+", default=[32, 64, 128], help="Grid resolutions (default: 32 64 128)")
+    parser.add_argument("--resolutions", type=int, nargs="+", default=[16, 32, 64], help="Grid resolutions (default: 16 32 64)")
     parser.add_argument("--schemes", nargs="+", default=["WENO5", "WENO3", "WENO1", "MUSCL2"], help="Schemes to test (default: all)")
     args = parser.parse_args()
 
