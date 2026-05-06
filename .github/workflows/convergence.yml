@@ -1,15 +1,7 @@
 name: Convergence
 
 on:
-  push:
-    branches: [master]
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   convergence-1d:
