@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
 """
-1D periodic advection convergence case.
+1D single-fluid Euler convergence case.
 
-Two identical fluids (same gamma, same density = 1) with a sine-wave volume
-fraction.  Since both EOS are identical, alpha_1 advects passively at u = 1
-with no acoustic coupling.  After exactly one period (T = L/u = 1), the
-exact solution equals the IC, so L2(q_cons_vf1(T) - q_cons_vf1(0)) is
-purely the scheme's accumulated spatial truncation error.
+Single fluid with a density sine wave: rho = 1 + 0.2*sin(2*pi*x).
+Constant velocity u=1 and pressure p=1.  For this IC, the Euler equations
+reduce to pure advection of all variables at speed u=1.  After exactly one
+period (T = L/u = 1), the exact solution equals the IC, so
+L2(rho(T) - rho(0)) measures the accumulated scheme spatial truncation error.
+
+No non-conservative alpha equation — clean benchmark for WENO/MUSCL rates.
 """
 
 import argparse
 import json
 import math
 
-parser = argparse.ArgumentParser(description="1D advection convergence case")
+parser = argparse.ArgumentParser(description="1D Euler convergence case")
 parser.add_argument("--mfc", type=json.loads, default="{}", metavar="DICT")
 parser.add_argument("-N", type=int, default=64, help="Grid points (default: 64)")
 parser.add_argument("--order", type=int, default=5, help="WENO order: 1, 3, or 5")
 parser.add_argument("--muscl", action="store_true", help="Use MUSCL-2 instead of WENO")
 parser.add_argument("--cfl", type=float, default=0.4, help="CFL number (default: 0.4)")
-parser.add_argument("--mp-weno", action="store_true", help="Enable MP-WENO limiter")
-parser.add_argument("--muscl-lim", type=int, default=1, help="MUSCL limiter: 1=minmod 2=MC 3=VanAlbada 4=VanLeer 5=Superbee")
+parser.add_argument("--no-mapped", action="store_true", help="Disable mapped WENO")
+parser.add_argument("--muscl-lim", type=int, default=0, help="MUSCL limiter: 0=unlimited 1=minmod ... (default: 0)")
 args = parser.parse_args()
 
 gamma = 1.4
@@ -29,13 +31,12 @@ m = N - 1
 L = 1.0
 dx = L / N
 
-# Max wave speed: acoustic speed + convective speed
-# c_sound = sqrt(gamma * p / rho) = sqrt(gamma) ≈ 1.183 (for p=1, rho=1)
-c_max = math.sqrt(gamma) + 1.0
+# c_sound = sqrt(gamma * p / rho) = sqrt(gamma) for p=1, rho=1
+c_max = math.sqrt(gamma) + 1.0  # acoustic + convective
 dt = args.cfl * dx / c_max
-T_end = 1.0  # exactly one period: u=1, L=1
+T_end = 1.0
 Nt = max(4, math.ceil(T_end / dt))
-dt = T_end / Nt  # snap to land exactly on T_end
+dt = T_end / Nt
 
 if args.muscl:
     scheme_params = {
@@ -50,9 +51,9 @@ else:
         "weno_eps": 1.0e-16,
         "weno_Re_flux": "F",
         "weno_avg": "F",
-        "mapped_weno": "F" if args.order == 1 else "T",
+        "mapped_weno": "F" if (args.order == 1 or args.no_mapped) else "T",
         "null_weights": "F",
-        "mp_weno": "T" if args.mp_weno else "F",
+        "mp_weno": "F",
     }
 
 print(
@@ -71,7 +72,7 @@ print(
             "num_patches": 1,
             "model_eqns": 2,
             "alt_soundspeed": "F",
-            "num_fluids": 2,
+            "num_fluids": 1,
             "mpp_lim": "F",
             "mixture_err": "F",
             "time_stepper": 3,
@@ -89,14 +90,10 @@ print(
             "patch_icpp(1)%length_x": L,
             "patch_icpp(1)%vel(1)": 1.0,
             "patch_icpp(1)%pres": 1.0,
-            "patch_icpp(1)%alpha_rho(1)": "0.5 + 0.2 * sin(2.0 * pi * x / lx)",
-            "patch_icpp(1)%alpha_rho(2)": "0.5 - 0.2 * sin(2.0 * pi * x / lx)",
-            "patch_icpp(1)%alpha(1)": "0.5 + 0.2 * sin(2.0 * pi * x / lx)",
-            "patch_icpp(1)%alpha(2)": "0.5 - 0.2 * sin(2.0 * pi * x / lx)",
+            "patch_icpp(1)%alpha_rho(1)": "1.0 + 0.2 * sin(2.0 * pi * x / lx)",
+            "patch_icpp(1)%alpha(1)": 1.0,
             "fluid_pp(1)%gamma": 1.0 / (gamma - 1.0),
             "fluid_pp(1)%pi_inf": 0.0,
-            "fluid_pp(2)%gamma": 1.0 / (gamma - 1.0),
-            "fluid_pp(2)%pi_inf": 0.0,
             **scheme_params,
         }
     )

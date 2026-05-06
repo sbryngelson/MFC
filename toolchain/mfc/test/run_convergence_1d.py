@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Convergence-rate verification for MFC's 1D periodic advection problem.
+Convergence-rate verification for MFC's 1D single-fluid Euler equations.
 
-Two identical fluids (same EOS, rho=1) with a sine-wave volume fraction.
+Single fluid with a density sine wave: rho = 1 + 0.2*sin(2*pi*x), u=1, p=1.
 After exactly one period (T=1, u=1, L=1), the exact solution equals the IC.
-L2(q_cons_vf1(T) - q_cons_vf1(0)) measures the accumulated scheme error.
+L2(rho(T) - rho(0)) measures the accumulated scheme spatial truncation error.
+No non-conservative alpha equation — clean benchmark for all schemes.
 
 CFL=0.02 by default so that RK3 temporal error O(dt^3)~O(h^3) is negligible
 relative to the spatial error at all tested resolutions, allowing WENO5 to
@@ -15,6 +16,10 @@ Jiang-Shu smoothness indicators do not converge to optimal weights at critical
 points where f'=0).  The expected rate for WENO3 here is therefore 2, not 3;
 the 2D isentropic vortex test (run_convergence.py) verifies WENO3 rate 3 on
 a problem without smooth-extremum contamination.
+
+MUSCL2 uses muscl_lim=0 (unlimited central-difference) by default.  TVD
+limiters clip slopes to zero at smooth extrema and stall at 1st order on the
+sine wave; the unlimited limiter preserves 2nd-order convergence everywhere.
 
 Usage:
     python toolchain/mfc/test/run_convergence_1d.py [--no-build] [--resolutions 32 64 128]
@@ -32,7 +37,7 @@ import tempfile
 
 import numpy as np
 
-CASE = "examples/1D_advection_convergence/case.py"
+CASE = "examples/1D_euler_convergence/case.py"
 MFC = "./mfc.sh"
 
 SCHEMES = [
@@ -168,6 +173,7 @@ def main():
         help="Schemes to test",
     )
     parser.add_argument("--cfl", type=float, default=0.02, help="CFL number (default: 0.02; small so RK3 temporal error is negligible)")
+    parser.add_argument("--muscl-lim", type=int, default=0, help="MUSCL limiter (0=unlimited 1=minmod ...; default: 0)")
     args = parser.parse_args()
 
     if not args.no_build:
@@ -179,7 +185,7 @@ def main():
         if result.returncode != 0:
             sys.exit(1)
 
-    cfl_extra = ["--cfl", str(args.cfl)]
+    cfl_extra = ["--cfl", str(args.cfl), "--muscl-lim", str(args.muscl_lim)]
 
     results = {}
     for label, extra_args, expected_order, tol in SCHEMES:

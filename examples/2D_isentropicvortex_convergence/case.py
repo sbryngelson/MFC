@@ -15,6 +15,7 @@ parser.add_argument("--mfc", type=json.loads, default="{}", metavar="DICT")
 parser.add_argument("-N", type=int, default=32, help="Grid points per dim (default: 32)")
 parser.add_argument("--order", type=int, default=5, help="WENO order: 1, 3, or 5 (default: 5)")
 parser.add_argument("--muscl", action="store_true", help="Use MUSCL instead of WENO")
+parser.add_argument("--muscl-lim", type=int, default=0, help="MUSCL limiter: 0=unlimited 1=minmod ... (default: 0)")
 args = parser.parse_args()
 
 gamma = 1.4
@@ -34,7 +35,7 @@ if args.muscl:
     scheme_params = {
         "recon_type": 2,
         "muscl_order": 2,
-        "muscl_lim": 1,
+        "muscl_lim": args.muscl_lim,
     }
 else:
     scheme_params = {

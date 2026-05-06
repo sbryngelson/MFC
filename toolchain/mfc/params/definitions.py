@@ -609,8 +609,8 @@ CONSTRAINTS = {
         "value_labels": {1: "1st order", 2: "2nd order"},
     },
     "muscl_lim": {
-        "choices": [1, 2, 3, 4, 5],
-        "value_labels": {1: "minmod", 2: "MC", 3: "Van Albada", 4: "Van Leer", 5: "SUPERBEE"},
+        "choices": [0, 1, 2, 3, 4, 5],
+        "value_labels": {0: "unlimited", 1: "minmod", 2: "MC", 3: "Van Albada", 4: "Van Leer", 5: "SUPERBEE"},
     },
     # Time stepping
     "time_stepper": {
