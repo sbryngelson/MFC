@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""
+Convergence-rate verification for MFC's 1D periodic advection problem.
+
+Two identical fluids (same EOS, rho=1) with a sine-wave volume fraction.
+After exactly one period (T=1, u=1, L=1), the exact solution equals the IC.
+L2(q_cons_vf1(T) - q_cons_vf1(0)) measures the accumulated scheme error.
+
+CFL=0.02 by default so that RK3 temporal error O(dt^3)~O(h^3) is negligible
+relative to the spatial error at all tested resolutions, allowing WENO5 to
+show its true 5th-order rate.
+
+WENO3-JS degrades to 2nd order at smooth extrema (Henrick et al. 2005, the
+Jiang-Shu smoothness indicators do not converge to optimal weights at critical
+points where f'=0).  The expected rate for WENO3 here is therefore 2, not 3;
+the 2D isentropic vortex test (run_convergence.py) verifies WENO3 rate 3 on
+a problem without smooth-extremum contamination.
+
+Usage:
+    python toolchain/mfc/test/run_convergence_1d.py [--no-build] [--resolutions 32 64 128]
+"""
+
+import argparse
+import json
+import math
+import os
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+
+import numpy as np
+
+CASE = "examples/1D_advection_convergence/case.py"
+MFC = "./mfc.sh"
+
+SCHEMES = [
+    ("WENO5", ["--order", "5"], 5, 1.0),
+    # WENO3-JS degrades to 2nd order at smooth extrema; expected rate is 2 here.
+    ("WENO3", ["--order", "3"], 2, 0.5),
+    ("WENO1", ["--order", "1"], 1, 0.4),
+    ("MUSCL2", ["--muscl"], 2, 0.5),
+]
+
+
+def read_vf1_1d(run_dir: str, step: int) -> np.ndarray:
+    """Read q_cons_vf1 from 1D p_all binary output."""
+    path = os.path.join(run_dir, "p_all", "p0", str(step), "q_cons_vf1.dat")
+    with open(path, "rb") as f:
+        rec_len = struct.unpack("i", f.read(4))[0]
+        data = np.frombuffer(f.read(rec_len), dtype=np.float64)
+        f.read(4)
+    return data.copy()
+
+
+def l2_error(a: np.ndarray, b: np.ndarray, dx: float) -> float:
+    return float(np.sqrt(np.sum((a - b) ** 2) * dx))
+
+
+def convergence_rate(errors: list, resolutions: list) -> float:
+    log_dx = np.log(1.0 / np.array(resolutions, dtype=float))
+    log_err = np.log(np.array(errors, dtype=float))
+    rate, _ = np.polyfit(log_dx, log_err, 1)
+    return float(rate)
+
+
+def run_case(tmpdir: str, N: int, extra_args: list):
+    """Run the 1D advection case at resolution N. Returns (Nt, run_dir)."""
+    result = subprocess.run(
+        [sys.executable, CASE, "--mfc", "{}", "-N", str(N)] + extra_args,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"case.py failed:\n{result.stderr}")
+    cfg = json.loads(result.stdout)
+    Nt = int(cfg["t_step_stop"])
+
+    cmd = [
+        MFC,
+        "run",
+        CASE,
+        "--no-build",
+        "-t",
+        "pre_process",
+        "simulation",
+        "-n",
+        "1",
+        "--",
+        "-N",
+        str(N),
+    ] + extra_args
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=os.getcwd(), check=False)
+    if result.returncode != 0:
+        print(result.stdout[-3000:])
+        raise RuntimeError(f"./mfc.sh run failed for N={N}")
+
+    case_dir = os.path.dirname(CASE)
+    src = os.path.join(case_dir, "p_all")
+    dst = os.path.join(tmpdir, f"N{N}", "p_all")
+    if os.path.exists(dst):
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
+    shutil.rmtree(src, ignore_errors=True)
+    shutil.rmtree(os.path.join(case_dir, "D"), ignore_errors=True)
+
+    return Nt, os.path.join(tmpdir, f"N{N}")
+
+
+def test_scheme(label, extra_args, expected_order, tol, resolutions):
+    print(f"\n{'=' * 60}")
+    print(f"  {label}  (need rate >= {expected_order - tol:.1f})")
+    print(f"{'=' * 60}")
+
+    errors = []
+    nts = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for N in resolutions:
+            dx = 1.0 / N
+            Nt, run_dir = run_case(tmpdir, N, extra_args)
+            nts.append(Nt)
+            vf0 = read_vf1_1d(run_dir, 0)
+            vfT = read_vf1_1d(run_dir, Nt)
+            err = l2_error(vfT, vf0, dx)
+            errors.append(err)
+            print(f"  N={N}: Nt={Nt}, |vf0|={len(vf0)}, err={err:.4e}")
+
+    rates = [None]
+    for i in range(1, len(resolutions)):
+        log_dx0 = math.log(1.0 / resolutions[i - 1])
+        log_dx1 = math.log(1.0 / resolutions[i])
+        rates.append((math.log(errors[i]) - math.log(errors[i - 1])) / (log_dx1 - log_dx0))
+
+    print()
+    print(f"  {'N':>6}  {'Nt':>6}  {'dx':>10}  {'L2 error':>14}  {'rate':>8}")
+    print(f"  {'-' * 6}  {'-' * 6}  {'-' * 10}  {'-' * 14}  {'-' * 8}")
+    for i, N in enumerate(resolutions):
+        r_str = f"{rates[i]:>8.2f}" if rates[i] is not None else f"{'---':>8}"
+        print(f"  {N:>6}  {nts[i]:>6}  {1.0 / N:>10.6f}  {errors[i]:>14.6e}  {r_str}")
+
+    if len(resolutions) > 1:
+        overall = convergence_rate(errors, resolutions)
+        print(f"\n  Fitted rate: {overall:.2f}  (need >= {expected_order - tol:.1f})")
+        passed = overall >= expected_order - tol
+    else:
+        passed = True
+
+    print(f"  {'PASS' if passed else 'FAIL'}")
+    return passed
+
+
+def main():
+    parser = argparse.ArgumentParser(description="MFC 1D advection convergence-rate verification")
+    parser.add_argument("--no-build", action="store_true", help="Skip build step")
+    parser.add_argument(
+        "--resolutions",
+        type=int,
+        nargs="+",
+        default=[32, 64, 128],
+        help="Grid resolutions to test (default: 32 64 128)",
+    )
+    parser.add_argument(
+        "--schemes",
+        nargs="+",
+        default=["WENO5", "WENO3", "WENO1", "MUSCL2"],
+        help="Schemes to test",
+    )
+    parser.add_argument("--cfl", type=float, default=0.02, help="CFL number (default: 0.02; small so RK3 temporal error is negligible)")
+    args = parser.parse_args()
+
+    if not args.no_build:
+        print("Building pre_process and simulation...")
+        result = subprocess.run(
+            [MFC, "build", "-t", "pre_process", "simulation", "-j", "8"],
+            check=False,
+        )
+        if result.returncode != 0:
+            sys.exit(1)
+
+    cfl_extra = ["--cfl", str(args.cfl)]
+
+    results = {}
+    for label, extra_args, expected_order, tol in SCHEMES:
+        if label not in args.schemes:
+            continue
+        try:
+            passed = test_scheme(label, extra_args + cfl_extra, expected_order, tol, args.resolutions)
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            passed = False
+        results[label] = passed
+
+    print(f"\n{'=' * 60}")
+    print("  Summary")
+    print(f"{'=' * 60}")
+    all_pass = True
+    for label, passed in results.items():
+        print(f"  {label:<12} {'PASS' if passed else 'FAIL'}")
+        if not passed:
+            all_pass = False
+
+    sys.exit(0 if all_pass else 1)
+
+
+if __name__ == "__main__":
+    main()

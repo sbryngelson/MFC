@@ -12,7 +12,34 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  convergence:
+  convergence-1d:
+    name: "1D Advection Convergence"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Ubuntu
+        run: |
+          sudo apt update -y
+          sudo apt install -y cmake gcc g++ python3 python3-dev \
+                   openmpi-bin libopenmpi-dev
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Initialize MFC
+        run: ./mfc.sh init
+
+      - name: Run 1D convergence tests
+        run: |
+          python toolchain/mfc/test/run_convergence_1d.py \
+            --resolutions 32 64 128
+
+  convergence-2d:
     name: "2D Isentropic Vortex Convergence"
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -34,7 +61,7 @@ jobs:
       - name: Initialize MFC
         run: ./mfc.sh init
 
-      - name: Run convergence tests
+      - name: Run 2D convergence tests
         run: |
           python toolchain/mfc/test/run_convergence.py \
             --resolutions 16 32 64
