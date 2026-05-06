@@ -1536,6 +1536,7 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                 "1D_titarevtorro_analytical",
                 "2D_acoustic_pulse_analytical",
                 "2D_isentropicvortex_analytical",
+                "2D_isentropicvortex_convergence",
                 "2D_zero_circ_vortex_analytical",
                 "3D_TaylorGreenVortex_analytical",
                 "3D_IGR_TaylorGreenVortex_nvidia",
