@@ -57,8 +57,9 @@ MFC = "./mfc.sh"
 #   WENO1  : full range [128,1024]; rate 0.97.
 #   MUSCL2 : full range [128,1024]; unlimited slope, rate exactly 2.00.
 #   TENO5  : same range as WENO5; CT=1e-6; rate matches WENO5 on smooth problems.
-#   WENO7  : CFL=0.005, cap at N=256 — machine-precision floor near N=512;
-#            rate ≥6.5 (fits ≥6.0 threshold with tolerance 0.5 after temporal fix).
+#   WENO7  : CFL=0.005, range [64,128] — at N=256 the spatial error (~1.7e-14)
+#            falls below the round-off accumulation floor (~2.5e-12 for ~28M
+#            cell-steps), so only N=64 and N=128 give a clean rate ≥6.5.
 #   TENO7  : same range and CFL as WENO7; CT=1e-9.
 SCHEMES = [
     ("WENO5", ["--order", "5", "--cfl", "0.02"], 5, 0.2, 128, 512),
@@ -66,8 +67,8 @@ SCHEMES = [
     ("WENO1", ["--order", "1", "--cfl", "0.02"], 1, 0.05, 128, None),
     ("MUSCL2", ["--muscl", "--cfl", "0.02"], 2, 0.1, 128, None),
     ("TENO5", ["--order", "5", "--teno", "--teno-ct", "1e-6", "--cfl", "0.02"], 5, 0.2, 128, 512),
-    ("WENO7", ["--order", "7", "--cfl", "0.005"], 7, 0.5, 128, 256),
-    ("TENO7", ["--order", "7", "--teno", "--teno-ct", "1e-9", "--cfl", "0.005"], 7, 0.5, 128, 256),
+    ("WENO7", ["--order", "7", "--cfl", "0.005"], 7, 0.5, 64, 128),
+    ("TENO7", ["--order", "7", "--teno", "--teno-ct", "1e-9", "--cfl", "0.005"], 7, 0.5, 64, 128),
 ]
 
 
@@ -187,8 +188,8 @@ def main():
         "--resolutions",
         type=int,
         nargs="+",
-        default=[128, 256, 512, 1024],
-        help="Grid resolutions to test (default: 128 256 512 1024)",
+        default=[64, 128, 256, 512, 1024],
+        help="Grid resolutions to test (default: 64 128 256 512 1024)",
     )
     parser.add_argument(
         "--schemes",

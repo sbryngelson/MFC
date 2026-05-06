@@ -11,11 +11,13 @@ primitive-to-conserved covariance floor O(eps^3 * h^2).  For h > eps^(1/3)=0.22
 L2(rho(T) - rho(0)) measures accumulated scheme error; the comparison to rho(0)
 (the numerical IC) eliminates IC discretisation error, isolating the scheme error.
 
-WENO7/TENO7 require min N=64 per dimension (MFC constraint: N >= 5 * weno_order = 35).
-They also need CFL=0.005: at CFL=0.4 the RK3 temporal error dominates (ratio
-temporal/spatial >> 1 because (CFL*h)^3 >> h^7 for the tested h values), giving
-a spurious rate of ~3.  With CFL=0.005 the temporal error drops by (0.005/0.4)^3
-= 1/51200, making spatial error dominant and recovering rate ≈7.
+WENO7/TENO7 are NOT tested here.  For the isentropic vortex, the IC
+primitive→conserved covariance error is O(eps^3 * h^2).  The WENO7 scheme
+error is O(eps^2 * h^7).  Scheme error dominates only when h > eps^(1/5);
+with eps=0.01 that requires h > 0.40, i.e., N < 25.  At N=64-128 the
+covariance floor dominates and the measured rate is ~2, not 7.
+WENO7/TENO7 7th-order convergence is verified by the 1D test (run_convergence_1d.py)
+which uses a pure advection problem that avoids this nonlinear floor.
 
 Usage:
     python toolchain/mfc/test/run_convergence.py [--resolutions 32 64 128]
@@ -43,17 +45,13 @@ MFC = "./mfc.sh"
 #
 # WENO3: at N=32-128 the rate is ~2.0-2.2 (pre-asymptotic; approaches 3 at
 #   finer grids).  Threshold 1.8.
-# WENO7/TENO7: require N >= 35 (MFC stencil constraint), so min_N=64.  Use
-#   CFL=0.005 to suppress RK3 temporal error (otherwise rate collapses to ~3).
-#   With N=64,128 the fitted rate is a single pairwise value; threshold >=6.0.
+# WENO7/TENO7 are omitted — see module docstring for why.
 SCHEMES = [
     ("WENO5", ["--order", "5"], 5, 1.0, 32, None),
     ("WENO3", ["--order", "3"], 3, 1.2, 32, None),
     ("WENO1", ["--order", "1"], 1, 0.4, 32, None),
     ("MUSCL2", ["--muscl"], 2, 0.5, 32, None),
     ("TENO5", ["--order", "5", "--teno", "--teno-ct", "1e-6"], 5, 1.0, 32, None),
-    ("WENO7", ["--order", "7", "--cfl", "0.005"], 7, 1.0, 64, None),
-    ("TENO7", ["--order", "7", "--teno", "--teno-ct", "1e-9", "--cfl", "0.005"], 7, 1.0, 64, None),
 ]
 
 
@@ -179,7 +177,7 @@ def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None,
 def main():
     parser = argparse.ArgumentParser(description="MFC convergence-rate verification")
     parser.add_argument("--resolutions", type=int, nargs="+", default=[32, 64, 128], help="Grid resolutions (default: 32 64 128; N<32 unsupported for WENO5)")
-    parser.add_argument("--schemes", nargs="+", default=["WENO5", "WENO3", "WENO1", "MUSCL2", "TENO5", "WENO7", "TENO7"], help="Schemes to test (default: all)")
+    parser.add_argument("--schemes", nargs="+", default=["WENO5", "WENO3", "WENO1", "MUSCL2", "TENO5"], help="Schemes to test (default: all)")
     args = parser.parse_args()
 
     results = {}

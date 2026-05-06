@@ -31,7 +31,7 @@ jobs:
         run: |
           source build/venv/bin/activate
           python toolchain/mfc/test/run_convergence_1d.py \
-            --resolutions 128 256 512 1024
+            --resolutions 64 128 256 512 1024
 
   convergence-2d:
     name: "2D Isentropic Vortex Convergence"
