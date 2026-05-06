@@ -40,16 +40,21 @@ import numpy as np
 CASE = "examples/1D_euler_convergence/case.py"
 MFC = "./mfc.sh"
 
-# (label, extra_args, expected_order, tolerance, max_N)
-# max_N caps the resolution list per scheme.  WENO5 hits the double-precision
-# floor around N=512 (error ~4e-12 after 56k steps); capping at 512 keeps the
-# fitted rate clean.  Other schemes are not limited.
+# (label, extra_args, expected_order, tolerance, min_N, max_N)
+# Per-scheme resolution bounds let each scheme run over the range where its
+# asymptotic order is cleanly visible:
+#   WENO5 : cap at N=512 — double-precision floor kills the rate at N=1024
+#           (error ~2.6e-12, rate collapses to 0.69); [128,512] gives 4.99.
+#   WENO3 : start at N=256 — skips the coarsest pre-asymptotic points;
+#           WENO3-JS degrades to 2nd order at smooth extrema (Henrick 2005),
+#           asymptote confirmed 1.99 at N=4096; [256,1024] gives ~1.87.
+#   WENO1 : full range [128,1024]; rate 0.97.
+#   MUSCL2: full range [128,1024]; unlimited slope, rate exactly 2.00.
 SCHEMES = [
-    ("WENO5", ["--order", "5"], 5, 1.0, 512),
-    # WENO3-JS degrades to 2nd order at smooth extrema; expected rate is 2 here.
-    ("WENO3", ["--order", "3"], 2, 0.5, None),
-    ("WENO1", ["--order", "1"], 1, 0.05, None),
-    ("MUSCL2", ["--muscl"], 2, 0.5, None),
+    ("WENO5", ["--order", "5"], 5, 0.2, 128, 512),
+    ("WENO3", ["--order", "3"], 2, 0.2, 256, None),
+    ("WENO1", ["--order", "1"], 1, 0.05, 128, None),
+    ("MUSCL2", ["--muscl"], 2, 0.1, 128, None),
 ]
 
 
@@ -118,7 +123,9 @@ def run_case(tmpdir: str, N: int, extra_args: list):
     return Nt, os.path.join(tmpdir, f"N{N}")
 
 
-def test_scheme(label, extra_args, expected_order, tol, resolutions, max_N=None):
+def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None, max_N=None):
+    if min_N is not None:
+        resolutions = [N for N in resolutions if N >= min_N]
     if max_N is not None:
         resolutions = [N for N in resolutions if N <= max_N]
     print(f"\n{'=' * 60}")
@@ -194,11 +201,11 @@ def main():
     cfl_extra = ["--cfl", str(args.cfl), "--muscl-lim", str(args.muscl_lim)]
 
     results = {}
-    for label, extra_args, expected_order, tol, max_N in SCHEMES:
+    for label, extra_args, expected_order, tol, min_N, max_N in SCHEMES:
         if label not in args.schemes:
             continue
         try:
-            passed = test_scheme(label, extra_args + cfl_extra, expected_order, tol, args.resolutions, max_N)
+            passed = test_scheme(label, extra_args + cfl_extra, expected_order, tol, args.resolutions, min_N, max_N)
         except Exception as e:
             print(f"  ERROR: {e}")
             passed = False
