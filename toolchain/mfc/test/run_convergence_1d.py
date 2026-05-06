@@ -40,12 +40,16 @@ import numpy as np
 CASE = "examples/1D_euler_convergence/case.py"
 MFC = "./mfc.sh"
 
+# (label, extra_args, expected_order, tolerance, max_N)
+# max_N caps the resolution list per scheme.  WENO5 hits the double-precision
+# floor around N=512 (error ~4e-12 after 56k steps); capping at 512 keeps the
+# fitted rate clean.  Other schemes are not limited.
 SCHEMES = [
-    ("WENO5", ["--order", "5"], 5, 1.0),
+    ("WENO5", ["--order", "5"], 5, 1.0, 512),
     # WENO3-JS degrades to 2nd order at smooth extrema; expected rate is 2 here.
-    ("WENO3", ["--order", "3"], 2, 0.5),
-    ("WENO1", ["--order", "1"], 1, 0.4),
-    ("MUSCL2", ["--muscl"], 2, 0.5),
+    ("WENO3", ["--order", "3"], 2, 0.5, None),
+    ("WENO1", ["--order", "1"], 1, 0.05, None),
+    ("MUSCL2", ["--muscl"], 2, 0.5, None),
 ]
 
 
@@ -114,7 +118,9 @@ def run_case(tmpdir: str, N: int, extra_args: list):
     return Nt, os.path.join(tmpdir, f"N{N}")
 
 
-def test_scheme(label, extra_args, expected_order, tol, resolutions):
+def test_scheme(label, extra_args, expected_order, tol, resolutions, max_N=None):
+    if max_N is not None:
+        resolutions = [N for N in resolutions if N <= max_N]
     print(f"\n{'=' * 60}")
     print(f"  {label}  (need rate >= {expected_order - tol:.1f})")
     print(f"{'=' * 60}")
@@ -163,8 +169,8 @@ def main():
         "--resolutions",
         type=int,
         nargs="+",
-        default=[32, 64, 128],
-        help="Grid resolutions to test (default: 32 64 128)",
+        default=[128, 256, 512, 1024],
+        help="Grid resolutions to test (default: 128 256 512 1024)",
     )
     parser.add_argument(
         "--schemes",
@@ -188,11 +194,11 @@ def main():
     cfl_extra = ["--cfl", str(args.cfl), "--muscl-lim", str(args.muscl_lim)]
 
     results = {}
-    for label, extra_args, expected_order, tol in SCHEMES:
+    for label, extra_args, expected_order, tol, max_N in SCHEMES:
         if label not in args.schemes:
             continue
         try:
-            passed = test_scheme(label, extra_args + cfl_extra, expected_order, tol, args.resolutions)
+            passed = test_scheme(label, extra_args + cfl_extra, expected_order, tol, args.resolutions, max_N)
         except Exception as e:
             print(f"  ERROR: {e}")
             passed = False

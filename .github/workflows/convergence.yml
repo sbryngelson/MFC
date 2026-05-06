@@ -37,7 +37,7 @@ jobs:
       - name: Run 1D convergence tests
         run: |
           python toolchain/mfc/test/run_convergence_1d.py \
-            --resolutions 32 64 128 256
+            --resolutions 128 256 512 1024
 
   convergence-2d:
     name: "2D Isentropic Vortex Convergence"
