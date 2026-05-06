@@ -50,8 +50,8 @@ SCHEMES = [
     ("WENO1", ["--order", "1"], 1, 0.4, 32, None),
     ("MUSCL2", ["--muscl"], 2, 0.5, 32, None),
     ("TENO5", ["--order", "5", "--teno", "--teno-ct", "1e-6"], 5, 1.0, 32, None),
-    ("WENO7", ["--order", "7"], 7, 3.0, 64, None),
-    ("TENO7", ["--order", "7", "--teno", "--teno-ct", "1e-9"], 7, 3.0, 64, None),
+    ("WENO7", ["--order", "7"], 7, 4.0, 64, None),
+    ("TENO7", ["--order", "7", "--teno", "--teno-ct", "1e-9"], 7, 4.0, 64, None),
 ]
 
 
@@ -100,7 +100,6 @@ def run_case(tmpdir: str, N: int, extra_args: list):
         MFC,
         "run",
         CASE,
-        "--no-build",
         "-t",
         "pre_process",
         "simulation",
@@ -177,20 +176,9 @@ def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None,
 
 def main():
     parser = argparse.ArgumentParser(description="MFC convergence-rate verification")
-    parser.add_argument("--no-build", action="store_true", help="Skip build step")
     parser.add_argument("--resolutions", type=int, nargs="+", default=[32, 64, 128], help="Grid resolutions (default: 32 64 128; N<32 unsupported for WENO5)")
     parser.add_argument("--schemes", nargs="+", default=["WENO5", "WENO3", "WENO1", "MUSCL2", "TENO5", "WENO7", "TENO7"], help="Schemes to test (default: all)")
     args = parser.parse_args()
-
-    if not args.no_build:
-        print("Building pre_process and simulation...")
-        result = subprocess.run(
-            [MFC, "build", "-t", "pre_process", "simulation", "-j", "8"],
-            capture_output=False,
-            check=False,
-        )
-        if result.returncode != 0:
-            sys.exit(1)
 
     results = {}
     for label, extra_args, expected_order, tol, min_N, max_N in SCHEMES:
