@@ -55,17 +55,34 @@ SCHEMES = [
 N_SPATIAL = 512  # fixed spatial resolution
 
 
-def read_vf1_1d(run_dir: str, step: int, num_ranks: int = 1) -> np.ndarray:
-    """Read q_cons_vf1 from all MPI ranks and concatenate into one 1D array."""
+def read_cons_var(run_dir: str, step: int, var_idx: int, num_ranks: int = 1) -> np.ndarray:
+    """Read q_cons_vf{var_idx} from all MPI ranks and concatenate into one 1D array."""
     chunks = []
     for rank in range(num_ranks):
-        path = os.path.join(run_dir, "p_all", f"p{rank}", str(step), "q_cons_vf1.dat")
+        path = os.path.join(run_dir, "p_all", f"p{rank}", str(step), f"q_cons_vf{var_idx}.dat")
         with open(path, "rb") as f:
             rec_len = struct.unpack("i", f.read(4))[0]
             data = np.frombuffer(f.read(rec_len), dtype=np.float64)
             f.read(4)
         chunks.append(data.copy())
     return np.concatenate(chunks)
+
+
+# 1D single-fluid Euler (model_eqns=2, num_fluids=1): vf1=ρ, vf2=ρu, vf3=E
+CONS_VARS_1D = [("density", 1), ("x-momentum", 2), ("energy", 3)]
+CONS_TOL = 1e-10
+
+
+def conservation_errors(run_dir: str, Nt: int, cell_vol: float, var_list: list, num_ranks: int) -> dict:
+    """Return relative conservation error |Σq(T) - Σq(0)| / |Σq(0)| for each variable."""
+    errs = {}
+    for name, idx in var_list:
+        q0 = read_cons_var(run_dir, 0, idx, num_ranks)
+        qT = read_cons_var(run_dir, Nt, idx, num_ranks)
+        s0 = float(np.sum(q0)) * cell_vol
+        sT = float(np.sum(qT)) * cell_vol
+        errs[name] = abs(sT - s0) / (abs(s0) + 1e-300)
+    return errs
 
 
 def l2_error(a: np.ndarray, b: np.ndarray, dx: float) -> float:
@@ -128,16 +145,18 @@ def test_scheme(label, extra_args, expected_order, tol, cfls, num_ranks=1):
     dts = []
     nts = []
     dx = 1.0 / N_SPATIAL
+    all_cons_errs = []
 
     with tempfile.TemporaryDirectory() as tmpdir:
         for cfl in cfls:
             dt, Nt, run_dir = run_case(tmpdir, cfl, extra_args, num_ranks)
             dts.append(dt)
             nts.append(Nt)
-            vf0 = read_vf1_1d(run_dir, 0, num_ranks)
-            vfT = read_vf1_1d(run_dir, Nt, num_ranks)
+            vf0 = read_cons_var(run_dir, 0, 1, num_ranks)
+            vfT = read_cons_var(run_dir, Nt, 1, num_ranks)
             err = l2_error(vfT, vf0, dx)
             errors.append(err)
+            all_cons_errs.append(conservation_errors(run_dir, Nt, dx, CONS_VARS_1D, num_ranks))
 
     rates = [None]
     for i in range(1, len(cfls)):
@@ -156,11 +175,21 @@ def test_scheme(label, extra_args, expected_order, tol, cfls, num_ranks=1):
         log_err = np.log(np.array(errors, dtype=float))
         overall, _ = np.polyfit(log_dt, log_err, 1)
         print(f"\n  Fitted rate: {overall:.2f}  (need >= {expected_order - tol:.1f})")
-        passed = overall >= expected_order - tol
+        rate_passed = overall >= expected_order - tol
     else:
         print("\n  (need >= 2 CFL values to compute rate)")
-        passed = True
+        rate_passed = True
 
+    print(f"\n  Conservation (need rel. error < {CONS_TOL:.0e}):")
+    cons_passed = True
+    for name, _ in CONS_VARS_1D:
+        max_err = max(ce[name] for ce in all_cons_errs)
+        ok = max_err < CONS_TOL
+        print(f"    {name:<14}: max = {max_err:.2e}  {'OK' if ok else 'FAIL'}")
+        if not ok:
+            cons_passed = False
+
+    passed = rate_passed and cons_passed
     print(f"  {'PASS' if passed else 'FAIL'}")
     return passed
 
