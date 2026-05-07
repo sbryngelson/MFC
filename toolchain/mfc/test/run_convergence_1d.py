@@ -72,7 +72,7 @@ SCHEMES = [
 ]
 
 
-def read_cons_var(run_dir: str, step: int, var_idx: int, num_ranks: int = 1) -> np.ndarray:
+def read_cons_var(run_dir: str, step: int, var_idx: int, num_ranks: int = 1, expected_size: int = None) -> np.ndarray:
     """Read q_cons_vf{var_idx} from all MPI ranks and concatenate into one 1D array."""
     chunks = []
     for rank in range(num_ranks):
@@ -82,7 +82,10 @@ def read_cons_var(run_dir: str, step: int, var_idx: int, num_ranks: int = 1) -> 
             data = np.frombuffer(f.read(rec_len), dtype=np.float64)
             f.read(4)
         chunks.append(data.copy())
-    return np.concatenate(chunks)
+    combined = np.concatenate(chunks)
+    if expected_size is not None and combined.size != expected_size:
+        raise ValueError(f"Expected {expected_size} values across {num_ranks} ranks, got {combined.size}")
+    return combined
 
 
 # 1D single-fluid Euler (model_eqns=2, num_fluids=1): vf1=ρ, vf2=ρu, vf3=E
@@ -90,12 +93,12 @@ CONS_VARS_1D = [("density", 1), ("x-momentum", 2), ("energy", 3)]
 CONS_TOL = 1e-10
 
 
-def conservation_errors(run_dir: str, Nt: int, cell_vol: float, var_list: list, num_ranks: int) -> dict:
+def conservation_errors(run_dir: str, Nt: int, cell_vol: float, var_list: list, num_ranks: int, expected_size: int = None) -> dict:
     """Return relative conservation error |Σq(T) - Σq(0)| / |Σq(0)| for each variable."""
     errs = {}
     for name, idx in var_list:
-        q0 = read_cons_var(run_dir, 0, idx, num_ranks)
-        qT = read_cons_var(run_dir, Nt, idx, num_ranks)
+        q0 = read_cons_var(run_dir, 0, idx, num_ranks, expected_size)
+        qT = read_cons_var(run_dir, Nt, idx, num_ranks, expected_size)
         s0 = float(np.sum(q0)) * cell_vol
         sT = float(np.sum(qT)) * cell_vol
         errs[name] = abs(sT - s0) / (abs(s0) + 1e-300)
@@ -142,6 +145,7 @@ def run_case(tmpdir: str, N: int, extra_args: list, num_ranks: int = 1):
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=os.getcwd(), check=False)
     if result.returncode != 0:
         print(result.stdout[-3000:])
+        print(result.stderr)
         raise RuntimeError(f"./mfc.sh run failed for N={N}")
 
     case_dir = os.path.dirname(CASE)
@@ -173,11 +177,11 @@ def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None,
             dx = 1.0 / N
             Nt, run_dir = run_case(tmpdir, N, extra_args, num_ranks)
             nts.append(Nt)
-            vf0 = read_cons_var(run_dir, 0, 1, num_ranks)
-            vfT = read_cons_var(run_dir, Nt, 1, num_ranks)
+            vf0 = read_cons_var(run_dir, 0, 1, num_ranks, expected_size=N)
+            vfT = read_cons_var(run_dir, Nt, 1, num_ranks, expected_size=N)
             err = l2_error(vfT, vf0, dx)
             errors.append(err)
-            all_cons_errs.append(conservation_errors(run_dir, Nt, dx, CONS_VARS_1D, num_ranks))
+            all_cons_errs.append(conservation_errors(run_dir, Nt, dx, CONS_VARS_1D, num_ranks, expected_size=N))
             print(f"  N={N}: Nt={Nt}, |vf0|={len(vf0)}, err={err:.4e}")
 
     rates = [None]
@@ -242,7 +246,10 @@ def main():
         try:
             passed = test_scheme(label, extra_args + muscl_extra, expected_order, tol, args.resolutions, min_N, max_N, args.num_ranks)
         except Exception as e:
+            import traceback
+
             print(f"  ERROR: {e}")
+            traceback.print_exc()
             passed = False
         results[label] = passed
 

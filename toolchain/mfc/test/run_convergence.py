@@ -142,6 +142,7 @@ def run_case(tmpdir: str, N: int, extra_args: list, num_ranks: int = 1):
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=os.getcwd(), check=False)
     if result.returncode != 0:
         print(result.stdout[-2000:])
+        print(result.stderr)
         raise RuntimeError(f"./mfc.sh run failed for N={N}")
 
     # Copy p_all to temp dir, then clean the case directory for next run
@@ -230,7 +231,10 @@ def main():
         try:
             passed = test_scheme(label, extra_args, expected_order, tol, args.resolutions, min_N, max_N, args.num_ranks)
         except Exception as e:
+            import traceback
+
             print(f"  ERROR: {e}")
+            traceback.print_exc()
             passed = False
         results[label] = passed
 

@@ -54,7 +54,7 @@ SCHEMES = [
 ]
 
 
-def read_cons_var(run_dir: str, step: int, var_idx: int, num_ranks: int = 1) -> np.ndarray:
+def read_cons_var(run_dir: str, step: int, var_idx: int, num_ranks: int = 1, expected_size: int = None) -> np.ndarray:
     """Read q_cons_vf{var_idx} from all ranks in rank order (= spatial order for 1D)."""
     chunks = []
     for rank in range(num_ranks):
@@ -64,7 +64,10 @@ def read_cons_var(run_dir: str, step: int, var_idx: int, num_ranks: int = 1) -> 
             data = np.frombuffer(f.read(rec_len), dtype=np.float64)
             f.read(4)
         chunks.append(data.copy())
-    return np.concatenate(chunks)
+    combined = np.concatenate(chunks)
+    if expected_size is not None and combined.size != expected_size:
+        raise ValueError(f"Expected {expected_size} values across {num_ranks} ranks, got {combined.size}")
+    return combined
 
 
 def l1_self_error(coarse: np.ndarray, fine: np.ndarray, dx_coarse: float) -> float:
@@ -103,6 +106,7 @@ def run_case(tmpdir: str, N: int, extra_args: list, num_ranks: int = 1):
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=os.getcwd(), check=False)
     if result.returncode != 0:
         print(result.stdout[-3000:])
+        print(result.stderr)
         raise RuntimeError(f"./mfc.sh run failed for N={N}")
 
     case_dir = os.path.dirname(CASE)
@@ -142,8 +146,8 @@ def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None,
             if N_f != 2 * N_c:
                 continue  # skip non-2x pairs
             dx_c = 1.0 / N_c
-            rho_c = read_cons_var(run_dirs[i], nts[i], 1, num_ranks)
-            rho_f = read_cons_var(run_dirs[i + 1], nts[i + 1], 1, num_ranks)
+            rho_c = read_cons_var(run_dirs[i], nts[i], 1, num_ranks, expected_size=N_c)
+            rho_f = read_cons_var(run_dirs[i + 1], nts[i + 1], 1, num_ranks, expected_size=N_f)
             err = l1_self_error(rho_c, rho_f, dx_c)
             errors.append(err)
             error_resolutions.append(N_c)
@@ -170,8 +174,8 @@ def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None,
         print(f"\n  Single pair rate: {rates[-1]:.2f}  (need >= {expected_order - tol:.1f})")
         passed = rates[-1] >= expected_order - tol
     else:
-        print("\n  (need >= 2 consecutive resolutions to compute rate)")
-        passed = True
+        print("\n  ERROR: need >= 2 consecutive 2x-apart resolutions to compute a rate")
+        passed = False
 
     print(f"  {'PASS' if passed else 'FAIL'}")
     return passed
@@ -202,7 +206,10 @@ def main():
         try:
             passed = test_scheme(label, extra_args, expected_order, tol, args.resolutions, min_N, args.num_ranks)
         except Exception as e:
+            import traceback
+
             print(f"  ERROR: {e}")
+            traceback.print_exc()
             passed = False
         results[label] = passed
 
