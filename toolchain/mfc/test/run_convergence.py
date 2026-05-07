@@ -55,16 +55,24 @@ SCHEMES = [
 ]
 
 
-def read_cons_vf1(run_dir: str, step: int, N: int) -> np.ndarray:
-    """Read density (q_cons_vf1 = alpha_rho(1) = rho for single fluid) from p_all output."""
-    path = os.path.join(run_dir, "p_all", "p0", str(step), "q_cons_vf1.dat")
-    with open(path, "rb") as f:
-        rec_len = struct.unpack("i", f.read(4))[0]
-        data = np.frombuffer(f.read(rec_len), dtype=np.float64)
-        f.read(4)  # trailing record marker
-    if data.size != N * N:
-        raise ValueError(f"Expected {N * N} values, got {data.size} in {path}")
-    return data.reshape((N, N), order="F")
+def read_cons_vf1(run_dir: str, step: int, N: int, num_ranks: int = 1) -> np.ndarray:
+    """Read density from all MPI ranks and return as a flat array.
+
+    Spatial ordering is not preserved across ranks but that is fine for L2
+    norm computation, which is invariant to permutation of elements.
+    """
+    chunks = []
+    for rank in range(num_ranks):
+        path = os.path.join(run_dir, "p_all", f"p{rank}", str(step), "q_cons_vf1.dat")
+        with open(path, "rb") as f:
+            rec_len = struct.unpack("i", f.read(4))[0]
+            data = np.frombuffer(f.read(rec_len), dtype=np.float64)
+            f.read(4)
+        chunks.append(data.copy())
+    combined = np.concatenate(chunks)
+    if combined.size != N * N:
+        raise ValueError(f"Expected {N * N} values across {num_ranks} ranks, got {combined.size}")
+    return combined
 
 
 def l2_error(rho_final: np.ndarray, rho_init: np.ndarray, dx: float) -> float:
@@ -143,8 +151,8 @@ def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None,
             dx = 10.0 / N
             Nt, run_dir = run_case(tmpdir, N, extra_args, num_ranks)
             nts.append(Nt)
-            rho0 = read_cons_vf1(run_dir, 0, N)
-            rhoT = read_cons_vf1(run_dir, Nt, N)
+            rho0 = read_cons_vf1(run_dir, 0, N, num_ranks)
+            rhoT = read_cons_vf1(run_dir, Nt, N, num_ranks)
             err = l2_error(rhoT, rho0, dx)
             errors.append(err)
 

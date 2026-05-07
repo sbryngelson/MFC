@@ -72,14 +72,17 @@ SCHEMES = [
 ]
 
 
-def read_vf1_1d(run_dir: str, step: int) -> np.ndarray:
-    """Read q_cons_vf1 from 1D p_all binary output."""
-    path = os.path.join(run_dir, "p_all", "p0", str(step), "q_cons_vf1.dat")
-    with open(path, "rb") as f:
-        rec_len = struct.unpack("i", f.read(4))[0]
-        data = np.frombuffer(f.read(rec_len), dtype=np.float64)
-        f.read(4)
-    return data.copy()
+def read_vf1_1d(run_dir: str, step: int, num_ranks: int = 1) -> np.ndarray:
+    """Read q_cons_vf1 from all MPI ranks and concatenate into one 1D array."""
+    chunks = []
+    for rank in range(num_ranks):
+        path = os.path.join(run_dir, "p_all", f"p{rank}", str(step), "q_cons_vf1.dat")
+        with open(path, "rb") as f:
+            rec_len = struct.unpack("i", f.read(4))[0]
+            data = np.frombuffer(f.read(rec_len), dtype=np.float64)
+            f.read(4)
+        chunks.append(data.copy())
+    return np.concatenate(chunks)
 
 
 def l2_error(a: np.ndarray, b: np.ndarray, dx: float) -> float:
@@ -152,8 +155,8 @@ def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None,
             dx = 1.0 / N
             Nt, run_dir = run_case(tmpdir, N, extra_args, num_ranks)
             nts.append(Nt)
-            vf0 = read_vf1_1d(run_dir, 0)
-            vfT = read_vf1_1d(run_dir, Nt)
+            vf0 = read_vf1_1d(run_dir, 0, num_ranks)
+            vfT = read_vf1_1d(run_dir, Nt, num_ranks)
             err = l2_error(vfT, vf0, dx)
             errors.append(err)
             print(f"  N={N}: Nt={Nt}, |vf0|={len(vf0)}, err={err:.4e}")
