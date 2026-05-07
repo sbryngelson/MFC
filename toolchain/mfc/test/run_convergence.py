@@ -47,11 +47,13 @@ MFC = "./mfc.sh"
 #   finer grids).  Threshold 1.8.
 # WENO7/TENO7 are omitted — see module docstring for why.
 SCHEMES = [
-    ("WENO5", ["--order", "5"], 5, 1.0, 32, None),
+    # WENO5/TENO5: need (N/2) >= num_stcls_min*recon_order = 25 cells/rank with 4
+    # ranks in 2x2; min_N=64 ensures 32 cells/rank which satisfies this constraint.
+    ("WENO5", ["--order", "5"], 5, 1.0, 64, None),
     ("WENO3", ["--order", "3"], 3, 1.2, 32, None),
     ("WENO1", ["--order", "1"], 1, 0.4, 32, None),
     ("MUSCL2", ["--muscl"], 2, 0.5, 32, None),
-    ("TENO5", ["--order", "5", "--teno", "--teno-ct", "1e-6"], 5, 1.0, 32, None),
+    ("TENO5", ["--order", "5", "--teno", "--teno-ct", "1e-6"], 5, 1.0, 64, None),
 ]
 
 
@@ -76,7 +78,10 @@ def read_cons_var(run_dir: str, step: int, var_idx: int, N: int, num_ranks: int 
 
 
 # 2D single-fluid Euler (model_eqns=2, num_fluids=1): vf1=ρ, vf2=ρu, vf3=ρv, vf4=E
-CONS_VARS_2D = [("density", 1), ("x-momentum", 2), ("y-momentum", 3), ("energy", 4)]
+# Momentum is excluded: the isentropic vortex has zero net linear momentum, making
+# the relative error formula ill-conditioned (denominator ≈ 0). Density and energy
+# have large nonzero integrals and are the meaningful conserved quantities to verify.
+CONS_VARS_2D = [("density", 1), ("energy", 4)]
 CONS_TOL = 1e-10
 
 
