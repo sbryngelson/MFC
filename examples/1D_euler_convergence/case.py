@@ -25,6 +25,7 @@ parser.add_argument("--teno-ct", type=float, default=1e-6, help="TENO CT thresho
 parser.add_argument("--cfl", type=float, default=0.4, help="CFL number (default: 0.4)")
 parser.add_argument("--no-mapped", action="store_true", help="Disable mapped WENO")
 parser.add_argument("--muscl-lim", type=int, default=0, help="MUSCL limiter: 0=unlimited 1=minmod ... (default: 0)")
+parser.add_argument("--time-stepper", type=int, default=3, help="Time stepper: 1=Euler 2=RK2 3=RK3 (default: 3)")
 args = parser.parse_args()
 
 gamma = 1.4
@@ -79,7 +80,7 @@ print(
             "num_fluids": 1,
             "mpp_lim": "F",
             "mixture_err": "F",
-            "time_stepper": 3,
+            "time_stepper": args.time_stepper,
             "riemann_solver": 2,
             "wave_speeds": 1,
             "avg_state": 2,

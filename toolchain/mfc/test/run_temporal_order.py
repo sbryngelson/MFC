@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
 """
-Time-integration order verification for MFC's RK3 time stepper.
+Time-integration order verification for MFC's RK1, RK2, and RK3 time steppers.
 
 Uses the 1D single-fluid Euler advection problem (rho = 1 + 0.2*sin(2*pi*x),
 u=1, p=1, L=1, T=1) with a fine spatial grid (N=512, WENO5) so the spatial
-error (~4e-12) is negligible compared to the RK3 temporal error at the CFLs
-tested here.
+error (~4e-12) is negligible compared to the temporal error at the CFLs tested.
 
 L2(rho(T) - rho(0)) measures total accumulated error.  By fixing N and varying
 CFL (and hence dt), the spatial contribution is constant and the measured rate
 reflects the time integration order.
 
-CFL values [0.5, 0.25] keep the temporal error well above the spatial floor:
-  CFL=0.50 → err ~8.3e-10 (>200x spatial floor)
-  CFL=0.25 → err ~1.1e-10 (>25x spatial floor)
-Pairwise rate ≈ 2.95, threshold ≥ 2.7.
+CFL ranges are chosen to be within each stepper's stability region and keep
+temporal errors well above the ~4e-12 spatial floor:
+  RK1 (Euler, 1st order): CFL=[0.10, 0.05] — stable limit ~0.1 with WENO5+LF
+    (nearly-imaginary eigenvalues constrain Euler more than TVD RK);
+    error ~2.5e-4 and ~1.2e-4 (rate ≈ 1.0)
+  RK2 (TVD Heun, 2nd order): CFL=[0.50, 0.25];
+    error ~1.2e-6 and ~2.9e-7 (rate ≈ 2.0)
+  RK3 (TVD Shu-Osher, 3rd order): CFL=[0.50, 0.25];
+    error ~8.3e-10 and ~1.1e-10 (rate ≈ 3.0)
 
 Usage:
     python toolchain/mfc/test/run_temporal_order.py
-    python toolchain/mfc/test/run_temporal_order.py --cfls 0.5 0.25 0.125
+    python toolchain/mfc/test/run_temporal_order.py --schemes RK3/WENO5 --cfls 0.5 0.25 0.125
 """
 
 import argparse
@@ -37,10 +41,15 @@ CASE = "examples/1D_euler_convergence/case.py"
 MFC = "./mfc.sh"
 
 # (label, extra_args, expected_order, tolerance, cfls)
-# All schemes here use RK3 (time_stepper=3 is default in MFC).
 # N=512 is fixed; WENO5 keeps spatial error ~4e-12 (negligible at CFL>=0.25).
+# RK1/RK2 temporal errors at CFL=0.5 are ~2e-4 and ~2e-7, both >> spatial floor.
 SCHEMES = [
-    ("RK3/WENO5", ["--order", "5"], 3, 0.3, [0.5, 0.25]),
+    # RK1 (Forward Euler): nearly-imaginary WENO5+LF eigenvalues constrain stability
+    # to CFL < ~0.1; use [0.10, 0.05] which are provably stable and temporal-dominated
+    ("RK1/WENO5", ["--order", "5", "--time-stepper", "1"], 1, 0.1, [0.10, 0.05]),
+    # RK2/RK3 (TVD): stable to CFL~1; use [0.50, 0.25] for clean temporal dominance
+    ("RK2/WENO5", ["--order", "5", "--time-stepper", "2"], 2, 0.2, [0.50, 0.25]),
+    ("RK3/WENO5", ["--order", "5", "--time-stepper", "3"], 3, 0.3, [0.50, 0.25]),
 ]
 
 N_SPATIAL = 512  # fixed spatial resolution
@@ -168,7 +177,7 @@ def main():
     parser.add_argument(
         "--schemes",
         nargs="+",
-        default=["RK3/WENO5"],
+        default=["RK1/WENO5", "RK2/WENO5", "RK3/WENO5"],
         help="Schemes to test (default: all)",
     )
     parser.add_argument("--num-ranks", type=int, default=1, help="MPI ranks per simulation (default: 1)")
