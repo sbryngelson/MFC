@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+env:
+  OMPI_MCA_rmaps_base_oversubscribe: 1
+
 jobs:
   convergence-1d:
     name: "1D Advection Convergence"
