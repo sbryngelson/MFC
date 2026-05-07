@@ -81,7 +81,7 @@ def convergence_rate(errors: list, resolutions: list) -> float:
     return float(rate)
 
 
-def run_case(tmpdir: str, N: int, extra_args: list):
+def run_case(tmpdir: str, N: int, extra_args: list, num_ranks: int = 1):
     """Run the vortex case at resolution N. Returns (Nt, run_dir)."""
     # Query case parameters to find t_step_stop
     result = subprocess.run(
@@ -104,7 +104,7 @@ def run_case(tmpdir: str, N: int, extra_args: list):
         "pre_process",
         "simulation",
         "-n",
-        "1",
+        str(num_ranks),
         "--",
         "-N",
         str(N),
@@ -127,7 +127,7 @@ def run_case(tmpdir: str, N: int, extra_args: list):
     return Nt, os.path.join(tmpdir, f"N{N}")
 
 
-def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None, max_N=None):
+def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None, max_N=None, num_ranks=1):
     if min_N is not None:
         resolutions = [N for N in resolutions if N >= min_N]
     if max_N is not None:
@@ -141,7 +141,7 @@ def test_scheme(label, extra_args, expected_order, tol, resolutions, min_N=None,
     with tempfile.TemporaryDirectory() as tmpdir:
         for N in resolutions:
             dx = 10.0 / N
-            Nt, run_dir = run_case(tmpdir, N, extra_args)
+            Nt, run_dir = run_case(tmpdir, N, extra_args, num_ranks)
             nts.append(Nt)
             rho0 = read_cons_vf1(run_dir, 0, N)
             rhoT = read_cons_vf1(run_dir, Nt, N)
@@ -178,6 +178,7 @@ def main():
     parser = argparse.ArgumentParser(description="MFC convergence-rate verification")
     parser.add_argument("--resolutions", type=int, nargs="+", default=[32, 64, 128], help="Grid resolutions (default: 32 64 128; N<32 unsupported for WENO5)")
     parser.add_argument("--schemes", nargs="+", default=["WENO5", "WENO3", "WENO1", "MUSCL2", "TENO5"], help="Schemes to test (default: all)")
+    parser.add_argument("--num-ranks", type=int, default=1, help="MPI ranks per simulation (default: 1)")
     args = parser.parse_args()
 
     results = {}
@@ -185,7 +186,7 @@ def main():
         if label not in args.schemes:
             continue
         try:
-            passed = test_scheme(label, extra_args, expected_order, tol, args.resolutions, min_N, max_N)
+            passed = test_scheme(label, extra_args, expected_order, tol, args.resolutions, min_N, max_N, args.num_ranks)
         except Exception as e:
             print(f"  ERROR: {e}")
             passed = False

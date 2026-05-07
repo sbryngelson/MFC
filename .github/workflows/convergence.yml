@@ -31,7 +31,8 @@ jobs:
         run: |
           source build/venv/bin/activate
           python toolchain/mfc/test/run_convergence_1d.py \
-            --resolutions 64 128 256 512 1024
+            --resolutions 64 128 256 512 1024 \
+            --num-ranks 4
 
   convergence-2d:
     name: "2D Isentropic Vortex Convergence"
@@ -59,4 +60,5 @@ jobs:
         run: |
           source build/venv/bin/activate
           python toolchain/mfc/test/run_convergence.py \
-            --resolutions 32 64 128
+            --resolutions 32 64 128 \
+            --num-ranks 4
