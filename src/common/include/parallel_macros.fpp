@@ -100,7 +100,6 @@
 #endif
 #elif MFC_OpenACC
         $:acc_directive
-        $:cray_directive
 #elif MFC_OpenMP
         $:omp_directive
 #endif
