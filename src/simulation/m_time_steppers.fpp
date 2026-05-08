@@ -548,6 +548,20 @@ contains
 
             if (adv_n) call s_comp_alpha_from_n(q_cons_ts(1)%vf)
 
+            ! Single-fluid cyl_coord: alpha is trivially 1 but drifts due to varying HLLC contact velocity across faces. Reset to
+            ! prevent pressure NaN.
+            if (num_fluids == 1 .and. cyl_coord .and. .not. bubbles_euler) then
+                $:GPU_PARALLEL_LOOP(collapse=3)
+                do l = 0, p
+                    do k = 0, n
+                        do j = 0, m
+                            q_cons_ts(1)%vf(eqn_idx%adv%beg)%sf(j, k, l) = 1._wp
+                        end do
+                    end do
+                end do
+                $:END_GPU_PARALLEL_LOOP()
+            end if
+
             if (ib) then
                 ! check if any IBMS are moving, and if so, update the markers, ghost points, levelsets, and levelset norms
                 if (moving_immersed_boundary_flag) then
