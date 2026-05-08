@@ -772,10 +772,10 @@ contains
                                     ! Recalculating the radial momentum geometric source flux
                                     flux_gsrc_rs${XYZ}$_vf(j, k, l, eqn_idx%cont%end + 2) = flux_rs${XYZ}$_vf(j, k, l, &
                                                            & eqn_idx%cont%end + 2) - (s_M*pres_R - s_P*pres_L)/(s_M - s_P)
-                                    ! Geometrical source of the void fraction(s) is zero
+                                    ! Cylindrical correction for HLL/LF numerical diffusion of void fraction(s)
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = eqn_idx%adv%beg, eqn_idx%adv%end
-                                        flux_gsrc_rs${XYZ}$_vf(j, k, l, i) = 0._wp
+                                        flux_gsrc_rs${XYZ}$_vf(j, k, l, i) = flux_rs${XYZ}$_vf(j, k, l, i)
                                     end do
                                 end if
 
@@ -1382,10 +1382,10 @@ contains
                                     ! Recalculating the radial momentum geometric source flux
                                     flux_gsrc_rs${XYZ}$_vf(j, k, l, eqn_idx%cont%end + 2) = flux_rs${XYZ}$_vf(j, k, l, &
                                                            & eqn_idx%cont%end + 2) - (s_M*pres_R - s_P*pres_L)/(s_M - s_P)
-                                    ! Geometrical source of the void fraction(s) is zero
+                                    ! Cylindrical correction for HLL/LF numerical diffusion of void fraction(s)
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = eqn_idx%adv%beg, eqn_idx%adv%end
-                                        flux_gsrc_rs${XYZ}$_vf(j, k, l, i) = 0._wp
+                                        flux_gsrc_rs${XYZ}$_vf(j, k, l, i) = flux_rs${XYZ}$_vf(j, k, l, i)
                                     end do
                                 end if
 
