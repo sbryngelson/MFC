@@ -1584,6 +1584,7 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                 "2D_ibm_stl_MFCCharacter",
                 "1D_qbmm",
                 "2D_Thermal_Flatplate",  # formatted I/O field overflow on gfortran 12
+                "2D_axisym_convergence",  # WENO5 stencil requires n+1 >= 25; case uses nr=6 (run via run_convergence_axisym.py)
             ]
             if path in casesToSkip:
                 continue
