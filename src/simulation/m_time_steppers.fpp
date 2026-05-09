@@ -551,15 +551,7 @@ contains
             ! Single-fluid cyl_coord: alpha is trivially 1 but drifts due to varying HLLC contact velocity across faces. Reset to
             ! prevent pressure NaN.
             if (num_fluids == 1 .and. cyl_coord .and. .not. bubbles_euler) then
-                $:GPU_PARALLEL_LOOP(collapse=3)
-                do l = 0, p
-                    do k = 0, n
-                        do j = 0, m
-                            q_cons_ts(1)%vf(eqn_idx%adv%beg)%sf(j, k, l) = 1._wp
-                        end do
-                    end do
-                end do
-                $:END_GPU_PARALLEL_LOOP()
+                call s_reset_single_fluid_alpha(q_cons_ts(1)%vf)
             end if
 
             if (ib) then
@@ -716,6 +708,25 @@ contains
         call nvtxEndRange
 
     end subroutine s_apply_bodyforces
+
+    !> Reset the single-fluid volume-fraction field to 1, preventing per-stage drift caused by varying contact-wave speed across
+    !! cylindrical faces.
+    subroutine s_reset_single_fluid_alpha(q_cons_vf)
+
+        type(scalar_field), dimension(1:sys_size), intent(inout) :: q_cons_vf
+        integer                                                  :: j, k, l
+
+        $:GPU_PARALLEL_LOOP(collapse=3)
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    q_cons_vf(eqn_idx%adv%beg)%sf(j, k, l) = 1._wp
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_reset_single_fluid_alpha
 
     !> Update immersed boundary positions and velocities at the current Runge-Kutta stage
     subroutine s_propagate_immersed_boundaries(s)
