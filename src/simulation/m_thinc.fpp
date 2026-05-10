@@ -30,7 +30,7 @@ module m_thinc
     real(wp) :: gq3_pts(3) = [-5e-1_wp*0.7745966692414834_wp, 0._wp, 5e-1_wp*0.7745966692414834_wp]
     !> Weights: 5/18, 8/18, 5/18
     real(wp) :: gq3_wts(3) = [5._wp/18._wp, 8._wp/18._wp, 5._wp/18._wp]
-    $:GPU_DECLARE(copyin='[gq3_pts, gq3_wts]')
+    $:GPU_DECLARE(create='[gq3_pts, gq3_wts]')
 
     real(wp), allocatable, dimension(:,:,:,:) :: mthinc_nhat !> Unit normal vector
     real(wp), allocatable, dimension(:,:,:)   :: mthinc_d    !> Interface position parameter
