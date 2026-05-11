@@ -1468,9 +1468,9 @@ contains
     end subroutine s_weno
 
     !> Enforce monotonicity-preserving bounds on the WENO reconstruction
-    subroutine s_preserve_monotonicity(v_rs_weno, vL_rs_vf, vR_rs_vf, weno_dir)
+    subroutine s_preserve_monotonicity(v_rs_ws, vL_rs_vf, vR_rs_vf, weno_dir)
 
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(in) :: v_rs_weno
+        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(in) :: v_rs_ws
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf, vR_rs_vf
         integer, intent(in) :: weno_dir
         integer :: i, j, k, l
@@ -1503,11 +1503,11 @@ contains
                             do i = 1, v_size
                                 ! Second-order undivided differences for curvature estimation
 
-                                vp0 = v_rs_weno(${SF('')}$, i)
-                                vm1 = v_rs_weno(${SF(' - 1')}$, i)
-                                vm2 = v_rs_weno(${SF(' - 2')}$, i)
-                                vp1 = v_rs_weno(${SF(' + 1')}$, i)
-                                vp2 = v_rs_weno(${SF(' + 2')}$, i)
+                                vp0 = v_rs_ws(${SF('')}$, i)
+                                vm1 = v_rs_ws(${SF(' - 1')}$, i)
+                                vm2 = v_rs_ws(${SF(' - 2')}$, i)
+                                vp1 = v_rs_ws(${SF(' + 1')}$, i)
+                                vp2 = v_rs_ws(${SF(' + 2')}$, i)
 
                                 d(-1) = vp0 + vm2 - vm1*2._wp
                                 d(0) = vp1 + vm1 - vp0*2._wp
