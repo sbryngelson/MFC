@@ -24,11 +24,11 @@ jobs:
     strategy:
       matrix:
         config:
-            - { name: 'cpu', runner: 'ubuntu-22.04',     base_image: 'ubuntu:22.04' }
-            - { name: 'cpu', runner: 'ubuntu-22.04-arm', base_image: 'ubuntu:22.04' }
-            - { name: 'gpu', runner: 'ubuntu-22.04',     base_image: 'nvcr.io/nvidia/nvhpc:24.5-devel-cuda_multi-ubuntu22.04', compiler_arch: 'Linux_x86_64' }
-            - { name: 'gpu', runner: 'ubuntu-22.04-arm', base_image: 'nvcr.io/nvidia/nvhpc:24.5-devel-cuda_multi-ubuntu22.04', compiler_arch: 'Linux_aarch64' }
-            - { name: 'amd', runner: 'ubuntu-22.04',     base_image: 'ubuntu:22.04' }
+            - { name: 'cpu',  tag: 'cpu',       runner: 'ubuntu-22.04',     base_image: 'ubuntu:22.04' }
+            - { name: 'cpu',  tag: 'cpu',       runner: 'ubuntu-22.04-arm', base_image: 'ubuntu:22.04' }
+            - { name: 'gpu',  tag: 'gpu-nvidia', runner: 'ubuntu-22.04',     base_image: 'nvcr.io/nvidia/nvhpc:24.5-devel-cuda_multi-ubuntu22.04', compiler_arch: 'Linux_x86_64' }
+            - { name: 'gpu',  tag: 'gpu-nvidia', runner: 'ubuntu-22.04-arm', base_image: 'nvcr.io/nvidia/nvhpc:24.5-devel-cuda_multi-ubuntu22.04', compiler_arch: 'Linux_aarch64' }
+            - { name: 'amd',  tag: 'gpu-amd',   runner: 'ubuntu-22.04',     base_image: 'ubuntu:22.04' }
     runs-on: ${{ matrix.config.runner }}
     outputs:
       tag: ${{ steps.clone.outputs.tag }}
@@ -109,8 +109,8 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/mfc:${{ env.TAG }}-${{ matrix.config.name }}-${{ matrix.config.runner }}
-            ${{ env.GH_REGISTRY }}:${{ env.TAG }}-${{ matrix.config.name }}-${{ matrix.config.runner }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/mfc:${{ env.TAG }}-${{ matrix.config.tag }}-${{ matrix.config.runner }}
+            ${{ env.GH_REGISTRY }}:${{ env.TAG }}-${{ matrix.config.tag }}-${{ matrix.config.runner }}
           push: true
 
       - name: Build and push image (gpu)
@@ -131,8 +131,8 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/mfc:${{ env.TAG }}-${{ matrix.config.name }}-${{ matrix.config.runner }}
-            ${{ env.GH_REGISTRY }}:${{ env.TAG }}-${{ matrix.config.name }}-${{ matrix.config.runner }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/mfc:${{ env.TAG }}-${{ matrix.config.tag }}-${{ matrix.config.runner }}
+            ${{ env.GH_REGISTRY }}:${{ env.TAG }}-${{ matrix.config.tag }}-${{ matrix.config.runner }}
           push: true
 
       - name: Build and push image (amd)
@@ -154,8 +154,8 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/mfc:${{ env.TAG }}-amd-ubuntu-22.04
-            ghcr.io/${{ github.repository_owner }}/mfc:${{ env.TAG }}-amd-ubuntu-22.04
+            ${{ secrets.DOCKERHUB_USERNAME }}/mfc:${{ env.TAG }}-gpu-amd-ubuntu-22.04
+            ${{ env.GH_REGISTRY }}:${{ env.TAG }}-gpu-amd-ubuntu-22.04
           push: true
 
   manifests:
@@ -163,7 +163,7 @@ jobs:
     needs: Container
     environment:
       name: containers
-      url: https://hub.docker.com/r/sbryngelson/mfc
+      url: https://hub.docker.com/r/mflowcode/mfc
     steps:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -193,9 +193,9 @@ jobs:
         run: |
           GH="${{ env.GH_REGISTRY }}"
           for R in "$DH" "$GH"; do
-            docker buildx imagetools create -t $R:$TAG-cpu $R:$TAG-cpu-ubuntu-22.04 $R:$TAG-cpu-ubuntu-22.04-arm
-            docker buildx imagetools create -t $R:$TAG-gpu $R:$TAG-gpu-ubuntu-22.04 $R:$TAG-gpu-ubuntu-22.04-arm
-            docker buildx imagetools create -t $R:$TAG-amd $R:$TAG-amd-ubuntu-22.04
+            docker buildx imagetools create -t $R:$TAG-cpu       $R:$TAG-cpu-ubuntu-22.04 $R:$TAG-cpu-ubuntu-22.04-arm
+            docker buildx imagetools create -t $R:$TAG-gpu-nvidia $R:$TAG-gpu-nvidia-ubuntu-22.04 $R:$TAG-gpu-nvidia-ubuntu-22.04-arm
+            docker buildx imagetools create -t $R:$TAG-gpu-amd   $R:$TAG-gpu-amd-ubuntu-22.04
           done
 
       - name: Update latest tags
@@ -206,7 +206,7 @@ jobs:
         run: |
           GH="${{ env.GH_REGISTRY }}"
           for R in "$DH" "$GH"; do
-            docker buildx imagetools create -t $R:latest-cpu $R:$TAG-cpu-ubuntu-22.04 $R:$TAG-cpu-ubuntu-22.04-arm
-            docker buildx imagetools create -t $R:latest-gpu $R:$TAG-gpu-ubuntu-22.04 $R:$TAG-gpu-ubuntu-22.04-arm
-            docker buildx imagetools create -t $R:latest-amd $R:$TAG-amd-ubuntu-22.04
+            docker buildx imagetools create -t $R:latest-cpu       $R:$TAG-cpu-ubuntu-22.04 $R:$TAG-cpu-ubuntu-22.04-arm
+            docker buildx imagetools create -t $R:latest-gpu-nvidia $R:$TAG-gpu-nvidia-ubuntu-22.04 $R:$TAG-gpu-nvidia-ubuntu-22.04-arm
+            docker buildx imagetools create -t $R:latest-gpu-amd   $R:$TAG-gpu-amd-ubuntu-22.04
           done
