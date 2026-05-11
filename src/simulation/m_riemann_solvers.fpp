@@ -796,7 +796,7 @@ contains
             end if
         #:endfor
 
-        if (viscous .or. dummy) then
+        if (viscous) then
             if (weno_Re_flux) then
                 call s_compute_viscous_source_flux(qL_prim_vf(eqn_idx%mom%beg:eqn_idx%mom%end), &
                                                    & dqL_prim_dx_vf(eqn_idx%mom%beg:eqn_idx%mom%end), &
@@ -1406,7 +1406,7 @@ contains
             end if
         #:endfor
 
-        if (viscous .or. dummy) then
+        if (viscous) then
             $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, idx_right_phys, vel_grad_L, vel_grad_R, alpha_L, alpha_R, &
                                 & vel_L, vel_R, Re_L, Re_R]', copyin='[norm_dir]')
             do l = isz%beg, isz%end
@@ -3314,7 +3314,7 @@ contains
         #:endfor
         ! Computing HLLC flux and source flux for Euler system of equations
 
-        if (viscous .or. dummy) then
+        if (viscous) then
             if (weno_Re_flux) then
                 call s_compute_viscous_source_flux(qL_prim_vf(eqn_idx%mom%beg:eqn_idx%mom%end), &
                                                    & dqL_prim_dx_vf(eqn_idx%mom%beg:eqn_idx%mom%end), &
@@ -3740,7 +3740,7 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
 
-                if (viscous .or. dummy) then
+                if (viscous) then
                     $:GPU_PARALLEL_LOOP(collapse=3)
                     do i = eqn_idx%mom%beg, eqn_idx%mom%end
                         do l = isz%beg, isz%end
@@ -3789,7 +3789,7 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
 
-                if (viscous .or. dummy) then
+                if (viscous) then
                     $:GPU_PARALLEL_LOOP(collapse=3)
                     do i = eqn_idx%mom%beg, eqn_idx%mom%end
                         do l = isz%beg, isz%end
@@ -3840,7 +3840,7 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
 
-                if (viscous .or. dummy) then
+                if (viscous) then
                     $:GPU_PARALLEL_LOOP(collapse=3)
                     do i = eqn_idx%mom%beg, eqn_idx%mom%end
                         do l = isz%beg, isz%end
@@ -3887,7 +3887,7 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
 
-                if (viscous .or. dummy) then
+                if (viscous) then
                     $:GPU_PARALLEL_LOOP(collapse=3)
                     do i = eqn_idx%mom%beg, eqn_idx%mom%end
                         do l = isz%beg, isz%end
@@ -3936,7 +3936,7 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
 
-                if (viscous .or. dummy) then
+                if (viscous) then
                     $:GPU_PARALLEL_LOOP(collapse=3)
                     do i = eqn_idx%mom%beg, eqn_idx%mom%end
                         do k = isy%beg, isy%end
@@ -3979,7 +3979,7 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
 
-                if (viscous .or. dummy) then
+                if (viscous) then
                     $:GPU_PARALLEL_LOOP(collapse=3)
                     do i = eqn_idx%mom%beg, eqn_idx%mom%end
                         do k = isy%beg, isy%end
@@ -4026,7 +4026,7 @@ contains
         ! Reshaping Inputted Data in x-direction
 
         if (norm_dir == 1) then
-            if (viscous .or. (surface_tension) .or. dummy) then
+            if (viscous .or. (surface_tension)) then
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = eqn_idx%mom%beg, eqn_idx%E
                     do l = is3%beg, is3%end
@@ -4072,7 +4072,7 @@ contains
 
             ! Reshaping Inputted Data in y-direction
         else if (norm_dir == 2) then
-            if (viscous .or. (surface_tension) .or. dummy) then
+            if (viscous .or. (surface_tension)) then
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = eqn_idx%mom%beg, eqn_idx%E
                     do l = is3%beg, is3%end
@@ -4118,7 +4118,7 @@ contains
 
             ! Reshaping Inputted Data in z-direction
         else
-            if (viscous .or. (surface_tension) .or. dummy) then
+            if (viscous .or. (surface_tension)) then
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = eqn_idx%mom%beg, eqn_idx%E
                     do j = is1%beg, is1%end

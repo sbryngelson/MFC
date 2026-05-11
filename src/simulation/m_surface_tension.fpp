@@ -306,7 +306,7 @@ contains
         integer :: i, j, k, l
 
         #:for SCHEME, TYPE in [('weno', 'WENO_TYPE'),('muscl', 'MUSCL_TYPE')]
-            if (recon_type == ${TYPE}$ .or. dummy) then
+            if (recon_type == ${TYPE}$) then
                 ! Reconstruction in s1-direction
 
                 if (norm_dir == 1) then

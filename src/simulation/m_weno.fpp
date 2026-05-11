@@ -873,6 +873,27 @@ contains
 
     end subroutine s_compute_weno_coefficients
 
+    subroutine s_pack_weno_input_arr(v_vf)
+
+        type(scalar_field), dimension(1:), intent(in) :: v_vf
+        integer                                       :: i, j, k, l, n_vars
+
+        n_vars = size(v_vf)
+
+        $:GPU_PARALLEL_LOOP(collapse=4)
+        do i = 1, n_vars
+            do l = idwbuff(3)%beg, idwbuff(3)%end
+                do k = idwbuff(2)%beg, idwbuff(2)%end
+                    do j = idwbuff(1)%beg, idwbuff(1)%end
+                        v_rs_weno(j, k, l, i) = v_vf(i)%sf(j, k, l)
+                    end do
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_pack_weno_input_arr
+
     !> Perform WENO reconstruction of left and right cell-boundary values from cell-averaged variables
     subroutine s_weno(v_vf, vL_rs_vf_x, vL_rs_vf_y, vL_rs_vf_z, vR_rs_vf_x, vR_rs_vf_y, vR_rs_vf_z, weno_dir, is1_weno_d, &
 
@@ -909,11 +930,11 @@ contains
 
         $:GPU_UPDATE(device='[is1_weno, is2_weno, is3_weno]')
 
-        if (weno_order /= 1 .or. dummy) then
+        if (weno_order /= 1) then
             call s_initialize_weno(v_vf, weno_dir)
         end if
 
-        if (weno_order == 1 .or. dummy) then
+        if (weno_order == 1) then
             if (weno_dir == 1) then
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, ubound(v_vf, 1)
@@ -955,7 +976,7 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
             end if
         end if
-        if (weno_order == 3 .or. dummy) then
+        if (weno_order == 3) then
             #:for WENO_DIR, XYZ in [(1, 'x'), (2, 'y'), (3, 'z')]
                 if (weno_dir == ${WENO_DIR}$) then
                     $:GPU_PARALLEL_LOOP(collapse=4,private='[beta, dvd, poly, omega, alpha, tau, q]')
@@ -1040,7 +1061,7 @@ contains
                 end if
             #:endfor
         end if
-        if (weno_order == 5 .or. dummy) then
+        if (weno_order == 5) then
             #:if not MFC_CASE_OPTIMIZATION or weno_num_stencils > 1
                 #:for WENO_DIR, XYZ in [(1, 'x'), (2, 'y'), (3, 'z')]
                     if (weno_dir == ${WENO_DIR}$) then
@@ -1189,7 +1210,7 @@ contains
                 #:endfor
             #:endif
         end if
-        if (weno_order == 7 .or. dummy) then
+        if (weno_order == 7) then
             #:if not MFC_CASE_OPTIMIZATION or weno_num_stencils > 2
                 #:for WENO_DIR, XYZ in [(1, 'x'), (2, 'y'), (3, 'z')]
                     if (weno_dir == ${WENO_DIR}$) then

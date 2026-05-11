@@ -253,7 +253,7 @@ contains
             end do
         end if
 
-        if ((.not. igr) .or. dummy) then
+        if ((.not. igr)) then
             @:ALLOCATE(dq_prim_dx_qp(1:1))
             @:ALLOCATE(dq_prim_dy_qp(1:1))
             @:ALLOCATE(dq_prim_dz_qp(1:1))
@@ -534,7 +534,7 @@ contains
 
         call cpu_time(t_start)
 
-        if (.not. igr .or. dummy) then
+        if (.not. igr) then
             ! Association/Population of Working Variables
             $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
             do i = 1, sys_size
@@ -572,12 +572,12 @@ contains
             end if
         end if
 
-        if (igr .or. dummy) then
+        if (igr) then
             call nvtxStartRange("RHS-COMMUNICATION")
             call s_populate_variables_buffers(bc_type, q_cons_vf, pb_in, mv_in, q_T_sf)
             call nvtxEndRange
         end if
-        if (.not. igr .or. dummy) then
+        if (.not. igr) then
             call nvtxStartRange("RHS-CONVERT")
             call s_convert_conservative_to_primitive_variables(q_cons_qp%vf, q_T_sf, q_prim_qp%vf, idwint)
             call nvtxEndRange
@@ -600,7 +600,7 @@ contains
         if (qbmm) call s_mom_inv(q_cons_qp%vf, q_prim_qp%vf, mom_sp, mom_3d, pb_in, rhs_pb, mv_in, rhs_mv, idwbuff(1), &
             & idwbuff(2), idwbuff(3))
 
-        if ((viscous .and. .not. igr) .or. dummy) then
+        if ((viscous .and. .not. igr)) then
             call nvtxStartRange("RHS-VISCOUS")
             call s_get_viscous(qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, dqL_prim_dx_n, dqL_prim_dy_n, dqL_prim_dz_n, qL_prim, qR_rsx_vf, &
                                & qR_rsy_vf, qR_rsz_vf, dqR_prim_dx_n, dqR_prim_dy_n, dqR_prim_dz_n, qR_prim, q_prim_qp, &
@@ -620,8 +620,9 @@ contains
             call nvtxEndRange
         end if
 
+
         do id = 1, num_dims
-            if (igr .or. dummy) then
+            if (igr) then
                 if (id == 1) then
                     $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
                     do l = -1, p + 1
@@ -858,7 +859,7 @@ contains
         ! END: Additional physics and source terms
 
         if (run_time_info .or. probe_wrt .or. ib .or. bubbles_lagrange) then
-            if (.not. igr .or. dummy) then
+            if (.not. igr) then
                 $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
                 do i = 1, sys_size
                     do l = idwbuff(3)%beg, idwbuff(3)%end
@@ -1432,7 +1433,7 @@ contains
             end if
 
             if (cyl_coord .and. ((bc_y%beg == -2) .or. (bc_y%beg == -14))) then
-                if (viscous .or. dummy) then
+                if (viscous) then
                     if (p > 0) then
                         call s_compute_viscous_stress_cylindrical_boundary(q_prim_vf, &
                             & dq_prim_dx_vf(eqn_idx%mom%beg:eqn_idx%mom%end), dq_prim_dy_vf(eqn_idx%mom%beg:eqn_idx%mom%end), &
@@ -1519,7 +1520,7 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
 
-                    if (viscous .or. dummy) then
+                    if (viscous) then
                         $:GPU_PARALLEL_LOOP(private='[i, j, l]', collapse=2)
                         do l = 0, p
                             do j = 0, m
@@ -1625,7 +1626,7 @@ contains
         integer :: i, j, k, l
 
         #:for SCHEME, TYPE in [('weno','WENO_TYPE'), ('muscl','MUSCL_TYPE')]
-            if (recon_type == ${TYPE}$ .or. dummy) then
+            if (recon_type == ${TYPE}$) then
                 ! Reconstruction in s1-direction
                 if (norm_dir == 1) then
                     is1 = idwbuff(1); is2 = idwbuff(2); is3 = idwbuff(3)
@@ -1672,7 +1673,7 @@ contains
         ! Reconstruction in s1-direction
 
         #:for SCHEME, TYPE in [('weno','WENO_TYPE'), ('muscl', 'MUSCL_TYPE')]
-            if (recon_type == ${TYPE}$ .or. dummy) then
+            if (recon_type == ${TYPE}$) then
                 if (norm_dir == 1) then
                     is1 = idwbuff(1); is2 = idwbuff(2); is3 = idwbuff(3)
                     recon_dir = 1; is1%beg = is1%beg + ${SCHEME}$_polyn
