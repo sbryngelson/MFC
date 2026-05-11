@@ -23,6 +23,7 @@ option(MFC_OpenMP        "Build with OpenMP"                                 OFF
 option(MFC_GCov          "Build with GCov"                                   OFF)
 option(MFC_Unified       "Build with unified CPU & GPU memory (GH-200 only)" OFF)
 option(MFC_Fastmath      "Build with -gpu=fastmath on NV GPUs"               OFF)
+option(MFC_TRACE_CALLS   "Build with generated runtime call tracing"          OFF)
 option(MFC_PRE_PROCESS   "Build pre_process"                                 OFF)
 option(MFC_SIMULATION    "Build simulation"                                  OFF)
 option(MFC_POST_PROCESS  "Build post_process"                                OFF)
@@ -108,6 +109,17 @@ endif()
 
 find_program(FYPP_EXE fypp REQUIRED)
 
+set(MFC_TRACE_SUPPORTED_COMPILERS GNU Intel IntelLLVM NVHPC PGI)
+
+if (MFC_TRACE_CALLS)
+    if (NOT CMAKE_Fortran_COMPILER_ID IN_LIST MFC_TRACE_SUPPORTED_COMPILERS)
+        message(FATAL_ERROR "ERROR: Runtime call tracing is supported with GNU, Intel/IntelLLVM, and NVHPC/PGI Fortran compilers. CMake detected ${CMAKE_Fortran_COMPILER_ID}.")
+    endif()
+
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    find_package(Threads REQUIRED)
+endif()
+
 
 # Miscellaneous Configuration:
 # *  Explicitly link to -ldl (or system equivalent)
@@ -132,6 +144,16 @@ if (CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
     add_compile_options(
         $<$<COMPILE_LANGUAGE:Fortran>:-ffree-line-length-none>
     )
+
+    if (MFC_TRACE_CALLS)
+        add_compile_options(
+            $<$<COMPILE_LANGUAGE:Fortran>:-finstrument-functions>
+            $<$<COMPILE_LANGUAGE:Fortran>:-g>
+            $<$<COMPILE_LANGUAGE:Fortran>:-fno-inline>
+            $<$<COMPILE_LANGUAGE:Fortran>:-fno-optimize-sibling-calls>
+        )
+        add_link_options("-rdynamic")
+    endif()
 
     if (MFC_GCov)
 
@@ -241,13 +263,22 @@ elseif (CMAKE_Fortran_COMPILER_ID STREQUAL "Flang")
     if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelDebug")
         add_compile_options($<$<COMPILE_LANGUAGE:Fortran>:-O1> $<$<COMPILE_LANGUAGE:Fortran>:-g>)
     endif()
-elseif (CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+elseif ((CMAKE_Fortran_COMPILER_ID STREQUAL "Intel") OR (CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM"))
     add_compile_options($<$<COMPILE_LANGUAGE:Fortran>:-free>)
 
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_compile_options(-g -Og -traceback -debug -check all)
     elseif (CMAKE_BUILD_TYPE STREQUAL "RelDebug")
         add_compile_options(-g -Og -traceback -check bounds)
+    endif()
+
+    if (MFC_TRACE_CALLS)
+        add_compile_options(
+            $<$<COMPILE_LANGUAGE:Fortran>:-finstrument-functions>
+            $<$<COMPILE_LANGUAGE:Fortran>:-g>
+            $<$<COMPILE_LANGUAGE:Fortran>:-O0>
+        )
+        add_link_options("-Wl,-export-dynamic")
     endif()
 elseif ((CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC") OR (CMAKE_Fortran_COMPILER_ID STREQUAL "PGI"))
     add_compile_options(
@@ -275,9 +306,25 @@ elseif ((CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC") OR (CMAKE_Fortran_COMPILER_
         )
     endif()
 
+    if (MFC_TRACE_CALLS)
+        add_compile_options(
+            $<$<COMPILE_LANGUAGE:Fortran>:-Minstrument=functions>
+            $<$<COMPILE_LANGUAGE:Fortran>:-g>
+        )
+        add_link_options("-Wl,-export-dynamic")
+    endif()
+
     if (DEFINED ENV{MFC_CUDA_CC})
         string(REGEX MATCHALL "[0-9]+" MFC_CUDA_CC $ENV{MFC_CUDA_CC})
         message(STATUS "Found $MFC_CUDA_CC specified. GPU code will be generated for compute capability(ies) ${MFC_CUDA_CC}.")
+    endif()
+endif()
+
+if (MFC_TRACE_CALLS)
+    if (CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+        set_source_files_properties("${CMAKE_SOURCE_DIR}/src/common/m_trace.f90" PROPERTIES COMPILE_OPTIONS "-fno-instrument-functions")
+    elseif ((CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC") OR (CMAKE_Fortran_COMPILER_ID STREQUAL "PGI"))
+        set_source_files_properties("${CMAKE_SOURCE_DIR}/src/common/m_trace.f90" PROPERTIES COMPILE_OPTIONS "-Minstrument-exclude-func-list=s_trace_point_begin;-Minstrument-exclude-func-list=s_trace_point_end")
     endif()
 endif()
 
@@ -306,7 +353,9 @@ if (CMAKE_BUILD_TYPE STREQUAL "Release")
 
     # Enable LTO/IPO if supported (skip for gcov — LTO interferes with coverage
     # instrumentation and can trigger assembler errors on newer architectures).
-    if (MFC_GCov)
+    if (MFC_TRACE_CALLS)
+        message(STATUS "LTO/IPO disabled for trace build")
+    elseif (MFC_GCov)
         message(STATUS "LTO/IPO disabled for gcov build")
     elseif (CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
         if (MFC_Unified)
@@ -396,6 +445,7 @@ macro(HANDLE_SOURCES target useCommon)
     set(${target}_SRCs ${${target}_F90s})
     if (${useCommon})
         file(GLOB common_F90s CONFIGURE_DEPENDS "${common_DIR}/*.f90")
+        list(FILTER common_F90s EXCLUDE REGEX ".*/m_trace\.f90$")
         list(APPEND ${target}_SRCs ${common_F90s})
     endif()
 
@@ -458,6 +508,48 @@ macro(HANDLE_SOURCES target useCommon)
 
         list(APPEND ${target}_SRCs ${f90})
     endforeach()
+
+    if (MFC_TRACE_CALLS)
+        list(FIND ${target}_SRCs "${common_DIR}/m_trace.f90" _trace_module_index)
+        if (_trace_module_index EQUAL -1)
+            list(APPEND ${target}_SRCs "${common_DIR}/m_trace.f90")
+        endif()
+        list(APPEND ${target}_SRCs "${common_DIR}/m_trace_runtime.c")
+
+        set(_trace_SRCs "")
+        set(_trace_instrument_options "")
+        if (MFC_OpenACC OR MFC_OpenMP)
+            list(APPEND _trace_instrument_options "--no-point-traces")
+        endif()
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/trace/${target}")
+
+        foreach(src ${${target}_SRCs})
+            cmake_path(GET src FILENAME src_filename)
+
+            if(src_filename STREQUAL "m_trace.f90" OR src_filename STREQUAL "m_trace_runtime.c" OR src_filename STREQUAL "m_thermochem.f90")
+                list(APPEND _trace_SRCs "${src}")
+            else()
+                set(trace_src "${CMAKE_BINARY_DIR}/trace/${target}/${src_filename}")
+
+                add_custom_command(
+                    OUTPUT  "${trace_src}"
+                    COMMAND "${Python3_EXECUTABLE}"
+                            "${CMAKE_SOURCE_DIR}/toolchain/instrument_fortran_trace.py"
+                            ${_trace_instrument_options}
+                            "${src}"
+                            "${trace_src}"
+                    DEPENDS "${src}"
+                            "${CMAKE_SOURCE_DIR}/toolchain/instrument_fortran_trace.py"
+                    COMMENT "Instrumenting (trace) ${src_filename}"
+                    VERBATIM
+                )
+
+                list(APPEND _trace_SRCs "${trace_src}")
+            endif()
+        endforeach()
+
+        set(${target}_SRCs ${_trace_SRCs})
+    endif()
 endmacro()
 
 
@@ -558,6 +650,10 @@ exit 0
             ${a_target} PRIVATE MFC_${CMAKE_Fortran_COMPILER_ID}
                                 MFC_${${ARGS_TARGET}_UPPER}
         )
+
+        if (MFC_TRACE_CALLS)
+            target_link_libraries(${a_target} PRIVATE Threads::Threads)
+        endif()
 
         if (MFC_MPI AND ARGS_MPI)
             find_package(MPI COMPONENTS Fortran REQUIRED)

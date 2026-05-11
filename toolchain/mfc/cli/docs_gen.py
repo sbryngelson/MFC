@@ -92,10 +92,16 @@ def _generate_options_table(cmd: Command, schema: CLISchema) -> List[str]:
 
         # Add MFC config flags if included
         if "mfc_config" in cmd.include_common:
-            lines.append("| `--mpi`, `--no-mpi` | Enable/disable MPI | `true` |")
-            lines.append("| `--gpu [acc/mp]`, `--no-gpu` | Enable GPU (OpenACC/OpenMP) | `no` |")
-            lines.append("| `--debug`, `--no-debug` | Build with full debug compiler flags | `false` |")
-            lines.append("| `--reldebug`, `--no-reldebug` | Build with lightweight debug flags (CI) | `false` |")
+            config_rows = {
+                "mpi": "| `--mpi`, `--no-mpi` | Enable/disable MPI | `true` |",
+                "gpu": "| `--gpu [acc/mp]`, `--no-gpu` | Enable GPU (OpenACC/OpenMP) | `no` |",
+                "debug": "| `--debug`, `--no-debug` | Build with full debug compiler flags | `false` |",
+                "reldebug": "| `--reldebug`, `--no-reldebug` | Build with lightweight debug flags (CI) | `false` |",
+                "trace": "| `--trace`, `--no-trace` | Enable generated runtime call tracing; CPU builds include the local middle grid point | `false` |",
+            }
+            for name, row in config_rows.items():
+                if name not in cmd.exclude_config_flags:
+                    lines.append(row)
 
         lines.append("")
 
@@ -282,6 +288,7 @@ def generate_cli_reference(schema: CLISchema) -> str:
             "| `--debug` / `--no-debug` | Build with full debug compiler flags |",
             "| `--reldebug` / `--no-reldebug` | Build with lightweight debug flags (CI) |",
             "| `--gcov` / `--no-gcov` | Enable code coverage |",
+            "| `--trace` / `--no-trace` | Generated runtime call tracing; CPU builds include the local middle grid point |",
             "| `--single` / `--no-single` | Single precision |",
             "| `--mixed` / `--no-mixed` | Mixed precision |",
             "",

@@ -420,6 +420,7 @@ class MFCTarget:
             flags.append(f"-DMFC_GCov={'ON' if ARG('gcov') else 'OFF'}")
             flags.append(f"-DMFC_Unified={'ON' if ARG('unified') else 'OFF'}")
             flags.append(f"-DMFC_Fastmath={'ON' if ARG('fastmath') else 'OFF'}")
+            flags.append(f"-DMFC_TRACE_CALLS={'ON' if ARG('trace') else 'OFF'}")
 
         command = ["cmake"] + flags + ["-S", cmake_dirpath, "-B", build_dirpath]
 

@@ -146,12 +146,14 @@ BUILD_COMMAND = Command(
         Example("./mfc.sh build", "Build all default targets (CPU)"),
         Example("./mfc.sh build -j 8", "Build with 8 parallel jobs"),
         Example("./mfc.sh build --gpu", "Build with GPU (OpenACC) support"),
+        Example("./mfc.sh build --trace", "Build with generated runtime call tracing"),
         Example("./mfc.sh build -i case.py --case-optimization -j 8", "Case optimization (10x faster!)"),
     ],
     key_options=[
         ("-j, --jobs N", "Number of parallel build jobs"),
         ("-t, --targets", "Targets: pre_process, simulation, post_process"),
         ("--gpu [acc|mp]", "Enable GPU support (OpenACC or OpenMP)"),
+        ("--trace", "Enable generated runtime call tracing"),
         ("--case-optimization", "Hard-code case params for 10x speedup"),
         ("--debug", "Build in debug mode"),
     ],
@@ -163,6 +165,7 @@ RUN_COMMAND = Command(
     help="Run a case with MFC.",
     description="Run an MFC simulation case interactively or submit as a batch job.",
     include_common=["targets", "mfc_config", "jobs", "verbose", "debug_log", "gpus"],
+    exclude_config_flags=["trace"],
     positionals=[
         Positional(
             name="input",
@@ -275,6 +278,13 @@ RUN_COMMAND = Command(
             dest="no_build",
         ),
         Argument(
+            name="trace",
+            help="Emit a runtime call trace. CPU builds include the local middle grid point; GPU builds trace host calls only.",
+            action=ArgAction.STORE_TRUE,
+            default=False,
+            dest="runtime_trace",
+        ),
+        Argument(
             name="wait",
             help="(Batch) Wait for the job to finish.",
             action=ArgAction.STORE_TRUE,
@@ -350,6 +360,7 @@ RUN_COMMAND = Command(
         Example("./mfc.sh run case.py -e batch -N 2 -n 4", "Submit batch job: 2 nodes, 4 ranks/node"),
         Example("./mfc.sh run case.py --archive /mnt/nas/mfc-runs", "Archive run into /mnt/nas/mfc-runs/<name>-<timestamp>/"),
         Example("./mfc.sh run case.py --archive /mnt/nas/mfc-runs --archive-format tar.zst", "Archive as a compressed tarball"),
+        Example("./mfc.sh run case.py --trace", "Trace runtime calls; CPU builds include the local middle grid point"),
     ],
     key_options=[
         ("--case-optimization", "Hard-code params for 10x speedup!"),
@@ -360,6 +371,7 @@ RUN_COMMAND = Command(
         ("-w, --walltime", "Wall time limit (batch)"),
         ("--archive PATH", "Archive inputs+outputs after interactive run"),
         ("--archive-format FMT", "Archive format: dir, tar, tar.zst"),
+        ("--trace", "Emit a runtime call trace"),
     ],
 )
 

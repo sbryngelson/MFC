@@ -22,6 +22,7 @@ _BASH_COMPLETION_MAP = {
 def _collect_all_options(cmd: Command, schema: CLISchema) -> List[str]:
     """Collect all option flags for a command including common sets."""
     options: Set[str] = set()
+    excluded_config_flags = set(cmd.exclude_config_flags)
 
     # Common arguments
     for set_name in cmd.include_common:
@@ -31,26 +32,20 @@ def _collect_all_options(cmd: Command, schema: CLISchema) -> List[str]:
 
         # MFC config flags
         if common_set.mfc_config_flags:
-            options.update(
-                [
-                    "--mpi",
-                    "--no-mpi",
-                    "--gpu",
-                    "--no-gpu",
-                    "--debug",
-                    "--no-debug",
-                    "--gcov",
-                    "--no-gcov",
-                    "--unified",
-                    "--no-unified",
-                    "--single",
-                    "--no-single",
-                    "--mixed",
-                    "--no-mixed",
-                    "--fastmath",
-                    "--no-fastmath",
-                ]
-            )
+            config_options = {
+                "mpi": ["--mpi", "--no-mpi"],
+                "gpu": ["--gpu", "--no-gpu"],
+                "debug": ["--debug", "--no-debug"],
+                "gcov": ["--gcov", "--no-gcov"],
+                "unified": ["--unified", "--no-unified"],
+                "single": ["--single", "--no-single"],
+                "mixed": ["--mixed", "--no-mixed"],
+                "fastmath": ["--fastmath", "--no-fastmath"],
+                "trace": ["--trace", "--no-trace"],
+            }
+            for name, flags in config_options.items():
+                if name not in excluded_config_flags:
+                    options.update(flags)
         else:
             for arg in common_set.arguments:
                 if arg.short:
@@ -318,32 +313,27 @@ def _generate_zsh_command_args(cmd: Command, schema: CLISchema) -> List[str]:
         arg_lines.append(_zsh_completion_for_positional(pos, i + 1))
 
     # Options from common sets
+    excluded_config_flags = set(cmd.exclude_config_flags)
     for set_name in cmd.include_common:
         common_set = schema.get_common_set(set_name)
         if common_set is None:
             continue
 
         if common_set.mfc_config_flags:
-            arg_lines.extend(
-                [
-                    "'--mpi[Enable MPI]'",
-                    "'--no-mpi[Disable MPI]'",
-                    "'--gpu[Enable GPU]:mode:(acc mp)'",
-                    "'--no-gpu[Disable GPU]'",
-                    "'--debug[Build with debug compiler flags (for MFC code)]'",
-                    "'--no-debug[Build without debug flags]'",
-                    "'--gcov[Enable gcov coverage]'",
-                    "'--no-gcov[Disable gcov coverage]'",
-                    "'--unified[Enable unified memory]'",
-                    "'--no-unified[Disable unified memory]'",
-                    "'--single[Enable single precision]'",
-                    "'--no-single[Disable single precision]'",
-                    "'--mixed[Enable mixed precision]'",
-                    "'--no-mixed[Disable mixed precision]'",
-                    "'--fastmath[Enable fast math]'",
-                    "'--no-fastmath[Disable fast math]'",
-                ]
-            )
+            config_args = {
+                "mpi": ["'--mpi[Enable MPI]'", "'--no-mpi[Disable MPI]'"],
+                "gpu": ["'--gpu[Enable GPU]:mode:(acc mp)'", "'--no-gpu[Disable GPU]'"],
+                "debug": ["'--debug[Build with debug compiler flags (for MFC code)]'", "'--no-debug[Build without debug flags]'"],
+                "gcov": ["'--gcov[Enable gcov coverage]'", "'--no-gcov[Disable gcov coverage]'"],
+                "unified": ["'--unified[Enable unified memory]'", "'--no-unified[Disable unified memory]'"],
+                "single": ["'--single[Enable single precision]'", "'--no-single[Disable single precision]'"],
+                "mixed": ["'--mixed[Enable mixed precision]'", "'--no-mixed[Disable mixed precision]'"],
+                "fastmath": ["'--fastmath[Enable fast math]'", "'--no-fastmath[Disable fast math]'"],
+                "trace": ["'--trace[Enable generated runtime call tracing]'", "'--no-trace[Disable generated runtime call tracing]'"],
+            }
+            for name, args in config_args.items():
+                if name not in excluded_config_flags:
+                    arg_lines.extend(args)
         else:
             for arg in common_set.arguments:
                 desc = arg.help.replace("'", "").replace("[", "").replace("]", "")[:120]

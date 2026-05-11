@@ -70,7 +70,7 @@ def _add_positional(parser: argparse.ArgumentParser, pos: Positional):
     parser.add_argument(pos.name, **kwargs)
 
 
-def _add_mfc_config_arguments(parser: argparse.ArgumentParser, config):
+def _add_mfc_config_arguments(parser: argparse.ArgumentParser, config, exclude=None):
     """
     Add MFCConfig boolean pair arguments dynamically.
 
@@ -79,7 +79,10 @@ def _add_mfc_config_arguments(parser: argparse.ArgumentParser, config):
     # Import here to avoid circular dependency
     from ..state import gpuConfigOptions
 
+    exclude = set(exclude or [])
     for f in dataclasses.fields(config):
+        if f.name in exclude:
+            continue
         if f.name == "gpu":
             parser.add_argument(
                 f"--{f.name}",
@@ -109,7 +112,7 @@ def _add_common_arguments(parser: argparse.ArgumentParser, command: Command, com
 
         # Handle MFC config flags specially
         if common_set.mfc_config_flags and config is not None:
-            _add_mfc_config_arguments(parser, config)
+            _add_mfc_config_arguments(parser, config, command.exclude_config_flags)
         else:
             for arg in common_set.arguments:
                 _add_argument(parser, arg)

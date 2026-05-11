@@ -65,6 +65,10 @@ def get_baked_templates() -> dict:
     return {os.path.splitext(os.path.basename(f))[0]: file_read(f) for f in glob(os.path.join(MFC_TEMPLATE_DIR, "*.mako"))}
 
 
+def __runtime_trace_requested() -> bool:
+    return ARG("runtime_trace", False)
+
+
 def __job_script_filepath() -> str:
     return os.path.abspath(os.sep.join([os.path.dirname(ARG("input")), f"{ARG('name')}.{'bat' if os.name == 'nt' else 'sh'}"]))
 
@@ -90,6 +94,23 @@ def __generate_job_script(targets, case: input.MFCInputFile):
     if ARG("gpus") is not None:
         gpu_ids = ",".join([str(_) for _ in ARG("gpus")])
         env.update({"CUDA_VISIBLE_DEVICES": gpu_ids, "HIP_VISIBLE_DEVICES": gpu_ids})
+    if __runtime_trace_requested():
+        trace_file = os.path.abspath(os.path.join(os.path.dirname(ARG("input")), "trace.log"))
+        with open(trace_file, "w", encoding="utf-8"):
+            pass
+        env.update(
+            {
+                "MFC_TRACE": "1",
+                "MFC_TRACE_POINT": "middle",
+                "MFC_TRACE_FORMAT": "tree",
+                "MFC_TRACE_INCLUDE_SETUP": "1",
+                "MFC_TRACE_CONTEXT": "1",
+                "MFC_TRACE_FILE": trace_file,
+                "MFC_TRACE_STDOUT": "1" if sys.stdout.isatty() else "0",
+            }
+        )
+        if ARG("mpi"):
+            env.update({"MFC_TRACE_MPI": "1"})
 
     # Compute GPU mode booleans for templates
     gpu_mode = ARG("gpu")

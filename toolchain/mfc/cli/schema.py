@@ -135,6 +135,7 @@ class Command:
 
     # Inherit common argument sets
     include_common: List[str] = field(default_factory=list)  # e.g., ["targets", "jobs"]
+    exclude_config_flags: List[str] = field(default_factory=list)
 
     # Subcommands (for nested commands like "packer pack")
     subcommands: List["Command"] = field(default_factory=list)
