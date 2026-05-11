@@ -135,6 +135,14 @@ jobs:
             ${{ env.GH_REGISTRY }}:${{ env.TAG }}-${{ matrix.config.tag }}-${{ matrix.config.runner }}
           push: true
 
+      - name: Set AMD AFAR vars
+        if: ${{ matrix.config.name == 'amd' }}
+        run: |
+          AFAR=rocm-afar-8873-drop-22.2.0
+          ROOT="/opt/${AFAR}"
+          echo "AFAR_VERSION=${AFAR}"      >> $GITHUB_ENV
+          echo "AFAR_ROOT=${ROOT}"         >> $GITHUB_ENV
+
       - name: Build and push image (amd)
         if: ${{ matrix.config.name == 'amd' }}
         uses: docker/build-push-action@v6
@@ -144,13 +152,13 @@ jobs:
           build-args: |
             BASE_IMAGE=${{ matrix.config.base_image }}
             TARGET=amd
-            AFAR_VERSION=rocm-afar-8873-drop-22.2.0
-            OLCF_AFAR_ROOT=/opt/rocm-afar-8873-drop-22.2.0
+            AFAR_VERSION=${{ env.AFAR_VERSION }}
+            OLCF_AFAR_ROOT=${{ env.AFAR_ROOT }}
             CC_COMPILER=gcc
             CXX_COMPILER=g++
-            FC_COMPILER=/opt/rocm-afar-8873-drop-22.2.0/bin/amdflang
-            COMPILER_PATH=/opt/rocm-afar-8873-drop-22.2.0/lib/llvm/bin:/opt/rocm-afar-8873-drop-22.2.0/bin
-            COMPILER_LD_LIBRARY_PATH=/opt/rocm-afar-8873-drop-22.2.0/lib:/opt/rocm-afar-8873-drop-22.2.0/lib/llvm/lib
+            FC_COMPILER=${{ env.AFAR_ROOT }}/bin/amdflang
+            COMPILER_PATH=${{ env.AFAR_ROOT }}/lib/llvm/bin:${{ env.AFAR_ROOT }}/bin
+            COMPILER_LD_LIBRARY_PATH=${{ env.AFAR_ROOT }}/lib:${{ env.AFAR_ROOT }}/lib/llvm/lib
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
           tags: |
