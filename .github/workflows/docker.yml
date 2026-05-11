@@ -22,8 +22,8 @@ jobs:
         config:
             - { name: 'cpu', runner: 'ubuntu-22.04',     base_image: 'ubuntu:22.04' }
             - { name: 'cpu', runner: 'ubuntu-22.04-arm', base_image: 'ubuntu:22.04' }
-            - { name: 'gpu', runner: 'ubuntu-22.04',     base_image: 'nvcr.io/nvidia/nvhpc:23.11-devel-cuda_multi-ubuntu22.04' }
-            - { name: 'gpu', runner: 'ubuntu-22.04-arm', base_image: 'nvcr.io/nvidia/nvhpc:23.11-devel-cuda_multi-ubuntu22.04' }
+            - { name: 'gpu', runner: 'ubuntu-22.04',     base_image: 'nvcr.io/nvidia/nvhpc:24.5-devel-cuda_multi-ubuntu22.04', compiler_arch: 'Linux_x86_64' }
+            - { name: 'gpu', runner: 'ubuntu-22.04-arm', base_image: 'nvcr.io/nvidia/nvhpc:24.5-devel-cuda_multi-ubuntu22.04', compiler_arch: 'Linux_aarch64' }
     runs-on: ${{ matrix.config.runner }}
     outputs:
       tag: ${{ steps.clone.outputs.tag }}
@@ -108,8 +108,8 @@ jobs:
             CC_COMPILER=${{ 'nvc' }}
             CXX_COMPILER=${{ 'nvc++' }}
             FC_COMPILER=${{ 'nvfortran' }}
-            COMPILER_PATH=${{ '/opt/nvidia/hpc_sdk/Linux_x86_64/compilers/bin' }}
-            COMPILER_LD_LIBRARY_PATH=${{ '/opt/nvidia/hpc_sdk/Linux_x86_64/compilers/lib' }}
+            COMPILER_PATH=/opt/nvidia/hpc_sdk/${{ matrix.config.compiler_arch }}/compilers/bin
+            COMPILER_LD_LIBRARY_PATH=/opt/nvidia/hpc_sdk/${{ matrix.config.compiler_arch }}/compilers/lib
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/mfc:${{ env.TAG }}-${{ matrix.config.name }}-${{ matrix.config.runner}}
           push: true
 
