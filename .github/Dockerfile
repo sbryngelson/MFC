@@ -8,6 +8,9 @@ ARG FC_COMPILER
 ARG COMPILER_PATH
 ARG COMPILER_LD_LIBRARY_PATH
 
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
 RUN apt-get update -y && \
     apt-get install -y software-properties-common ca-certificates gnupg && \
     add-apt-repository ppa:deadsnakes/ppa && \
