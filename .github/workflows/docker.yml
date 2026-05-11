@@ -132,6 +132,13 @@ jobs:
           REGISTRY: ${{ secrets.DOCKERHUB_USERNAME }}/mfc
         run: |
           docker buildx imagetools create -t $REGISTRY:$TAG-cpu  $REGISTRY:$TAG-cpu-ubuntu-22.04 $REGISTRY:$TAG-cpu-ubuntu-22.04-arm
-          docker buildx imagetools create -t $REGISTRY:latest-cpu $REGISTRY:$TAG-cpu-ubuntu-22.04 $REGISTRY:$TAG-cpu-ubuntu-22.04-arm
           docker buildx imagetools create -t $REGISTRY:$TAG-gpu  $REGISTRY:$TAG-gpu-ubuntu-22.04 $REGISTRY:$TAG-gpu-ubuntu-22.04-arm
+
+      - name: Update latest tags
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ needs.Container.outputs.tag }}
+          REGISTRY: ${{ secrets.DOCKERHUB_USERNAME }}/mfc
+        run: |
+          docker buildx imagetools create -t $REGISTRY:latest-cpu $REGISTRY:$TAG-cpu-ubuntu-22.04 $REGISTRY:$TAG-cpu-ubuntu-22.04-arm
           docker buildx imagetools create -t $REGISTRY:latest-gpu $REGISTRY:$TAG-gpu-ubuntu-22.04 $REGISTRY:$TAG-gpu-ubuntu-22.04-arm
