@@ -51,19 +51,6 @@ famd-all python cmake
 famd-all cpe/25.09
 famd-all PrgEnv-amd
 
-amd90a  HPCFund gfx90a compiler (MI250)
-amd90a-gpu rocm/7.2.0
-amd90a-gpu OLCF_AFAR_ROOT="/work1/spencerbryngelson/sbryngelson/software/therock-afar-23.2.1-gfx90a-7.13.0-7357b5084b"
-amd90a-gpu PATH="${OLCF_AFAR_ROOT}/lib/llvm/bin:${PATH}"
-amd90a-gpu LD_LIBRARY_PATH="${OLCF_AFAR_ROOT}/lib:${OLCF_AFAR_ROOT}/lib/llvm/lib:${LD_LIBRARY_PATH}"
-amd90a-gpu CRAY_HIPFORT_INC="-I${OLCF_AFAR_ROOT}/include/hipfort/amdgcn"
-amd90a-gpu CRAY_HIPFORT_LIB="-L${OLCF_AFAR_ROOT}/lib -lhipfft"
-amd90a-gpu CRAY_HIP_INC="-I${OLCF_AFAR_ROOT}/include/hip"
-amd90a-gpu CMAKE_PREFIX_PATH="${OLCF_AFAR_ROOT}:${CMAKE_PREFIX_PATH}"
-amd90a-gpu CC="${OLCF_AFAR_ROOT}/lib/llvm/bin/clang"
-amd90a-gpu CXX="${OLCF_AFAR_ROOT}/lib/llvm/bin/clang++"
-amd90a-gpu FC="${OLCF_AFAR_ROOT}/bin/amdflang"
-
 tuo     OLCF Tuolumne
 tuo-all cpe/25.03 rocm/6.3.1
 tuo-all cray-fftw/3.3.10.9 cray-hdf5 python/3.12.2 cmake
