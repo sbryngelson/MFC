@@ -1182,15 +1182,15 @@ contains
                                                 alpha(q) = d_cbR_${XYZ}$ (q, ${SV}$)/(beta(q)**2._wp)
                                             end do
                                         else if (mapped_weno) then
-                                            alpha(0:weno_num_stencils) = d_cbR_${XYZ}$ (0:weno_num_stencils, &
-                                                  & ${SV}$)/(beta(0:weno_num_stencils)**2._wp)
+                                            do q = 0, weno_num_stencils
+                                                alpha(q) = d_cbR_${XYZ}$ (q, ${SV}$)/(beta(q)**2._wp)
+                                            end do
                                             omega = alpha/sum(alpha)
-                                            alpha(0:weno_num_stencils) = (d_cbR_${XYZ}$ (0:weno_num_stencils, &
-                                                  & ${SV}$)*(1._wp + d_cbR_${XYZ}$ (0:weno_num_stencils, &
-                                                  & ${SV}$) - 3._wp*omega(0:weno_num_stencils)) + omega(0:weno_num_stencils) &
-                                                  & **2._wp)*(omega(0:weno_num_stencils)/(d_cbR_${XYZ}$ (0:weno_num_stencils, &
-                                                  & ${SV}$)**2._wp + omega(0:weno_num_stencils)*(1._wp &
-                                                  & - 2._wp*d_cbR_${XYZ}$ (0:weno_num_stencils,${SV}$))))
+                                            do q = 0, weno_num_stencils
+                                                alpha(q) = (d_cbR_${XYZ}$ (q, ${SV}$)*(1._wp + d_cbR_${XYZ}$ (q, &
+                                                      & ${SV}$) - 3._wp*omega(q)) + omega(q)**2._wp)*(omega(q)/(d_cbR_${XYZ}$ (q, &
+                                                      & ${SV}$)**2._wp + omega(q)*(1._wp - 2._wp*d_cbR_${XYZ}$ (q, ${SV}$))))
+                                            end do
                                         else if (wenoz) then
                                             $:GPU_LOOP(parallelism='[seq]')
                                             do q = 0, weno_num_stencils
@@ -1487,7 +1487,7 @@ contains
         real(wp), parameter :: beta = 4._wp/3._wp  !< Local curvature freedom parameter
         real(wp), parameter :: alpha_mp = 2._wp
         real(wp), parameter :: beta_mp = 4._wp/3._wp
-        real(wp)            :: vp0, vp1, vp2, vm0, vm2
+        real(wp)            :: vp0, vp1, vp2, vm1, vm2
 
         #:for WENO_DIR, XYZ, STENCIL_VAR, COORDS, X_BND, Y_BND, Z_BND in &
                     [(1, 'x', 'j', '{STENCIL_IDX}, k, l', 'is1_weno', 'is2_weno', 'is3_weno'), &
@@ -1496,7 +1496,7 @@ contains
             #:set SV = STENCIL_VAR
             #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
             if (weno_dir == ${WENO_DIR}$) then
-                $:GPU_PARALLEL_LOOP(collapse=4,private='[d, vp0, vp1, vp2, vm0, vm2]')
+                $:GPU_PARALLEL_LOOP(collapse=4,private='[d, vp0, vp1, vp2, vm1, vm2]')
                 do l = ${Z_BND}$%beg, ${Z_BND}$%end
                     do k = ${Y_BND}$%beg, ${Y_BND}$%end
                         do j = ${X_BND}$%beg, ${X_BND}$%end
