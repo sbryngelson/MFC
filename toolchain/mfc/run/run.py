@@ -64,7 +64,7 @@ def __profiler_prepend() -> typing.List[str]:
 def __runner_prepend() -> typing.List[str]:
     profiler = __profiler_prepend()
 
-    if __runtime_trace_requested() and ARG("gpu") in (gpuConfigOptions.ACC.value, gpuConfigOptions.MP.value):
+    if ARG("runtime_trace", False) and ARG("gpu") != gpuConfigOptions.NONE.value:
         return ["python3", os.path.join(MFC_ROOT_DIR, "toolchain", "mfc", "run", "trace.py")] + profiler
 
     return profiler
@@ -72,10 +72,6 @@ def __runner_prepend() -> typing.List[str]:
 
 def get_baked_templates() -> dict:
     return {os.path.splitext(os.path.basename(f))[0]: file_read(f) for f in glob(os.path.join(MFC_TEMPLATE_DIR, "*.mako"))}
-
-
-def __runtime_trace_requested() -> bool:
-    return ARG("runtime_trace", False)
 
 
 def __job_script_filepath() -> str:
@@ -99,6 +95,11 @@ def __get_template() -> Template:
 
 
 def __generate_job_script(targets, case: input.MFCInputFile):
+    env = {}
+    if ARG("gpus") is not None:
+        gpu_ids = ",".join([str(_) for _ in ARG("gpus")])
+        env.update({"CUDA_VISIBLE_DEVICES": gpu_ids, "HIP_VISIBLE_DEVICES": gpu_ids})
+
     # Compute GPU mode booleans for templates
     gpu_mode = ARG("gpu")
 
@@ -111,11 +112,7 @@ def __generate_job_script(targets, case: input.MFCInputFile):
     gpu_acc = gpu_mode == gpuConfigOptions.ACC.value
     gpu_mp = gpu_mode == gpuConfigOptions.MP.value
 
-    env = {}
-    if ARG("gpus") is not None:
-        gpu_ids = ",".join([str(_) for _ in ARG("gpus")])
-        env.update({"CUDA_VISIBLE_DEVICES": gpu_ids, "HIP_VISIBLE_DEVICES": gpu_ids})
-    if __runtime_trace_requested():
+    if ARG("runtime_trace", False):
         trace_file = os.path.abspath(os.path.join(os.path.dirname(ARG("input")), "trace.log"))
         with open(trace_file, "w", encoding="utf-8"):
             pass

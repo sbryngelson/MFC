@@ -5,22 +5,19 @@
 !> @brief Simple runtime call tracing helpers.
 module m_trace
 
-    use iso_fortran_env, only: output_unit
-
     implicit none
 
     private
-    public :: s_trace_enter, s_trace_call, s_trace_global_call, s_trace_point_begin, s_trace_point_end
+    public :: s_trace_point_begin, s_trace_point_end
 
-    logical, private           :: trace_initialized = .false.
-    logical, private           :: trace_enabled = .false.
-    logical, private           :: trace_point_enabled = .false.
-    logical, private           :: trace_point_middle = .false.
-    integer, private           :: trace_j = 0
-    integer, private           :: trace_k = 0
-    integer, private           :: trace_l = 0
-    integer, private           :: trace_point_depth = 0
-    character(len=64), private :: trace_point_vars = ''
+    logical, private :: trace_initialized = .false.
+    logical, private :: trace_enabled = .false.
+    logical, private :: trace_point_enabled = .false.
+    logical, private :: trace_point_middle = .false.
+    integer, private :: trace_j = 0
+    integer, private :: trace_k = 0
+    integer, private :: trace_l = 0
+    integer, private :: trace_point_depth = 0
 
     interface
         subroutine c_trace_point_begin() bind(C, name="mfc_trace_point_begin")
@@ -70,78 +67,27 @@ contains
             end if
         end if
 
-        call get_environment_variable('MFC_TRACE_POINT_VARS', env_value, length=env_len)
-        if (env_len > 0) trace_point_vars = trim(env_value(:env_len))
-
         trace_initialized = .true.
 
     end subroutine s_initialize_trace
 
-    !> Emit a live call-trace line when MFC_TRACE is enabled.
-    subroutine s_trace_enter(name)
-
-        character(len=*), intent(in) :: name
-
-        call s_initialize_trace()
-
-        if (.not. trace_enabled) return
-        if (trace_point_enabled .and. trace_point_depth <= 0) return
-
-        write (output_unit, '(A,A)') 'TRACE ', trim(name)
-        call flush (output_unit)
-
-    end subroutine s_trace_enter
-
-    !> Emit a live call-site trace when the current trace scope is active.
-    subroutine s_trace_call(name)
-
-        character(len=*), intent(in) :: name
-
-        call s_initialize_trace()
-
-        if (.not. trace_enabled) return
-        if (trace_point_enabled .and. trace_point_depth <= 0) return
-
-        write (output_unit, '(A,A)') 'TRACE ', trim(name)
-        call flush (output_unit)
-
-    end subroutine s_trace_call
-
-    !> Emit a call-site trace even when point tracing has not entered a cell loop yet.
-    subroutine s_trace_global_call(name)
-
-        character(len=*), intent(in) :: name
-
-        call s_initialize_trace()
-
-        if (.not. trace_enabled) return
-
-        write (output_unit, '(A,A)') 'TRACE ', trim(name)
-        call flush (output_unit)
-
-    end subroutine s_trace_global_call
-
     !> Enable nested routine-entry tracing while a call at MFC_TRACE_POINT executes.
-    subroutine s_trace_point_begin(j, k, l, vars, mid_j, mid_k, mid_l)
+    subroutine s_trace_point_begin(j, k, l, mid_j, mid_k, mid_l)
 
-        integer, intent(in)          :: j
-        integer, intent(in)          :: k
-        integer, intent(in)          :: l
-        character(len=*), intent(in) :: vars
-        integer, intent(in)          :: mid_j
-        integer, intent(in)          :: mid_k
-        integer, intent(in)          :: mid_l
-        integer                      :: target_j
-        integer                      :: target_k
-        integer                      :: target_l
+        integer, intent(in) :: j
+        integer, intent(in) :: k
+        integer, intent(in) :: l
+        integer, intent(in) :: mid_j
+        integer, intent(in) :: mid_k
+        integer, intent(in) :: mid_l
+        integer             :: target_j
+        integer             :: target_k
+        integer             :: target_l
 
         call s_initialize_trace()
 
         if (.not. trace_enabled) return
         if (.not. trace_point_enabled) return
-        if (len_trim(trace_point_vars) > 0 .and. trim(trace_point_vars) /= 'any') then
-            if (trim(vars) /= trim(trace_point_vars)) return
-        end if
         if (trace_point_middle) then
             target_j = mid_j
             target_k = mid_k

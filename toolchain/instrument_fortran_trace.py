@@ -205,8 +205,7 @@ def point_begin_line(indent: str, point_vars: tuple[str, str, str], loop_stack: 
     for var in point_vars:
         entry = active[var]
         midpoint_args.append(f"int(({entry['lower']}) + ({entry['upper']}))/2")
-    point_names = ",".join(point_vars)
-    return f"{indent}call s_trace_point_begin({point_args}, '{point_names}', {', '.join(midpoint_args)})\n"
+    return f"{indent}call s_trace_point_begin({point_args}, {', '.join(midpoint_args)})\n"
 
 
 def instrument(lines: list[str], point_traces: bool = True) -> list[str]:
