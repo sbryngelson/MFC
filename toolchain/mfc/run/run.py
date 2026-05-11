@@ -61,6 +61,15 @@ def __profiler_prepend() -> typing.List[str]:
     return []
 
 
+def __runner_prepend() -> typing.List[str]:
+    profiler = __profiler_prepend()
+
+    if __runtime_trace_requested() and ARG("gpu") == gpuConfigOptions.ACC.value:
+        return ["python3", os.path.join(MFC_ROOT_DIR, "toolchain", "mfc", "run", "trace.py")] + profiler
+
+    return profiler
+
+
 def get_baked_templates() -> dict:
     return {os.path.splitext(os.path.basename(f))[0]: file_read(f) for f in glob(os.path.join(MFC_TEMPLATE_DIR, "*.mako"))}
 
@@ -90,6 +99,18 @@ def __get_template() -> Template:
 
 
 def __generate_job_script(targets, case: input.MFCInputFile):
+    # Compute GPU mode booleans for templates
+    gpu_mode = ARG("gpu")
+
+    # Validate gpu_mode is one of the expected values
+    valid_gpu_modes = {e.value for e in gpuConfigOptions}
+    if gpu_mode not in valid_gpu_modes:
+        raise MFCException(f"Invalid GPU mode '{gpu_mode}'. Must be one of: {', '.join(sorted(valid_gpu_modes))}")
+
+    gpu_enabled = gpu_mode != gpuConfigOptions.NONE.value
+    gpu_acc = gpu_mode == gpuConfigOptions.ACC.value
+    gpu_mp = gpu_mode == gpuConfigOptions.MP.value
+
     env = {}
     if ARG("gpus") is not None:
         gpu_ids = ",".join([str(_) for _ in ARG("gpus")])
@@ -109,20 +130,10 @@ def __generate_job_script(targets, case: input.MFCInputFile):
                 "MFC_TRACE_STDOUT": "1" if sys.stdout.isatty() else "0",
             }
         )
+        if gpu_acc:
+            env.update({"MFC_TRACE_ACC_NOTIFY": "1", "NV_ACC_NOTIFY": "1"})
         if ARG("mpi"):
             env.update({"MFC_TRACE_MPI": "1"})
-
-    # Compute GPU mode booleans for templates
-    gpu_mode = ARG("gpu")
-
-    # Validate gpu_mode is one of the expected values
-    valid_gpu_modes = {e.value for e in gpuConfigOptions}
-    if gpu_mode not in valid_gpu_modes:
-        raise MFCException(f"Invalid GPU mode '{gpu_mode}'. Must be one of: {', '.join(sorted(valid_gpu_modes))}")
-
-    gpu_enabled = gpu_mode != gpuConfigOptions.NONE.value
-    gpu_acc = gpu_mode == gpuConfigOptions.ACC.value
-    gpu_mp = gpu_mode == gpuConfigOptions.MP.value
 
     content = __get_template().render(
         **{**ARGS(), "targets": targets},
@@ -132,7 +143,7 @@ def __generate_job_script(targets, case: input.MFCInputFile):
         MFC_ROOT_DIR=MFC_ROOT_DIR,
         SIMULATION=SIMULATION,
         qsystem=queues.get_system(),
-        profiler=shlex.join(__profiler_prepend()),
+        profiler=shlex.join(__runner_prepend()),
         gpu_enabled=gpu_enabled,
         gpu_acc=gpu_acc,
         gpu_mp=gpu_mp,

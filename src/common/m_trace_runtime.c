@@ -71,6 +71,7 @@ static int trace_file_fd = -1;
 static void mfc_trace_initialize_once(void) __attribute__((no_instrument_function));
 static void mfc_trace_initialize(void) __attribute__((no_instrument_function));
 static int mfc_trace_process_rank(void) __attribute__((no_instrument_function));
+static void mfc_trace_executable_name(char *buffer, size_t buffer_size) __attribute__((no_instrument_function));
 static void mfc_trace_format_function_name(const char *name, char *buffer, size_t buffer_size) __attribute__((no_instrument_function));
 static void mfc_trace_pretty_file(const char *file, char *buffer, size_t buffer_size) __attribute__((no_instrument_function));
 static void mfc_trace_shell_quote(const char *text, char *buffer, size_t buffer_size) __attribute__((no_instrument_function));
@@ -150,6 +151,12 @@ static void mfc_trace_initialize_once(void) {
             (void)write(STDERR_FILENO, message, sizeof(message) - 1);
         }
     }
+
+    if (trace_enabled) {
+        char executable[MFC_TRACE_NAME_MAX];
+        mfc_trace_executable_name(executable, sizeof(executable));
+        mfc_trace_write_line("TRACE_RUN", executable, NULL, 0);
+    }
 }
 
 static void mfc_trace_initialize(void) {
@@ -179,6 +186,24 @@ static int mfc_trace_process_rank(void) {
     }
 
     return 0;
+}
+
+static void mfc_trace_executable_name(char *buffer, size_t buffer_size) {
+    char path[1024];
+    const char *name;
+    ssize_t len;
+
+    if (buffer_size == 0) return;
+
+    len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (len > 0) {
+        path[len] = '\0';
+        name = strrchr(path, '/');
+        snprintf(buffer, buffer_size, "%s", name != NULL ? name + 1 : path);
+        return;
+    }
+
+    snprintf(buffer, buffer_size, "program");
 }
 
 static void mfc_trace_format_function_name(const char *name, char *buffer, size_t buffer_size) {
@@ -407,6 +432,10 @@ static int mfc_trace_skip_symbol(const char *name) {
            strstr(name, "mfc_trace_") != NULL ||
            strstr(name, "m_trace:") != NULL ||
            strstr(name, "m_trace_s_") != NULL ||
+           strstr(name, "m_nvtx_") != NULL ||
+           strncmp(name, "..acc_", 6) == 0 ||
+           strstr(name, "acc_cuda_funcreg_constructor") != NULL ||
+           strstr(name, "acc_data_constructor") != NULL ||
            strcmp(name, "s_trace_point_begin") == 0 ||
            strcmp(name, "s_trace_point_end") == 0;
 }
