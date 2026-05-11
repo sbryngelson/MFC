@@ -56,7 +56,7 @@ jobs:
             TAG="nightly"
           else
             BRANCH="${{ github.event.inputs.tag || github.ref_name }}"
-            TAG="$BRANCH"
+            TAG=$(echo "$BRANCH" | tr '/' '-')
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "TAG=$TAG" >> $GITHUB_ENV
