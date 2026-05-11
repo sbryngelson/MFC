@@ -145,6 +145,7 @@ jobs:
             BASE_IMAGE=${{ matrix.config.base_image }}
             TARGET=amd
             AFAR_VERSION=rocm-afar-8873-drop-22.2.0
+            OLCF_AFAR_ROOT=/opt/rocm-afar-8873-drop-22.2.0
             CC_COMPILER=gcc
             CXX_COMPILER=g++
             FC_COMPILER=/opt/rocm-afar-8873-drop-22.2.0/bin/amdflang
