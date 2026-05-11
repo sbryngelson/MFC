@@ -20,7 +20,14 @@ _FC = get_fortran_constants()
 
 def _fc(name: str, default: int) -> int:
     """Get a Fortran constant, using the inline default when m_constants.fpp is unavailable."""
-    return _FC.get(name, default)
+    if _FC:
+        if name not in _FC:
+            raise RuntimeError(
+                f"Fortran constant '{name}' not found in m_constants.fpp. "
+                f"Toolchain is out of sync with Fortran source."
+            )
+        return _FC[name]
+    return default
 
 
 NF = _fc("num_fluids_max", 10)        # fluid_pp
