@@ -189,7 +189,7 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
         do i = 1, fourier_rings
-            i2 = i 
+            i2 = i
             $:GPU_UPDATE(device='[i2]')
 
             $:GPU_PARALLEL_LOOP(collapse=3)

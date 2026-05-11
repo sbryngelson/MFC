@@ -104,11 +104,11 @@ module m_rhs
     $:GPU_DECLARE(create='[alf_sum]')
 
     real(wp), allocatable, dimension(:,:,:)   :: blkmod1, blkmod2, alpha1, alpha2, Kterm
-    real(wp), allocatable, dimension(:,:,:,:) :: qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, qR_rsx_vf, qR_rsy_vf, qR_rsz_vf
-    real(wp), allocatable, dimension(:,:,:,:) :: dqL_rsx_vf, dqL_rsy_vf, dqL_rsz_vf, dqR_rsx_vf, dqR_rsy_vf, dqR_rsz_vf
+    real(wp), allocatable, dimension(:,:,:,:) :: qL_rsx_vf, qR_rsx_vf
+    real(wp), allocatable, dimension(:,:,:,:) :: dqL_rsx_vf, dqR_rsx_vf
     $:GPU_DECLARE(create='[blkmod1, blkmod2, alpha1, alpha2, Kterm]')
-    $:GPU_DECLARE(create='[qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, qR_rsx_vf, qR_rsy_vf, qR_rsz_vf]')
-    $:GPU_DECLARE(create='[dqL_rsx_vf, dqL_rsy_vf, dqL_rsz_vf, dqR_rsx_vf, dqR_rsy_vf, dqR_rsz_vf]')
+    $:GPU_DECLARE(create='[qL_rsx_vf, qR_rsx_vf]')
+    $:GPU_DECLARE(create='[dqL_rsx_vf, dqR_rsx_vf]')
 
 contains
 
@@ -285,30 +285,6 @@ contains
             @:ALLOCATE(qR_rsx_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
                        & 1:sys_size))
 
-            if (n > 0) then
-                @:ALLOCATE(qL_rsy_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-                @:ALLOCATE(qR_rsy_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-            else
-                @:ALLOCATE(qL_rsy_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-                @:ALLOCATE(qR_rsy_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-            end if
-
-            if (p > 0) then
-                @:ALLOCATE(qL_rsz_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                           & 1:sys_size))
-                @:ALLOCATE(qR_rsz_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                           & 1:sys_size))
-            else
-                @:ALLOCATE(qL_rsz_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-                @:ALLOCATE(qR_rsz_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, idwbuff(3)%beg:idwbuff(3)%end, &
-                           & 1:sys_size))
-            end if
-
             if (.not. viscous) then
                 do i = 1, num_dims
                     @:ALLOCATE(dqL_prim_dx_n(i)%vf(1:sys_size))
@@ -414,30 +390,6 @@ contains
                                & idwbuff(3)%beg:idwbuff(3)%end, eqn_idx%mom%beg:eqn_idx%mom%end))
                     @:ALLOCATE(dqR_rsx_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
                                & idwbuff(3)%beg:idwbuff(3)%end, eqn_idx%mom%beg:eqn_idx%mom%end))
-
-                    if (n > 0) then
-                        @:ALLOCATE(dqL_rsy_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, eqn_idx%mom%beg:eqn_idx%mom%end))
-                        @:ALLOCATE(dqR_rsy_vf(idwbuff(2)%beg:idwbuff(2)%end, idwbuff(1)%beg:idwbuff(1)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, eqn_idx%mom%beg:eqn_idx%mom%end))
-                    else
-                        @:ALLOCATE(dqL_rsy_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, eqn_idx%mom%beg:eqn_idx%mom%end))
-                        @:ALLOCATE(dqR_rsy_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, eqn_idx%mom%beg:eqn_idx%mom%end))
-                    end if
-
-                    if (p > 0) then
-                        @:ALLOCATE(dqL_rsz_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(1)%beg:idwbuff(1)%end, eqn_idx%mom%beg:eqn_idx%mom%end))
-                        @:ALLOCATE(dqR_rsz_vf(idwbuff(3)%beg:idwbuff(3)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(1)%beg:idwbuff(1)%end, eqn_idx%mom%beg:eqn_idx%mom%end))
-                    else
-                        @:ALLOCATE(dqL_rsz_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, eqn_idx%mom%beg:eqn_idx%mom%end))
-                        @:ALLOCATE(dqR_rsz_vf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                                   & idwbuff(3)%beg:idwbuff(3)%end, eqn_idx%mom%beg:eqn_idx%mom%end))
-                    end if
                 end if
             else
                 @:ALLOCATE(dq_prim_dx_qp(1)%vf(1:sys_size))
@@ -602,9 +554,9 @@ contains
 
         if ((viscous .and. .not. igr)) then
             call nvtxStartRange("RHS-VISCOUS")
-            call s_get_viscous(qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, dqL_prim_dx_n, dqL_prim_dy_n, dqL_prim_dz_n, qL_prim, qR_rsx_vf, &
-                               & qR_rsy_vf, qR_rsz_vf, dqR_prim_dx_n, dqR_prim_dy_n, dqR_prim_dz_n, qR_prim, q_prim_qp, &
-                               & dq_prim_dx_qp, dq_prim_dy_qp, dq_prim_dz_qp, idwbuff(1), idwbuff(2), idwbuff(3))
+            call s_get_viscous(qL_rsx_vf, dqL_prim_dx_n, dqL_prim_dy_n, dqL_prim_dz_n, qL_prim, qR_rsx_vf, dqR_prim_dx_n, &
+                               & dqR_prim_dy_n, dqR_prim_dz_n, qR_prim, q_prim_qp, dq_prim_dx_qp, dq_prim_dy_qp, dq_prim_dz_qp, &
+                               & idwbuff(1), idwbuff(2), idwbuff(3))
             call nvtxEndRange
         end if
 
@@ -620,7 +572,7 @@ contains
             call nvtxEndRange
         end if
 
-
+        ! Loop over coordinate directions for dimensional splitting
         do id = 1, num_dims
             if (igr) then
                 if (id == 1) then
@@ -659,51 +611,40 @@ contains
                     if (all(Re_size == 0) .or. int_comp > 0) then
                         ! Reconstruct densitiess
                         iv%beg = 1; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(1:sys_size), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(1:sys_size), qL_rsx_vf, qR_rsx_vf, id)
                     else
                         iv%beg = 1; iv%end = eqn_idx%cont%end
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
 
                         iv%beg = eqn_idx%E; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
                     end if
                 else
                     if (int_comp > 0) then
                         ! THINC reads cont and adv from v_rs_ws; must reconstruct full sys_size range to populate both
                         iv%beg = 1; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(1:sys_size), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(1:sys_size), qL_rsx_vf, qR_rsx_vf, id)
                         ! Surface tension requires first-order energy; overwrite the higher-order result from the full pass above
                         iv%beg = eqn_idx%E; iv%end = eqn_idx%E
-                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(eqn_idx%E), qL_rsx_vf, qL_rsy_vf, &
-                            & qL_rsz_vf, qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(eqn_idx%E), qL_rsx_vf, qR_rsx_vf, id)
                     else if (all(Re_size == 0)) then
                         iv%beg = 1; iv%end = eqn_idx%E - 1
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
 
                         iv%beg = eqn_idx%E; iv%end = eqn_idx%E
-                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(eqn_idx%E), qL_rsx_vf, qL_rsy_vf, &
-                            & qL_rsz_vf, qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(eqn_idx%E), qL_rsx_vf, qR_rsx_vf, id)
 
                         iv%beg = eqn_idx%E + 1; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
                     else
                         iv%beg = 1; iv%end = eqn_idx%cont%end
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
 
                         iv%beg = eqn_idx%E; iv%end = eqn_idx%E
-                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(eqn_idx%E), qL_rsx_vf, qL_rsy_vf, &
-                            & qL_rsz_vf, qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(eqn_idx%E), qL_rsx_vf, qR_rsx_vf, id)
 
                         iv%beg = eqn_idx%E + 1; iv%end = sys_size
-                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                                                & qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, id)
+                        call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
                     end if
                 end if
 
@@ -711,18 +652,16 @@ contains
                 if (weno_Re_flux) then
                     iv%beg = eqn_idx%mom%beg; iv%end = eqn_idx%mom%end
                     call s_reconstruct_cell_boundary_values_visc_deriv(dq_prim_dx_qp(1)%vf(iv%beg:iv%end), dqL_rsx_vf, &
-                        & dqL_rsy_vf, dqL_rsz_vf, dqR_rsx_vf, dqR_rsy_vf, dqR_rsz_vf, id, dqL_prim_dx_n(id)%vf(iv%beg:iv%end), &
-                        & dqR_prim_dx_n(id)%vf(iv%beg:iv%end), idwbuff(1), idwbuff(2), idwbuff(3))
+                        & dqR_rsx_vf, id, dqL_prim_dx_n(id)%vf(iv%beg:iv%end), dqR_prim_dx_n(id)%vf(iv%beg:iv%end), idwbuff(1), &
+                        & idwbuff(2), idwbuff(3))
                     if (n > 0) then
                         call s_reconstruct_cell_boundary_values_visc_deriv(dq_prim_dy_qp(1)%vf(iv%beg:iv%end), dqL_rsx_vf, &
-                            & dqL_rsy_vf, dqL_rsz_vf, dqR_rsx_vf, dqR_rsy_vf, dqR_rsz_vf, id, &
-                            & dqL_prim_dy_n(id)%vf(iv%beg:iv%end), dqR_prim_dy_n(id)%vf(iv%beg:iv%end), idwbuff(1), idwbuff(2), &
-                            & idwbuff(3))
+                            & dqR_rsx_vf, id, dqL_prim_dy_n(id)%vf(iv%beg:iv%end), dqR_prim_dy_n(id)%vf(iv%beg:iv%end), &
+                            & idwbuff(1), idwbuff(2), idwbuff(3))
                         if (p > 0) then
                             call s_reconstruct_cell_boundary_values_visc_deriv(dq_prim_dz_qp(1)%vf(iv%beg:iv%end), dqL_rsx_vf, &
-                                & dqL_rsy_vf, dqL_rsz_vf, dqR_rsx_vf, dqR_rsy_vf, dqR_rsz_vf, id, &
-                                & dqL_prim_dz_n(id)%vf(iv%beg:iv%end), dqR_prim_dz_n(id)%vf(iv%beg:iv%end), idwbuff(1), &
-                                & idwbuff(2), idwbuff(3))
+                                & dqR_rsx_vf, id, dqL_prim_dz_n(id)%vf(iv%beg:iv%end), dqR_prim_dz_n(id)%vf(iv%beg:iv%end), &
+                                & idwbuff(1), idwbuff(2), idwbuff(3))
                         end if
                     end if
                 end if
@@ -741,10 +680,10 @@ contains
 
                 ! Computing Riemann Solver Flux and Source Flux
                 call nvtxStartRange("RHS-RIEMANN-SOLVER")
-                call s_riemann_solver(qR_rsx_vf, qR_rsy_vf, qR_rsz_vf, dqR_prim_dx_n(id)%vf, dqR_prim_dy_n(id)%vf, &
-                                      & dqR_prim_dz_n(id)%vf, qR_prim(id)%vf, qL_rsx_vf, qL_rsy_vf, qL_rsz_vf, &
-                                      & dqL_prim_dx_n(id)%vf, dqL_prim_dy_n(id)%vf, dqL_prim_dz_n(id)%vf, qL_prim(id)%vf, &
-                                      & q_prim_qp%vf, flux_n(id)%vf, flux_src_n(id)%vf, flux_gsrc_n(id)%vf, id, irx, iry, irz)
+                call s_riemann_solver(qR_rsx_vf, dqR_prim_dx_n(id)%vf, dqR_prim_dy_n(id)%vf, dqR_prim_dz_n(id)%vf, &
+                                      & qR_prim(id)%vf, qL_rsx_vf, dqL_prim_dx_n(id)%vf, dqL_prim_dy_n(id)%vf, &
+                                      & dqL_prim_dz_n(id)%vf, qL_prim(id)%vf, q_prim_qp%vf, flux_n(id)%vf, flux_src_n(id)%vf, &
+                                      & flux_gsrc_n(id)%vf, id, irx, iry, irz)
                 call nvtxEndRange
 
                 ! Additional physics and source terms RHS addition for advection source
@@ -1616,11 +1555,11 @@ contains
     end subroutine s_compute_additional_physics_rhs
 
     !> Reconstruct left and right cell-boundary values from cell-averaged variables
-    subroutine s_reconstruct_cell_boundary_values(v_vf, vL_x, vL_y, vL_z, vR_x, vR_y, vR_z, norm_dir)
+    subroutine s_reconstruct_cell_boundary_values(v_vf, vL_x, vR_x, norm_dir)
 
         type(scalar_field), dimension(iv%beg:iv%end), intent(in) :: v_vf
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_x, vL_y, vL_z
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_x, vR_y, vR_z
+        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_x
+        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_x
         integer, intent(in) :: norm_dir
         integer :: recon_dir  !< Coordinate direction of the reconstruction
         integer :: i, j, k, l
@@ -1642,31 +1581,19 @@ contains
                     is1%end = is1%end - ${SCHEME}$_polyn
                 end if
 
-                if (n > 0) then
-                    if (p > 0) then
-                        call s_${SCHEME}$ (v_vf(iv%beg:iv%end), vL_x(:,:,:,iv%beg:iv%end), vL_y(:,:,:,iv%beg:iv%end), vL_z(:,:,:, &
-                                           & iv%beg:iv%end), vR_x(:,:,:,iv%beg:iv%end), vR_y(:,:,:,iv%beg:iv%end), vR_z(:,:,:, &
-                                           & iv%beg:iv%end), recon_dir, is1, is2, is3)
-                    else
-                        call s_${SCHEME}$ (v_vf(iv%beg:iv%end), vL_x(:,:,:,iv%beg:iv%end), vL_y(:,:,:,iv%beg:iv%end), vL_z(:,:,:, &
-                                           & :), vR_x(:,:,:,iv%beg:iv%end), vR_y(:,:,:,iv%beg:iv%end), vR_z(:,:,:,:), recon_dir, &
-                                           & is1, is2, is3)
-                    end if
-                else
-                    call s_${SCHEME}$ (v_vf(iv%beg:iv%end), vL_x(:,:,:,iv%beg:iv%end), vL_y(:,:,:,:), vL_z(:,:,:,:), vR_x(:,:,:, &
-                                       & iv%beg:iv%end), vR_y(:,:,:,:), vR_z(:,:,:,:), recon_dir, is1, is2, is3)
-                end if
+                call s_${SCHEME}$ (v_vf(iv%beg:iv%end), vL_x(:,:,:,iv%beg:iv%end), vR_x(:,:,:,iv%beg:iv%end), recon_dir, is1, &
+                                   & is2, is3)
             end if
         #:endfor
 
     end subroutine s_reconstruct_cell_boundary_values
 
     !> Perform first-order (piecewise constant) reconstruction of left and right cell-boundary values
-    subroutine s_reconstruct_cell_boundary_values_first_order(v_vf, vL_x, vL_y, vL_z, vR_x, vR_y, vR_z, norm_dir)
+    subroutine s_reconstruct_cell_boundary_values_first_order(v_vf, vL_x, vR_x, norm_dir)
 
         type(scalar_field), dimension(iv%beg:iv%end), intent(in) :: v_vf
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_x, vL_y, vL_z
-        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_x, vR_y, vR_z
+        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_x
+        real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_x
         integer, intent(in) :: norm_dir
         integer :: recon_dir  !< Coordinate direction of the reconstruction
         integer :: i, j, k, l
@@ -1693,7 +1620,7 @@ contains
         #:endfor
 
         if (recon_dir == 1) then
-            $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
+            $:GPU_PARALLEL_LOOP(collapse=4)
             do i = iv%beg, iv%end
                 do l = is3%beg, is3%end
                     do k = is2%beg, is2%end
@@ -1706,26 +1633,26 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
         else if (recon_dir == 2) then
-            $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
+            $:GPU_PARALLEL_LOOP(collapse=4)
             do i = iv%beg, iv%end
                 do l = is3%beg, is3%end
-                    do k = is2%beg, is2%end
-                        do j = is1%beg, is1%end
-                            vL_y(j, k, l, i) = v_vf(i)%sf(k, j, l)
-                            vR_y(j, k, l, i) = v_vf(i)%sf(k, j, l)
+                    do j = is1%beg, is1%end
+                        do k = is2%beg, is2%end
+                            vL_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
+                            vR_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
                         end do
                     end do
                 end do
             end do
             $:END_GPU_PARALLEL_LOOP()
         else if (recon_dir == 3) then
-            $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
-            do i = iv%beg, iv%end
-                do l = is3%beg, is3%end
+            $:GPU_PARALLEL_LOOP(collapse=4)
+            do i = 1, ubound(v_vf, 1)
+                do j = is1%beg, is1%end
                     do k = is2%beg, is2%end
-                        do j = is1%beg, is1%end
-                            vL_z(j, k, l, i) = v_vf(i)%sf(l, k, j)
-                            vR_z(j, k, l, i) = v_vf(i)%sf(l, k, j)
+                        do l = is3%beg, is3%end
+                            vL_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
+                            vR_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
                         end do
                     end do
                 end do
@@ -1767,14 +1694,6 @@ contains
 
         if (.not. igr) then
             @:DEALLOCATE(qL_rsx_vf, qR_rsx_vf)
-
-            if (n > 0) then
-                @:DEALLOCATE(qL_rsy_vf, qR_rsy_vf)
-            end if
-
-            if (p > 0) then
-                @:DEALLOCATE(qL_rsz_vf, qR_rsz_vf)
-            end if
 
             if (viscous) then
                 do l = eqn_idx%mom%beg, eqn_idx%mom%end
@@ -1827,14 +1746,6 @@ contains
 
                 if (weno_Re_flux) then
                     @:DEALLOCATE(dqL_rsx_vf, dqR_rsx_vf)
-
-                    if (n > 0) then
-                        @:DEALLOCATE(dqL_rsy_vf, dqR_rsy_vf)
-                    end if
-
-                    if (p > 0) then
-                        @:DEALLOCATE(dqL_rsz_vf, dqR_rsz_vf)
-                    end if
                 end if
 
                 do i = 1, num_dims
