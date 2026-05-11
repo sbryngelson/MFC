@@ -97,7 +97,7 @@ jobs:
 
       - name: Build and push image (gpu)
         if: ${{ matrix.config.name == 'gpu' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v5
         with:
           builder: default
           context: /mnt/share
