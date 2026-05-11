@@ -38,12 +38,14 @@ def main() -> int:
     if any(arg.endswith("/syscheck") for arg in command):
         env = os.environ.copy()
         env["MFC_TRACE"] = "0"
+        env.pop("MFC_TRACE_GPU_NOTIFY", None)
         env.pop("MFC_TRACE_ACC_NOTIFY", None)
+        env["NVCOMPILER_ACC_NOTIFY"] = "0"
         env["NV_ACC_NOTIFY"] = "0"
         return subprocess.run(command, env=env, check=False).returncode
 
     trace_file = os.environ.get("MFC_TRACE_FILE")
-    if not os.environ.get("MFC_TRACE_ACC_NOTIFY") or not trace_file:
+    if not (os.environ.get("MFC_TRACE_GPU_NOTIFY") or os.environ.get("MFC_TRACE_ACC_NOTIFY")) or not trace_file:
         return subprocess.run(command, check=False).returncode
 
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

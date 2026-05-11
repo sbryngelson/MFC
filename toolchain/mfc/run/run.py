@@ -64,7 +64,7 @@ def __profiler_prepend() -> typing.List[str]:
 def __runner_prepend() -> typing.List[str]:
     profiler = __profiler_prepend()
 
-    if __runtime_trace_requested() and ARG("gpu") == gpuConfigOptions.ACC.value:
+    if __runtime_trace_requested() and ARG("gpu") in (gpuConfigOptions.ACC.value, gpuConfigOptions.MP.value):
         return ["python3", os.path.join(MFC_ROOT_DIR, "toolchain", "mfc", "run", "trace.py")] + profiler
 
     return profiler
@@ -130,8 +130,8 @@ def __generate_job_script(targets, case: input.MFCInputFile):
                 "MFC_TRACE_STDOUT": "1" if sys.stdout.isatty() else "0",
             }
         )
-        if gpu_acc:
-            env.update({"MFC_TRACE_ACC_NOTIFY": "1", "NV_ACC_NOTIFY": "1"})
+        if gpu_acc or gpu_mp:
+            env.update({"MFC_TRACE_GPU_NOTIFY": "1", "NVCOMPILER_ACC_NOTIFY": "1", "NV_ACC_NOTIFY": "1"})
         if ARG("mpi"):
             env.update({"MFC_TRACE_MPI": "1"})
 
