@@ -622,8 +622,8 @@ contains
                             do l = idwbuff(3)%beg, idwbuff(3)%end
                                 do k = idwbuff(2)%beg, idwbuff(2)%end
                                     do j = idwbuff(1)%beg, idwbuff(1)%end
-                                        qL_rsx_vf(j, k, l, i) = qL_prim(id)%vf(i)%sf(j,k,l)
-                                        qR_rsx_vf(j, k, l, i) = qR_prim(id)%vf(i)%sf(j,k,l)
+                                        qL_rsx_vf(j, k, l, i) = qL_prim(id)%vf(i)%sf(j, k, l)
+                                        qR_rsx_vf(j, k, l, i) = qR_prim(id)%vf(i)%sf(j, k, l)
                                     end do
                                 end do
                             end do
@@ -660,8 +660,8 @@ contains
                             do l = idwbuff(3)%beg, idwbuff(3)%end
                                 do k = idwbuff(2)%beg, idwbuff(2)%end
                                     do j = idwbuff(1)%beg, idwbuff(1)%end
-                                        qL_rsx_vf(j, k, l, i) = qL_prim(id)%vf(i)%sf(j,k,l)
-                                        qR_rsx_vf(j, k, l, i) = qR_prim(id)%vf(i)%sf(j,k,l)
+                                        qL_rsx_vf(j, k, l, i) = qL_prim(id)%vf(i)%sf(j, k, l)
+                                        qR_rsx_vf(j, k, l, i) = qR_prim(id)%vf(i)%sf(j, k, l)
                                     end do
                                 end do
                             end do

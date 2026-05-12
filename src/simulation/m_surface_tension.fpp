@@ -284,11 +284,11 @@ contains
     !> Reconstruct left and right cell-boundary values of capillary variables
     subroutine s_reconstruct_cell_boundary_values_capillary(v_vf, vL_x, vR_x, norm_dir)
 
-        type(scalar_field), dimension(iv%beg:iv%end), intent(in) :: v_vf
+        type(scalar_field), dimension(iv%beg:iv%end), intent(in)                                  :: v_vf
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,iv%beg:), intent(out) :: vL_x
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,iv%beg:), intent(out) :: vR_x
-        integer, intent(in) :: norm_dir
-        integer :: i, j, k, l
+        integer, intent(in)                                                                       :: norm_dir
+        integer                                                                                   :: i, j, k, l
 
         $:GPU_PARALLEL_LOOP(collapse=4)
         do i = iv%beg, iv%end
@@ -302,7 +302,6 @@ contains
             end do
         end do
         $:END_GPU_PARALLEL_LOOP()
-        
 
     end subroutine s_reconstruct_cell_boundary_values_capillary
 
