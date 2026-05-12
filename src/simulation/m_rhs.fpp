@@ -603,7 +603,7 @@ contains
                     call nvtxEndRange
                 end if
             end if
-            if ((.not. igr) .or. dummy) then
+            if (.not. igr) then
                 ! Reconstructing Primitive/Conservative Variables
                 call nvtxStartRange("RHS-RECONSTRUCTION")
 
