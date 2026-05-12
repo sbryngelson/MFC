@@ -740,9 +740,8 @@ contains
                                                     & - s_P*B%L(norm_dir)) + s_M*s_P*(qL_prim_rsx_vf(${SF('')}$, &
                                                     & eqn_idx%psi) - qR_prim_rsx_vf(${SF(' + 1')}$, eqn_idx%psi)))/(s_M - s_P)
                                     else
-                                        flux_rsx_vf(${SF('')}$, &
-                                                    & eqn_idx%B%beg + norm_dir - 1) &
-                                                    & = 0._wp  ! Without hyperbolic cleaning, make sure flux of B_normal is identically zero
+                                        ! Without hyperbolic cleaning, make sure flux of B_normal is identically zero
+                                        flux_rsx_vf(${SF('')}$, eqn_idx%B%beg + norm_dir - 1) = 0._wp
                                     end if
                                 end if
                                 flux_src_rsx_vf(${SF('')}$, eqn_idx%adv%beg) = 0._wp
@@ -2765,8 +2764,8 @@ contains
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = eqn_idx%bub%beg, eqn_idx%bub%end
                                     flux_rsx_vf(${SF('')}$, i) = xi_M*nbub_L*qL_prim_rsx_vf(${SF('')}$, &
-                                                & i)*(vel_L(dir_idx(1)) + s_M*xi_L_m1) + xi_P*nbub_R &
-                                                & *qR_prim_rsx_vf(${SF(' + 1')}$, i)*(vel_R(dir_idx(1)) + s_P*xi_R_m1)
+                                                & i)*(vel_L(dir_idx(1)) + s_M*xi_L_m1) &
+                                                & + xi_P*nbub_R*qR_prim_rsx_vf(${SF(' + 1')}$, i)*(vel_R(dir_idx(1)) + s_P*xi_R_m1)
                                 end do
 
                                 if (qbmm) then
@@ -3209,8 +3208,8 @@ contains
                                 ! COLOR FUNCTION FLUX
                                 if (surface_tension) then
                                     flux_rsx_vf(${SF('')}$, eqn_idx%c) = xi_M*qL_prim_rsx_vf(${SF('')}$, &
-                                                & eqn_idx%c)*(vel_L(dir_idx(1)) + s_M*xi_L_m1) + xi_P* &
-                                                & qR_prim_rsx_vf(${SF(' + 1')}$, eqn_idx%c)*(vel_R(dir_idx(1)) + s_P*xi_R_m1)
+                                                & eqn_idx%c)*(vel_L(dir_idx(1)) + s_M*xi_L_m1) &
+                                                & + xi_P*qR_prim_rsx_vf(${SF(' + 1')}$, eqn_idx%c)*(vel_R(dir_idx(1)) + s_P*xi_R_m1)
                                 end if
 
                                 ! Hyperelastic reference map flux for material deformation tracking

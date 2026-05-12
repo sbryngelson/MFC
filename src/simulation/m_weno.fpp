@@ -1145,8 +1145,8 @@ contains
                                             $:GPU_LOOP(parallelism='[seq]')
                                             do q = 0, weno_num_stencils
                                                 alpha(q) = 1._wp + tau/beta(q)  ! Equation 22 (reuse alpha as gamma; pick C=1 & q=6)
-                                                alpha(q) = (alpha(q)**3._wp) &
-                                                      & **2._wp  ! Equation 22 cont. (some CPU compilers cannot optimize x**6.0)
+                                                ! Equation 22 cont. (some CPU compilers cannot optimize x**6.0)
+                                                alpha(q) = (alpha(q)**3._wp)**2._wp
                                             end do
                                             omega = alpha/sum(alpha)  ! Equation 25 (reuse omega as xi)
 
@@ -1355,8 +1355,8 @@ contains
                                             tau = abs(beta(3) - beta(0))  ! Equation 50
                                             $:GPU_LOOP(parallelism='[seq]')
                                             do q = 0, weno_num_stencils
-                                                alpha(q) = d_cbL_${XYZ}$ (q, &
-                                                      & ${SV}$)*(1._wp + (tau/beta(q))**wenoz_q)  ! wenoz_q = 2,3,4 for stability
+                                                ! wenoz_q = 2,3,4 for stability
+                                                alpha(q) = d_cbL_${XYZ}$ (q, ${SV}$)*(1._wp + (tau/beta(q))**wenoz_q)
                                             end do
                                         else if (teno) then
                                             #:if not MFC_CASE_OPTIMIZATION or weno_num_stencils > 3
@@ -1428,8 +1428,8 @@ contains
                                         else if (wenoz) then
                                             $:GPU_LOOP(parallelism='[seq]')
                                             do q = 0, weno_num_stencils
-                                                alpha(q) = d_cbR_${XYZ}$ (q, &
-                                                      & ${SV}$)*(1._wp + (tau/beta(q))**wenoz_q)  ! wenoz_q = 2,3,4 for stability
+                                                ! wenoz_q = 2,3,4 for stability
+                                                alpha(q) = d_cbR_${XYZ}$ (q, ${SV}$)*(1._wp + (tau/beta(q))**wenoz_q)
                                             end do
                                         else if (teno) then
                                             $:GPU_LOOP(parallelism='[seq]')
