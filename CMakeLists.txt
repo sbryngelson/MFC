@@ -710,14 +710,8 @@ exit 0
                         PRIVATE -DFRONTIER_UNIFIED)
                 endif()
 
-                find_library(HIP_LIB amdhip64
-                    HINTS "$ENV{OLCF_AFAR_ROOT}/lib" REQUIRED)
-                find_library(HIPFORT_AMDGCN_LIB hipfort-amdgcn
-                    HINTS "$ENV{OLCF_AFAR_ROOT}/lib" REQUIRED)
-                target_include_directories(${a_target} PRIVATE
-                    "$ENV{OLCF_AFAR_ROOT}/include/hipfort/amdgcn")
-                target_link_libraries(${a_target} PRIVATE
-                    ${HIP_LIB} ${HIPFORT_AMDGCN_LIB} flang_rt.hostdevice)
+                find_package(hipfort COMPONENTS hip CONFIG REQUIRED)
+                target_link_libraries(${a_target} PRIVATE hipfort::hip hipfort::hipfort-amdgcn)
             endif()
         elseif (CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
             target_compile_options(${a_target} PRIVATE "SHELL:-h noacc" "SHELL:-x acc")
