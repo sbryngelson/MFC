@@ -913,7 +913,7 @@ contains
         real(wp), dimension(-3:3) :: v  !< temporary field value array for clarity (WENO7 only)
         real(wp)                  :: tau
         integer                   :: i, j, k, l, q
-        real(wp)                  :: vp0, vp1, vp2, vp3, vm0, vm1, vm2, vm3, alpha_sum
+        real(wp)                  :: vp0, vp1, vp2, vp3, vm1, vm2, vm3
 
         is1_weno = is1_weno_d
         is2_weno = is2_weno_d
@@ -979,7 +979,7 @@ contains
                 #:set SV = STENCIL_VAR
                 #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
                 if (weno_dir == ${WENO_DIR}$) then
-                    $:GPU_PARALLEL_LOOP(collapse=4,private='[beta, dvd, poly, omega, alpha, tau, q, vp0, vp1, vm1, alpha_sum]')
+                    $:GPU_PARALLEL_LOOP(collapse=4,private='[beta, dvd, poly, omega, alpha, tau, q, vp0, vp1, vm1]')
                     do l = ${Z_BND}$%beg, ${Z_BND}$%end
                         do k = ${Y_BND}$%beg, ${Y_BND}$%end
                             do j = ${X_BND}$%beg, ${X_BND}$%end
@@ -1039,8 +1039,7 @@ contains
                                         do q = 0, weno_num_stencils
                                             alpha(q) = d_cbR_${XYZ}$ (q, ${SV}$)/(beta(q)**2._wp)
                                         end do
-                                        alpha_sum = alpha(0) + alpha(1)
-                                        omega = alpha/alpha_sum
+                                        omega = alpha/sum(alpha)
                                         do q = 0, weno_num_stencils
                                             alpha(q) = (d_cbR_${XYZ}$ (q, ${SV}$)*(1._wp + d_cbR_${XYZ}$ (q, &
                                                   & ${SV}$) - 3._wp*omega(q)) + omega(q)**2._wp)*(omega(q)/(d_cbR_${XYZ}$ (q, &
@@ -1072,7 +1071,7 @@ contains
                     #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
                     if (weno_dir == ${WENO_DIR}$) then
                         $:GPU_PARALLEL_LOOP(collapse=3,private='[dvd, poly, beta, alpha, omega, tau, delta, q, vp0, vm1, vm2, &
-                                            & vp1, vp2, alpha_sum]')
+                                            & vp1, vp2]')
                         do l = ${Z_BND}$%beg, ${Z_BND}$%end
                             do k = ${Y_BND}$%beg, ${Y_BND}$%end
                                 do j = ${X_BND}$%beg, ${X_BND}$%end

@@ -1647,7 +1647,7 @@ contains
             $:END_GPU_PARALLEL_LOOP()
         else if (recon_dir == 3) then
             $:GPU_PARALLEL_LOOP(collapse=4)
-            do i = 1, ubound(v_vf, 1)
+            do i = iv%beg, iv%end
                 do j = is1%beg, is1%end
                     do k = is2%beg, is2%end
                         do l = is3%beg, is3%end

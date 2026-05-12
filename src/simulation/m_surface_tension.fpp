@@ -277,9 +277,7 @@ contains
         iv%beg = 1; iv%end = num_dims + 1
 
         ! reconstruct gradient components at cell boundaries
-        do i = 1, num_dims
-            call s_reconstruct_cell_boundary_values_capillary(c_divs, gL_x, gR_x, i)
-        end do
+        call s_reconstruct_cell_boundary_values_capillary(c_divs, gL_x, gR_x, i)
 
     end subroutine s_get_capillary
 
@@ -290,71 +288,21 @@ contains
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,iv%beg:), intent(out) :: vL_x
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,iv%beg:), intent(out) :: vR_x
         integer, intent(in) :: norm_dir
-        integer :: recon_dir  !< Coordinate direction of the reconstruction
         integer :: i, j, k, l
 
-        #:for SCHEME, TYPE in [('weno', 'WENO_TYPE'),('muscl', 'MUSCL_TYPE')]
-            if (recon_type == ${TYPE}$) then
-                ! Reconstruction in s1-direction
-
-                if (norm_dir == 1) then
-                    is1 = idwbuff(1); is2 = idwbuff(2); is3 = idwbuff(3)
-                    recon_dir = 1; is1%beg = is1%beg + ${SCHEME}$_polyn
-                    is1%end = is1%end - ${SCHEME}$_polyn
-                else if (norm_dir == 2) then
-                    is1 = idwbuff(2); is2 = idwbuff(1); is3 = idwbuff(3)
-                    recon_dir = 2; is1%beg = is1%beg + ${SCHEME}$_polyn
-                    is1%end = is1%end - ${SCHEME}$_polyn
-                else
-                    is1 = idwbuff(3); is2 = idwbuff(2); is3 = idwbuff(1)
-                    recon_dir = 3; is1%beg = is1%beg + ${SCHEME}$_polyn
-                    is1%end = is1%end - ${SCHEME}$_polyn
-                end if
-
-                $:GPU_UPDATE(device='[is1, is2, is3, iv]')
-            end if
-        #:endfor
-
-        if (recon_dir == 1) then
-            $:GPU_PARALLEL_LOOP(collapse=4)
-            do i = iv%beg, iv%end
-                do l = is3%beg, is3%end
-                    do k = is2%beg, is2%end
-                        do j = is1%beg, is1%end
-                            vL_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
-                            vR_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
-                        end do
+        $:GPU_PARALLEL_LOOP(collapse=4)
+        do i = iv%beg, iv%end
+            do l = idwbuff(3)%beg, idwbuff(3)%end
+                do k = idwbuff(2)%beg, idwbuff(2)%end
+                    do j = idwbuff(1)%beg, idwbuff(1)%end
+                        vL_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
+                        vR_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
                     end do
                 end do
             end do
-            $:END_GPU_PARALLEL_LOOP()
-        else if (recon_dir == 2) then
-            $:GPU_PARALLEL_LOOP(collapse=4)
-            do i = iv%beg, iv%end
-                do l = is3%beg, is3%end
-                    do j = is1%beg, is1%end
-                        do k = is2%beg, is2%end
-                            vL_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
-                            vR_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
-                        end do
-                    end do
-                end do
-            end do
-            $:END_GPU_PARALLEL_LOOP()
-        else if (recon_dir == 3) then
-            $:GPU_PARALLEL_LOOP(collapse=4)
-            do i = iv%beg, iv%end
-                do j = is1%beg, is1%end
-                    do k = is2%beg, is2%end
-                        do l = is3%beg, is3%end
-                            vL_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
-                            vR_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
-                        end do
-                    end do
-                end do
-            end do
-            $:END_GPU_PARALLEL_LOOP()
-        end if
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+        
 
     end subroutine s_reconstruct_cell_boundary_values_capillary
 
