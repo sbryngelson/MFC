@@ -503,7 +503,7 @@ contains
         integer, intent(in) :: mpi_dir, pbc_loc, nVar
         integer :: i, j, k, l, r, q  !< Generic loop iterators
         integer :: buffer_counts(1:3), buffer_count
-        type(int_bounds_info) :: boundary_conditions(1:3)
+        type(bc_dir_t) :: boundary_conditions(1:3)
         integer :: beg_end(1:2), grid_dims(1:3)
         integer :: dst_proc, src_proc, recv_tag, send_tag
         logical :: beg_end_geq_0, qbmm_comm, chem_diff_comm
