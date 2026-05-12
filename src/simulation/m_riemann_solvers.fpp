@@ -3551,6 +3551,7 @@ contains
                                 flux_rsx_vf(${SF('')}$, eqn_idx%B%beg) = F_hlld(5)
                                 flux_rsx_vf(${SF('')}$, eqn_idx%B%beg + 1) = F_hlld(6)
                             else
+                                flux_rsx_vf(${SF('')}$, eqn_idx%B%beg + dir_idx(1) - 1) = 0._wp
                                 flux_rsx_vf(${SF('')}$, eqn_idx%B%beg + dir_idx(2) - 1) = F_hlld(5)
                                 flux_rsx_vf(${SF('')}$, eqn_idx%B%beg + dir_idx(3) - 1) = F_hlld(6)
                             end if
