@@ -103,27 +103,28 @@ module m_derived_types
         integer :: end
     end type idx_bounds_info
 
-    !> Integer bounds for variables
+    !> Integer beg/end bounds pair for loop index ranges and domain extents.
     type int_bounds_info
-        integer                             :: beg
-        integer                             :: end
-        real(wp)                            :: vb1
-        real(wp)                            :: vb2
-        real(wp)                            :: vb3
-        real(wp)                            :: ve1
-        real(wp)                            :: ve2
-        real(wp)                            :: ve3
+        integer :: beg
+        integer :: end
+    end type int_bounds_info
+
+    !> Boundary condition parameters for one coordinate direction (beg/end faces + face data).
+    type bc_dir_t
+        integer                             :: beg, end
+        real(wp)                            :: vb1, vb2, vb3
+        real(wp)                            :: ve1, ve2, ve3
         real(wp)                            :: pres_in, pres_out
         real(wp), dimension(3)              :: vel_in, vel_out
         real(wp), dimension(num_fluids_max) :: alpha_rho_in, alpha_in
         logical                             :: grcbc_in, grcbc_out, grcbc_vel_out
         logical                             :: isothermal_in, isothermal_out
         real(wp)                            :: Twall_in, Twall_out
-    end type int_bounds_info
+    end type bc_dir_t
 
-    !> Groups the x, y, z boundary condition begin/end codes for passing as a single argument.
+    !> Groups the x, y, z boundary condition structs for passing as a single argument.
     type bc_xyz_info
-        type(int_bounds_info) :: x, y, z
+        type(bc_dir_t) :: x, y, z
     end type bc_xyz_info
 
     !> QBMM moment index mappings - separate from bub beg/end so eqn_idx contains no allocatables.
@@ -137,7 +138,7 @@ module m_derived_types
     end type qbmm_idx_info
 
     !> All conserved-variable equation indices, computed at startup from model_eqns and enabled features.
-    !> Range indices (beg/end) use int_bounds_info; scalar indices are plain integers (0 = inactive).
+    !> Range indices (beg/end) use idx_bounds_info; scalar indices are plain integers (0 = inactive).
     !> Contains no allocatable members - safe for GPU_DECLARE as a single struct.
     type eqn_idx_info
         type(idx_bounds_info) :: cont     !< Partial densities (continuity equations)

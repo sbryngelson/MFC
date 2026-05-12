@@ -117,7 +117,7 @@ module m_global_parameters
     logical               :: bc_io
     !> @name Boundary conditions in the x-, y- and z-coordinate directions
     !> @{
-    type(int_bounds_info) :: bc_x, bc_y, bc_z
+    type(bc_dir_t) :: bc_x, bc_y, bc_z
     !> @}
 
     integer                            :: shear_num  !< Number of shear stress components

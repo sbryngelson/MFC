@@ -182,7 +182,7 @@ contains
         type(int_bounds_info), intent(in) :: is
         integer                           :: s
         real(wp), pointer, dimension(:)   :: s_cb => null()  !< Cell-boundary locations in the s-direction
-        type(int_bounds_info)             :: bc_s            !< Boundary conditions (BC) in the s-direction
+        type(bc_dir_t)                    :: bc_s            !< Boundary conditions (BC) in the s-direction
         integer                           :: i               !< Generic loop iterator
         real(wp)                          :: w(1:8)          !< Intermediate var for ideal weights: s_cb across overall stencil
         real(wp)                          :: ys(1:4)         !< Intermediate var for poly & beta: diff(s_cb) across sub-stencil
