@@ -290,7 +290,9 @@ contains
         integer, intent(in)                                                                       :: norm_dir
         integer                                                                                   :: i, j, k, l
 
-        $:GPU_PARALLEL_LOOP(collapse=4)
+        $:GPU_UPDATE(device='[iv]')
+
+        $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
         do i = iv%beg, iv%end
             do l = idwbuff(3)%beg, idwbuff(3)%end
                 do k = idwbuff(2)%beg, idwbuff(2)%end

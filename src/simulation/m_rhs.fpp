@@ -110,6 +110,9 @@ module m_rhs
     $:GPU_DECLARE(create='[qL_rsx_vf, qR_rsx_vf]')
     $:GPU_DECLARE(create='[dqL_rsx_vf, dqR_rsx_vf]')
 
+    integer :: iglob
+    $:GPU_DECLARE(create='[iglob]')
+
 contains
 
     !> Initialize the RHS module
@@ -616,14 +619,16 @@ contains
                         iv%beg = 1; iv%end = eqn_idx%cont%end
                         call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
 
-                        iv%beg = eqn_idx%mom%beg; iv%end = eqn_idx%mom%end
-                        $:GPU_PARALLEL_LOOP(collapse=4)
+                        iv%beg = eqn_idx%mom%beg; iv%end = eqn_idx%mom%end; iglob = id
+                        $:GPU_UPDATE(device='[iv, iglob]')
+
+                        $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                         do i = iv%beg, iv%end
                             do l = idwbuff(3)%beg, idwbuff(3)%end
                                 do k = idwbuff(2)%beg, idwbuff(2)%end
                                     do j = idwbuff(1)%beg, idwbuff(1)%end
-                                        qL_rsx_vf(j, k, l, i) = qL_prim(id)%vf(i)%sf(j, k, l)
-                                        qR_rsx_vf(j, k, l, i) = qR_prim(id)%vf(i)%sf(j, k, l)
+                                        qL_rsx_vf(j, k, l, i) = qL_prim(iglob)%vf(i)%sf(j, k, l)
+                                        qR_rsx_vf(j, k, l, i) = qR_prim(iglob)%vf(i)%sf(j, k, l)
                                     end do
                                 end do
                             end do
@@ -654,14 +659,16 @@ contains
                         iv%beg = 1; iv%end = eqn_idx%cont%end
                         call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
 
-                        iv%beg = eqn_idx%mom%beg; iv%end = eqn_idx%mom%end
-                        $:GPU_PARALLEL_LOOP(collapse=4)
+                        iv%beg = eqn_idx%mom%beg; iv%end = eqn_idx%mom%end; iglob = id
+                        $:GPU_UPDATE(device='[iv, iglob]')
+
+                        $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
                         do i = iv%beg, iv%end
                             do l = idwbuff(3)%beg, idwbuff(3)%end
                                 do k = idwbuff(2)%beg, idwbuff(2)%end
                                     do j = idwbuff(1)%beg, idwbuff(1)%end
-                                        qL_rsx_vf(j, k, l, i) = qL_prim(id)%vf(i)%sf(j, k, l)
-                                        qR_rsx_vf(j, k, l, i) = qR_prim(id)%vf(i)%sf(j, k, l)
+                                        qL_rsx_vf(j, k, l, i) = qL_prim(iglob)%vf(i)%sf(j, k, l)
+                                        qR_rsx_vf(j, k, l, i) = qR_prim(iglob)%vf(i)%sf(j, k, l)
                                     end do
                                 end do
                             end do
