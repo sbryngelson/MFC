@@ -493,16 +493,15 @@ contains
         type(int_bounds_info), intent(in)               :: ix, iy, iz
         integer                                         :: i, j, k, l
 
-        do i = 1, num_dims
-            iv%beg = eqn_idx%mom%beg; iv%end = eqn_idx%mom%end
-
-            $:GPU_UPDATE(device='[iv]')
-
-            call s_reconstruct_cell_boundary_values_visc(q_prim_qp%vf(iv%beg:iv%end), qL_prim_rsx_vf, qR_prim_rsx_vf, i, &
-                & qL_prim(i)%vf(iv%beg:iv%end), qR_prim(i)%vf(iv%beg:iv%end), ix, iy, iz)
-        end do
+        iv%beg = eqn_idx%mom%beg; iv%end = eqn_idx%mom%end
+        $:GPU_UPDATE(device='[iv]')
 
         if (weno_Re_flux) then
+            do i = 1, num_dims
+                call s_reconstruct_cell_boundary_values_visc(q_prim_qp%vf(iv%beg:iv%end), qL_prim_rsx_vf, qR_prim_rsx_vf, i, &
+                    & qL_prim(i)%vf(iv%beg:iv%end), qR_prim(i)%vf(iv%beg:iv%end), ix, iy, iz)
+            end do
+
             ! Compute velocity gradients via divergence theorem on cell-boundary reconstructed values
             do i = 1, num_dims
                 if (i == 1) then

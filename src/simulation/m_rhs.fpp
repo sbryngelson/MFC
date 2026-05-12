@@ -608,13 +608,27 @@ contains
                 call nvtxStartRange("RHS-RECONSTRUCTION")
 
                 if (.not. surface_tension) then
-                    if (all(Re_size == 0) .or. int_comp > 0) then
+                    if ((.not. weno_Re_flux) .or. int_comp > 0) then
                         ! Reconstruct densitiess
                         iv%beg = 1; iv%end = sys_size
                         call s_reconstruct_cell_boundary_values(q_prim_qp%vf(1:sys_size), qL_rsx_vf, qR_rsx_vf, id)
                     else
                         iv%beg = 1; iv%end = eqn_idx%cont%end
                         call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
+
+                        iv%beg = eqn_idx%mom%beg; iv%end = eqn_idx%mom%end
+                        $:GPU_PARALLEL_LOOP(collapse=4)
+                        do i = iv%beg, iv%end
+                            do l = idwbuff(3)%beg, idwbuff(3)%end
+                                do k = idwbuff(2)%beg, idwbuff(2)%end
+                                    do j = idwbuff(1)%beg, idwbuff(1)%end
+                                        qL_rsx_vf(j, k, l, i) = qL_prim(id)%vf(i)%sf(j,k,l)
+                                        qR_rsx_vf(j, k, l, i) = qR_prim(id)%vf(i)%sf(j,k,l)
+                                    end do
+                                end do
+                            end do
+                        end do
+                        $:END_GPU_PARALLEL_LOOP()
 
                         iv%beg = eqn_idx%E; iv%end = sys_size
                         call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
@@ -627,7 +641,7 @@ contains
                         ! Surface tension requires first-order energy; overwrite the higher-order result from the full pass above
                         iv%beg = eqn_idx%E; iv%end = eqn_idx%E
                         call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(eqn_idx%E), qL_rsx_vf, qR_rsx_vf, id)
-                    else if (all(Re_size == 0)) then
+                    else if ((.not. weno_Re_flux)) then
                         iv%beg = 1; iv%end = eqn_idx%E - 1
                         call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
 
@@ -639,6 +653,20 @@ contains
                     else
                         iv%beg = 1; iv%end = eqn_idx%cont%end
                         call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
+
+                        iv%beg = eqn_idx%mom%beg; iv%end = eqn_idx%mom%end
+                        $:GPU_PARALLEL_LOOP(collapse=4)
+                        do i = iv%beg, iv%end
+                            do l = idwbuff(3)%beg, idwbuff(3)%end
+                                do k = idwbuff(2)%beg, idwbuff(2)%end
+                                    do j = idwbuff(1)%beg, idwbuff(1)%end
+                                        qL_rsx_vf(j, k, l, i) = qL_prim(id)%vf(i)%sf(j,k,l)
+                                        qR_rsx_vf(j, k, l, i) = qR_prim(id)%vf(i)%sf(j,k,l)
+                                    end do
+                                end do
+                            end do
+                        end do
+                        $:END_GPU_PARALLEL_LOOP()
 
                         iv%beg = eqn_idx%E; iv%end = eqn_idx%E
                         call s_reconstruct_cell_boundary_values_first_order(q_prim_qp%vf(eqn_idx%E), qL_rsx_vf, qR_rsx_vf, id)
