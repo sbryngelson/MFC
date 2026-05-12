@@ -181,6 +181,11 @@ module m_derived_types
         logical  :: enabled
     end type body_force_axis
 
+    !> Groups per-body allocatable arrays (x, y, z) for one IB dynamics quantity
+    type ib_dynamics_t
+        real(wp), allocatable, dimension(:) :: x, y, z
+    end type ib_dynamics_t
+
     !> Defines parameters for a Model Patch
     type ic_model_parameters
         character(LEN=pathlen_max) :: filepath   !< Path the STL file relative to case_dir.

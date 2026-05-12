@@ -1356,12 +1356,7 @@ contains
         integer, dimension(num_procs)                   :: meshtypes
         integer                                         :: i, ios, file_unit
         integer                                         :: ierr, nBodies
-        real(wp), dimension(:), allocatable             :: px, py, pz
-        real(wp), dimension(:), allocatable             :: force_x, force_y, force_z
-        real(wp), dimension(:), allocatable             :: torque_x, torque_y, torque_z
-        real(wp), dimension(:), allocatable             :: vel_x, vel_y, vel_z
-        real(wp), dimension(:), allocatable             :: omega_x, omega_y, omega_z
-        real(wp), dimension(:), allocatable             :: angle_x, angle_y, angle_z
+        type(ib_dynamics_t)                             :: pos, force, torque, vel, omega, angle
         real(wp), dimension(:), allocatable             :: ib_diameter
 
         ! Build path to per-timestep IB state file
@@ -1377,12 +1372,12 @@ contains
 
         if (nBodies > 0) then
             allocate (ib_data(nBodies, NFIELDS_PER_IB))
-            allocate (px(nBodies), py(nBodies), pz(nBodies))
-            allocate (force_x(nBodies), force_y(nBodies), force_z(nBodies))
-            allocate (torque_x(nBodies), torque_y(nBodies), torque_z(nBodies))
-            allocate (vel_x(nBodies), vel_y(nBodies), vel_z(nBodies))
-            allocate (omega_x(nBodies), omega_y(nBodies), omega_z(nBodies))
-            allocate (angle_x(nBodies), angle_y(nBodies), angle_z(nBodies))
+            allocate (pos%x(nBodies), pos%y(nBodies), pos%z(nBodies))
+            allocate (force%x(nBodies), force%y(nBodies), force%z(nBodies))
+            allocate (torque%x(nBodies), torque%y(nBodies), torque%z(nBodies))
+            allocate (vel%x(nBodies), vel%y(nBodies), vel%z(nBodies))
+            allocate (omega%x(nBodies), omega%y(nBodies), omega%z(nBodies))
+            allocate (angle%x(nBodies), angle%y(nBodies), angle%z(nBodies))
             allocate (ib_diameter(nBodies))
 
             if (proc_rank == 0) then
@@ -1401,12 +1396,12 @@ contains
             call MPI_BCAST(ib_data, nBodies*NFIELDS_PER_IB, mpi_p, 0, MPI_COMM_WORLD, ierr)
 
             do i = 1, nBodies
-                force_x(i) = ib_data(i, 2); force_y(i) = ib_data(i, 3); force_z(i) = ib_data(i, 4)
-                torque_x(i) = ib_data(i, 5); torque_y(i) = ib_data(i, 6); torque_z(i) = ib_data(i, 7)
-                vel_x(i) = ib_data(i, 8); vel_y(i) = ib_data(i, 9); vel_z(i) = ib_data(i, 10)
-                omega_x(i) = ib_data(i, 11); omega_y(i) = ib_data(i, 12); omega_z(i) = ib_data(i, 13)
-                angle_x(i) = ib_data(i, 14); angle_y(i) = ib_data(i, 15); angle_z(i) = ib_data(i, 16)
-                px(i) = ib_data(i, 17); py(i) = ib_data(i, 18); pz(i) = ib_data(i, 19)
+                force%x(i) = ib_data(i, 2); force%y(i) = ib_data(i, 3); force%z(i) = ib_data(i, 4)
+                torque%x(i) = ib_data(i, 5); torque%y(i) = ib_data(i, 6); torque%z(i) = ib_data(i, 7)
+                vel%x(i) = ib_data(i, 8); vel%y(i) = ib_data(i, 9); vel%z(i) = ib_data(i, 10)
+                omega%x(i) = ib_data(i, 11); omega%y(i) = ib_data(i, 12); omega%z(i) = ib_data(i, 13)
+                angle%x(i) = ib_data(i, 14); angle%y(i) = ib_data(i, 15); angle%z(i) = ib_data(i, 16)
+                pos%x(i) = ib_data(i, 17); pos%y(i) = ib_data(i, 18); pos%z(i) = ib_data(i, 19)
                 ib_diameter(i) = ib_data(i, 20)*2.0_wp
             end do
 
@@ -1419,28 +1414,28 @@ contains
                 err = DBPUTMMESH(dbroot, 'ib_bodies', 16, num_procs, meshnames, len_trim(meshnames), meshtypes, DB_F77NULL, ierr)
             end if
 
-            err = DBPUTPM(dbfile, 'ib_bodies', 9, 3, px, py, pz, nBodies, DB_DOUBLE, DB_F77NULL, ierr)
+            err = DBPUTPM(dbfile, 'ib_bodies', 9, 3, pos%x, pos%y, pos%z, nBodies, DB_DOUBLE, DB_F77NULL, ierr)
 
-            call s_write_ib_variable('ib_force_x', t_step, force_x, nBodies)
-            call s_write_ib_variable('ib_force_y', t_step, force_y, nBodies)
-            call s_write_ib_variable('ib_force_z', t_step, force_z, nBodies)
-            call s_write_ib_variable('ib_torque_x', t_step, torque_x, nBodies)
-            call s_write_ib_variable('ib_torque_y', t_step, torque_y, nBodies)
-            call s_write_ib_variable('ib_torque_z', t_step, torque_z, nBodies)
-            call s_write_ib_variable('ib_vel_x', t_step, vel_x, nBodies)
-            call s_write_ib_variable('ib_vel_y', t_step, vel_y, nBodies)
-            call s_write_ib_variable('ib_vel_z', t_step, vel_z, nBodies)
-            call s_write_ib_variable('ib_omega_x', t_step, omega_x, nBodies)
-            call s_write_ib_variable('ib_omega_y', t_step, omega_y, nBodies)
-            call s_write_ib_variable('ib_omega_z', t_step, omega_z, nBodies)
-            call s_write_ib_variable('ib_angle_x', t_step, angle_x, nBodies)
-            call s_write_ib_variable('ib_angle_y', t_step, angle_y, nBodies)
-            call s_write_ib_variable('ib_angle_z', t_step, angle_z, nBodies)
+            call s_write_ib_variable('ib_force_x', t_step, force%x, nBodies)
+            call s_write_ib_variable('ib_force_y', t_step, force%y, nBodies)
+            call s_write_ib_variable('ib_force_z', t_step, force%z, nBodies)
+            call s_write_ib_variable('ib_torque_x', t_step, torque%x, nBodies)
+            call s_write_ib_variable('ib_torque_y', t_step, torque%y, nBodies)
+            call s_write_ib_variable('ib_torque_z', t_step, torque%z, nBodies)
+            call s_write_ib_variable('ib_vel_x', t_step, vel%x, nBodies)
+            call s_write_ib_variable('ib_vel_y', t_step, vel%y, nBodies)
+            call s_write_ib_variable('ib_vel_z', t_step, vel%z, nBodies)
+            call s_write_ib_variable('ib_omega_x', t_step, omega%x, nBodies)
+            call s_write_ib_variable('ib_omega_y', t_step, omega%y, nBodies)
+            call s_write_ib_variable('ib_omega_z', t_step, omega%z, nBodies)
+            call s_write_ib_variable('ib_angle_x', t_step, angle%x, nBodies)
+            call s_write_ib_variable('ib_angle_y', t_step, angle%y, nBodies)
+            call s_write_ib_variable('ib_angle_z', t_step, angle%z, nBodies)
             call s_write_ib_variable('ib_diameter', t_step, ib_diameter, nBodies)
 
-            deallocate (ib_data, px, py, pz, force_x, force_y, force_z)
-            deallocate (torque_x, torque_y, torque_z, vel_x, vel_y, vel_z)
-            deallocate (omega_x, omega_y, omega_z, angle_x, angle_y, angle_z)
+            deallocate (ib_data, pos%x, pos%y, pos%z, force%x, force%y, force%z)
+            deallocate (torque%x, torque%y, torque%z, vel%x, vel%y, vel%z)
+            deallocate (omega%x, omega%y, omega%z, angle%x, angle%y, angle%z)
             deallocate (ib_diameter)
         end if
 #endif
