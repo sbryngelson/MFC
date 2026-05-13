@@ -845,15 +845,15 @@ class CaseValidator:
     def check_body_forces(self):
         """Checks constraints on body forces parameters"""
         for dir in ["x", "y", "z"]:
-            bf = self.get(f"bf_{dir}", "F") == "T"
+            bf = self.get(f"bf%{dir}%enabled", "F") == "T"
 
             if not bf:
                 continue
 
-            self.prohibit(self.get(f"k_{dir}") is None, f"k_{dir} must be specified if bf_{dir} is true")
-            self.prohibit(self.get(f"w_{dir}") is None, f"w_{dir} must be specified if bf_{dir} is true")
-            self.prohibit(self.get(f"p_{dir}") is None, f"p_{dir} must be specified if bf_{dir} is true")
-            self.prohibit(self.get(f"g_{dir}") is None, f"g_{dir} must be specified if bf_{dir} is true")
+            self.prohibit(self.get(f"bf%{dir}%k") is None, f"bf%{dir}%k must be specified if bf%{dir}%enabled is true")
+            self.prohibit(self.get(f"bf%{dir}%w") is None, f"bf%{dir}%w must be specified if bf%{dir}%enabled is true")
+            self.prohibit(self.get(f"bf%{dir}%p") is None, f"bf%{dir}%p must be specified if bf%{dir}%enabled is true")
+            self.prohibit(self.get(f"bf%{dir}%g") is None, f"bf%{dir}%g must be specified if bf%{dir}%enabled is true")
 
     def check_viscosity(self):
         """Checks constraints on viscosity parameters"""

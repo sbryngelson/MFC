@@ -473,7 +473,7 @@ PATTERNS = [
     (r"lag_(\w+)_wrt", "Write Lagrangian {0} field"),
     # Body force patterns
     (r"([kgwp])_([xyz])", "Body force parameter {0} in {1}-direction"),
-    (r"bf_([xyz])", "Enable body force in {0}-direction"),
+    (r"bf%([xyz])%enabled", "Enable body force in {0}-direction"),
     # simplex patterns
     (r"simplex_params%perturb_dens\((\d+)\)", "Enable density perturbation for fluid {0}"),
     (r"simplex_params%perturb_dens_freq\((\d+)\)", "Density perturbation frequency for fluid {0}"),
