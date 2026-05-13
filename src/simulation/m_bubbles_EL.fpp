@@ -260,17 +260,17 @@ contains
         call s_locate_cell(mtn_pos(bub_id,1:3,1), cell, mtn_s(bub_id,1:3,1))
 
         ! Check if the bubble is located in the ghost cell of a symmetric, or wall boundary
-        if ((any(bc_x%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
-            & BC_NO_SLIP_WALL/)) .and. cell(1) < 0) .or. (any(bc_x%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
-            & BC_NO_SLIP_WALL/)) .and. cell(1) > m) .or. (any(bc_y%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
-            & BC_NO_SLIP_WALL/)) .and. cell(2) < 0) .or. (any(bc_y%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
+        if ((any(bc%x%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
+            & BC_NO_SLIP_WALL/)) .and. cell(1) < 0) .or. (any(bc%x%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
+            & BC_NO_SLIP_WALL/)) .and. cell(1) > m) .or. (any(bc%y%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
+            & BC_NO_SLIP_WALL/)) .and. cell(2) < 0) .or. (any(bc%y%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
             & BC_NO_SLIP_WALL/)) .and. cell(2) > n)) then
             call s_mpi_abort("Lagrange bubble is in the ghost cells of a symmetric or wall boundary.")
         end if
 
         if (p > 0) then
-            if ((any(bc_z%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
-                & BC_NO_SLIP_WALL/)) .and. cell(3) < 0) .or. (any(bc_z%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
+            if ((any(bc%z%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
+                & BC_NO_SLIP_WALL/)) .and. cell(3) < 0) .or. (any(bc%z%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, &
                 & BC_NO_SLIP_WALL/)) .and. cell(3) > p)) then
                 call s_mpi_abort("Lagrange bubble is in the ghost cells of a symmetric or wall boundary.")
             end if
@@ -1178,23 +1178,23 @@ contains
         end if
 
         ! For symmetric and wall boundary condition
-        if (any(bc_x%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/))) then
+        if (any(bc%x%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/))) then
             particle_in_domain = (particle_in_domain .and. (pos_part(1) >= x%cb(-1)))
         end if
-        if (any(bc_x%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/))) then
+        if (any(bc%x%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/))) then
             particle_in_domain = (particle_in_domain .and. (pos_part(1) < x%cb(m)))
         end if
-        if (any(bc_y%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/)) .and. (.not. cyl_coord)) then
+        if (any(bc%y%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/)) .and. (.not. cyl_coord)) then
             particle_in_domain = (particle_in_domain .and. (pos_part(2) >= y%cb(-1)))
         end if
-        if (any(bc_y%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/)) .and. (.not. cyl_coord)) then
+        if (any(bc%y%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/)) .and. (.not. cyl_coord)) then
             particle_in_domain = (particle_in_domain .and. (pos_part(2) < y%cb(n)))
         end if
         if (p > 0) then
-            if (any(bc_z%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/))) then
+            if (any(bc%z%beg == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/))) then
                 particle_in_domain = (particle_in_domain .and. (pos_part(3) >= z%cb(-1)))
             end if
-            if (any(bc_z%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/))) then
+            if (any(bc%z%end == (/BC_REFLECTIVE, BC_CHAR_SLIP_WALL, BC_SLIP_WALL, BC_NO_SLIP_WALL/))) then
                 particle_in_domain = (particle_in_domain .and. (pos_part(3) < z%cb(p)))
             end if
         end if

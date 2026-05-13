@@ -123,7 +123,7 @@ contains
         integer                                                :: ierr        !< Generic flag used to identify and report GPU errors
         ! Restrict filter to processors that have cells adjacent to axis
 
-        if (bc_y%beg >= 0) return
+        if (bc%y%beg >= 0) return
 #if defined(MFC_GPU)
         $:GPU_PARALLEL_LOOP(collapse=3)
         do k = 1, sys_size

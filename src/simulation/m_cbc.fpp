@@ -204,7 +204,7 @@ contains
             idx2%end = muscl_order - 1
         end if
         ! Allocating/Computing CBC Coefficients in x-direction
-        if (all((/bc_x%beg, bc_x%end/) <= -5) .and. all((/bc_x%beg, bc_x%end/) >= -13)) then
+        if (all((/bc%x%beg, bc%x%end/) <= -5) .and. all((/bc%x%beg, bc%x%end/) >= -13)) then
             @:ALLOCATE(fd_coef_x(0:buff_size, -1:1))
 
             if (weno_order > 1 .or. muscl_order > 1) then
@@ -213,7 +213,7 @@ contains
 
             call s_compute_cbc_coefficients(1, -1)
             call s_compute_cbc_coefficients(1, 1)
-        else if (bc_x%beg <= -5 .and. bc_x%beg >= -13) then
+        else if (bc%x%beg <= -5 .and. bc%x%beg >= -13) then
             @:ALLOCATE(fd_coef_x(0:buff_size, -1:-1))
 
             if (weno_order > 1 .or. muscl_order > 1) then
@@ -221,7 +221,7 @@ contains
             end if
 
             call s_compute_cbc_coefficients(1, -1)
-        else if (bc_x%end <= -5 .and. bc_x%end >= -13) then
+        else if (bc%x%end <= -5 .and. bc%x%end >= -13) then
             @:ALLOCATE(fd_coef_x(0:buff_size, 1:1))
 
             if (weno_order > 1 .or. muscl_order > 1) then
@@ -233,7 +233,7 @@ contains
 
         ! Allocating/Computing CBC Coefficients in y-direction
         if (n > 0) then
-            if (all((/bc_y%beg, bc_y%end/) <= -5) .and. all((/bc_y%beg, bc_y%end/) >= -13)) then
+            if (all((/bc%y%beg, bc%y%end/) <= -5) .and. all((/bc%y%beg, bc%y%end/) >= -13)) then
                 @:ALLOCATE(fd_coef_y(0:buff_size, -1:1))
 
                 if (weno_order > 1 .or. muscl_order > 1) then
@@ -242,7 +242,7 @@ contains
 
                 call s_compute_cbc_coefficients(2, -1)
                 call s_compute_cbc_coefficients(2, 1)
-            else if (bc_y%beg <= -5 .and. bc_y%beg >= -13) then
+            else if (bc%y%beg <= -5 .and. bc%y%beg >= -13) then
                 @:ALLOCATE(fd_coef_y(0:buff_size, -1:-1))
 
                 if (weno_order > 1 .or. muscl_order > 1) then
@@ -250,7 +250,7 @@ contains
                 end if
 
                 call s_compute_cbc_coefficients(2, -1)
-            else if (bc_y%end <= -5 .and. bc_y%end >= -13) then
+            else if (bc%y%end <= -5 .and. bc%y%end >= -13) then
                 @:ALLOCATE(fd_coef_y(0:buff_size, 1:1))
 
                 if (weno_order > 1 .or. muscl_order > 1) then
@@ -263,7 +263,7 @@ contains
 
         ! Allocating/Computing CBC Coefficients in z-direction
         if (p > 0) then
-            if (all((/bc_z%beg, bc_z%end/) <= -5) .and. all((/bc_z%beg, bc_z%end/) >= -13)) then
+            if (all((/bc%z%beg, bc%z%end/) <= -5) .and. all((/bc%z%beg, bc%z%end/) >= -13)) then
                 @:ALLOCATE(fd_coef_z(0:buff_size, -1:1))
 
                 if (weno_order > 1 .or. muscl_order > 1) then
@@ -272,7 +272,7 @@ contains
 
                 call s_compute_cbc_coefficients(3, -1)
                 call s_compute_cbc_coefficients(3, 1)
-            else if (bc_z%beg <= -5 .and. bc_z%beg >= -13) then
+            else if (bc%z%beg <= -5 .and. bc%z%beg >= -13) then
                 @:ALLOCATE(fd_coef_z(0:buff_size, -1:-1))
 
                 if (weno_order > 1 .or. muscl_order > 1) then
@@ -280,7 +280,7 @@ contains
                 end if
 
                 call s_compute_cbc_coefficients(3, -1)
-            else if (bc_z%end <= -5 .and. bc_z%end >= -13) then
+            else if (bc%z%end <= -5 .and. bc%z%end >= -13) then
                 @:ALLOCATE(fd_coef_z(0:buff_size, 1:1))
 
                 if (weno_order > 1 .or. muscl_order > 1) then
@@ -302,23 +302,23 @@ contains
         ! Assign and update GRCBC inputs
         #:for CBC_DIR, XYZ in [(1, 'x'), (2, 'y'), (3, 'z')]
             if (${CBC_DIR}$ <= num_dims) then
-                vel_in(${CBC_DIR}$, 1) = bc_${XYZ}$%vel_in(1)
-                vel_out(${CBC_DIR}$, 1) = bc_${XYZ}$%vel_out(1)
+                vel_in(${CBC_DIR}$, 1) = bc%${XYZ}$%vel_in(1)
+                vel_out(${CBC_DIR}$, 1) = bc%${XYZ}$%vel_out(1)
                 if (n > 0) then
-                    vel_in(${CBC_DIR}$, 2) = bc_${XYZ}$%vel_in(2)
-                    vel_out(${CBC_DIR}$, 2) = bc_${XYZ}$%vel_out(2)
+                    vel_in(${CBC_DIR}$, 2) = bc%${XYZ}$%vel_in(2)
+                    vel_out(${CBC_DIR}$, 2) = bc%${XYZ}$%vel_out(2)
                     if (p > 0) then
-                        vel_in(${CBC_DIR}$, 3) = bc_${XYZ}$%vel_in(3)
-                        vel_out(${CBC_DIR}$, 3) = bc_${XYZ}$%vel_out(3)
+                        vel_in(${CBC_DIR}$, 3) = bc%${XYZ}$%vel_in(3)
+                        vel_out(${CBC_DIR}$, 3) = bc%${XYZ}$%vel_out(3)
                     end if
                 end if
                 Del_in(${CBC_DIR}$) = maxval(${XYZ}$%spacing)
                 Del_out(${CBC_DIR}$) = maxval(${XYZ}$%spacing)
-                pres_in(${CBC_DIR}$) = bc_${XYZ}$%pres_in
-                pres_out(${CBC_DIR}$) = bc_${XYZ}$%pres_out
+                pres_in(${CBC_DIR}$) = bc%${XYZ}$%pres_in
+                pres_out(${CBC_DIR}$) = bc%${XYZ}$%pres_out
                 do i = 1, num_fluids
-                    alpha_rho_in(i, ${CBC_DIR}$) = bc_${XYZ}$%alpha_rho_in(i)
-                    alpha_in(i, ${CBC_DIR}$) = bc_${XYZ}$%alpha_in(i)
+                    alpha_rho_in(i, ${CBC_DIR}$) = bc%${XYZ}$%alpha_rho_in(i)
+                    alpha_in(i, ${CBC_DIR}$) = bc%${XYZ}$%alpha_in(i)
                 end do
             end if
         #:endfor
@@ -725,18 +725,18 @@ contains
 
                         Ma = vel(dir_idx(1))/c
 
-                        if ((cbc_loc == -1 .and. bc_${XYZ}$%beg == BC_CHAR_SLIP_WALL) .or. (cbc_loc == 1 &
-                            & .and. bc_${XYZ}$%end == BC_CHAR_SLIP_WALL)) then
+                        if ((cbc_loc == -1 .and. bc%${XYZ}$%beg == BC_CHAR_SLIP_WALL) .or. (cbc_loc == 1 &
+                            & .and. bc%${XYZ}$%end == BC_CHAR_SLIP_WALL)) then
                             call s_compute_slip_wall_L(lambda, L, rho, c, dpres_ds, dvel_ds)
-                        else if ((cbc_loc == -1 .and. bc_${XYZ}$%beg == BC_CHAR_NR_SUB_BUFFER) .or. (cbc_loc == 1 &
-                                 & .and. bc_${XYZ}$%end == BC_CHAR_NR_SUB_BUFFER)) then
+                        else if ((cbc_loc == -1 .and. bc%${XYZ}$%beg == BC_CHAR_NR_SUB_BUFFER) .or. (cbc_loc == 1 &
+                                 & .and. bc%${XYZ}$%end == BC_CHAR_NR_SUB_BUFFER)) then
                             call s_compute_nonreflecting_subsonic_buffer_L(lambda, L, rho, c, mf, dalpha_rho_ds, dpres_ds, &
                                 & dvel_ds, dadv_ds, dYs_ds)
-                        else if ((cbc_loc == -1 .and. bc_${XYZ}$%beg == BC_CHAR_NR_SUB_INFLOW) .or. (cbc_loc == 1 &
-                                 & .and. bc_${XYZ}$%end == BC_CHAR_NR_SUB_INFLOW)) then
+                        else if ((cbc_loc == -1 .and. bc%${XYZ}$%beg == BC_CHAR_NR_SUB_INFLOW) .or. (cbc_loc == 1 &
+                                 & .and. bc%${XYZ}$%end == BC_CHAR_NR_SUB_INFLOW)) then
                             call s_compute_nonreflecting_subsonic_inflow_L(lambda, L, rho, c, dpres_ds, dvel_ds)
                             ! Add GRCBC for Subsonic Inflow
-                            if (bc_${XYZ}$%grcbc_in) then
+                            if (bc%${XYZ}$%grcbc_in) then
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = 2, eqn_idx%mom%beg
                                     L(i) = c**3._wp*Ma*(alpha_rho(i - 1) - alpha_rho_in(i - 1, &
@@ -759,33 +759,33 @@ contains
                                   & dir_idx(1))*sign(1, &
                                   & cbc_loc))/Del_in(${CBC_DIR}$) + c*(1._wp + Ma)*(pres - pres_in(${CBC_DIR}$))/Del_in(${CBC_DIR}$)
                             end if
-                        else if ((cbc_loc == -1 .and. bc_${XYZ}$%beg == BC_CHAR_NR_SUB_OUTFLOW) .or. (cbc_loc == 1 &
-                                 & .and. bc_${XYZ}$%end == BC_CHAR_NR_SUB_OUTFLOW)) then
+                        else if ((cbc_loc == -1 .and. bc%${XYZ}$%beg == BC_CHAR_NR_SUB_OUTFLOW) .or. (cbc_loc == 1 &
+                                 & .and. bc%${XYZ}$%end == BC_CHAR_NR_SUB_OUTFLOW)) then
                             call s_compute_nonreflecting_subsonic_outflow_L(lambda, L, rho, c, mf, dalpha_rho_ds, dpres_ds, &
                                 & dvel_ds, dadv_ds, dYs_ds)
                             ! Add GRCBC for Subsonic Outflow (Pressure)
-                            if (bc_${XYZ}$%grcbc_out) then
+                            if (bc%${XYZ}$%grcbc_out) then
                                 L(eqn_idx%adv%end) = c*(1._wp - Ma)*(pres - pres_out(${CBC_DIR}$))/Del_out(${CBC_DIR}$)
 
                                 ! Add GRCBC for Subsonic Outflow (Normal Velocity)
-                                if (bc_${XYZ}$%grcbc_vel_out) then
+                                if (bc%${XYZ}$%grcbc_vel_out) then
                                     L(eqn_idx%adv%end) = L(eqn_idx%adv%end) + rho*c**2._wp*(1._wp - Ma)*(vel(dir_idx(1)) &
                                       & + vel_out(${CBC_DIR}$, dir_idx(1))*sign(1, cbc_loc))/Del_out(${CBC_DIR}$)
                                 end if
                             end if
-                        else if ((cbc_loc == -1 .and. bc_${XYZ}$%beg == BC_CHAR_FF_SUB_OUTFLOW) .or. (cbc_loc == 1 &
-                                 & .and. bc_${XYZ}$%end == BC_CHAR_FF_SUB_OUTFLOW)) then
+                        else if ((cbc_loc == -1 .and. bc%${XYZ}$%beg == BC_CHAR_FF_SUB_OUTFLOW) .or. (cbc_loc == 1 &
+                                 & .and. bc%${XYZ}$%end == BC_CHAR_FF_SUB_OUTFLOW)) then
                             call s_compute_force_free_subsonic_outflow_L(lambda, L, rho, c, mf, dalpha_rho_ds, dpres_ds, dvel_ds, &
                                 & dadv_ds)
-                        else if ((cbc_loc == -1 .and. bc_${XYZ}$%beg == BC_CHAR_CP_SUB_OUTFLOW) .or. (cbc_loc == 1 &
-                                 & .and. bc_${XYZ}$%end == BC_CHAR_CP_SUB_OUTFLOW)) then
+                        else if ((cbc_loc == -1 .and. bc%${XYZ}$%beg == BC_CHAR_CP_SUB_OUTFLOW) .or. (cbc_loc == 1 &
+                                 & .and. bc%${XYZ}$%end == BC_CHAR_CP_SUB_OUTFLOW)) then
                             call s_compute_constant_pressure_subsonic_outflow_L(lambda, L, rho, c, mf, dalpha_rho_ds, dpres_ds, &
                                 & dvel_ds, dadv_ds)
-                        else if ((cbc_loc == -1 .and. bc_${XYZ}$%beg == BC_CHAR_SUP_INFLOW) .or. (cbc_loc == 1 &
-                                 & .and. bc_${XYZ}$%end == BC_CHAR_SUP_INFLOW)) then
+                        else if ((cbc_loc == -1 .and. bc%${XYZ}$%beg == BC_CHAR_SUP_INFLOW) .or. (cbc_loc == 1 &
+                                 & .and. bc%${XYZ}$%end == BC_CHAR_SUP_INFLOW)) then
                             call s_compute_supersonic_inflow_L(L)
-                        else if ((cbc_loc == -1 .and. bc_${XYZ}$%beg == BC_CHAR_SUP_OUTFLOW) .or. (cbc_loc == 1 &
-                                 & .and. bc_${XYZ}$%end == BC_CHAR_SUP_OUTFLOW)) then
+                        else if ((cbc_loc == -1 .and. bc%${XYZ}$%beg == BC_CHAR_SUP_OUTFLOW) .or. (cbc_loc == 1 &
+                                 & .and. bc%${XYZ}$%end == BC_CHAR_SUP_OUTFLOW)) then
                             call s_compute_supersonic_outflow_L(lambda, L, rho, c, mf, dalpha_rho_ds, dpres_ds, dvel_ds, dadv_ds, &
                                                                 & dYs_ds)
                         end if
@@ -1359,7 +1359,7 @@ contains
         toggle = .false.
 
         #:for BC in {-5, -6, -7, -8, -9, -10, -11, -12, -13}
-            if (any((/bc_x%beg, bc_x%end, bc_y%beg, bc_y%end, bc_z%beg, bc_z%end/) == ${BC}$)) then
+            if (any((/bc%x%beg, bc%x%end, bc%y%beg, bc%y%end, bc%z%beg, bc%z%end/) == ${BC}$)) then
                 toggle = .true.
             end if
         #:endfor
@@ -1404,8 +1404,8 @@ contains
         @:DEALLOCATE(vel_in, vel_out, pres_in, pres_out, Del_in, Del_out, alpha_rho_in, alpha_in)
 
         ! Deallocating CBC Coefficients in x-direction
-        if (all((/bc_x%beg, bc_x%end/) <= -5) .and. all((/bc_x%beg, &
-            & bc_x%end/) >= -13) .or. bc_x%beg <= -5 .and. bc_x%beg >= -13 .or. bc_x%end <= -5 .and. bc_x%end >= -13) then
+        if (all((/bc%x%beg, bc%x%end/) <= -5) .and. all((/bc%x%beg, &
+            & bc%x%end/) >= -13) .or. bc%x%beg <= -5 .and. bc%x%beg >= -13 .or. bc%x%end <= -5 .and. bc%x%end >= -13) then
             @:DEALLOCATE(fd_coef_x)
             if (weno_order > 1 .or. muscl_order > 1) then
                 @:DEALLOCATE(pi_coef_x)
@@ -1414,8 +1414,8 @@ contains
 
         ! Deallocating CBC Coefficients in y-direction
         if (n > 0) then
-            if (all((/bc_y%beg, bc_y%end/) <= -5) .and. all((/bc_y%beg, &
-                & bc_y%end/) >= -13) .or. bc_y%beg <= -5 .and. bc_y%beg >= -13 .or. bc_y%end <= -5 .and. bc_y%end >= -13) then
+            if (all((/bc%y%beg, bc%y%end/) <= -5) .and. all((/bc%y%beg, &
+                & bc%y%end/) >= -13) .or. bc%y%beg <= -5 .and. bc%y%beg >= -13 .or. bc%y%end <= -5 .and. bc%y%end >= -13) then
                 @:DEALLOCATE(fd_coef_y)
                 if (weno_order > 1) then
                     @:DEALLOCATE(pi_coef_y)
@@ -1425,8 +1425,8 @@ contains
 
         ! Deallocating CBC Coefficients in z-direction
         if (p > 0) then
-            if (all((/bc_z%beg, bc_z%end/) <= -5) .and. all((/bc_z%beg, &
-                & bc_z%end/) >= -13) .or. bc_z%beg <= -5 .and. bc_z%beg >= -13 .or. bc_z%end <= -5 .and. bc_z%end >= -13) then
+            if (all((/bc%z%beg, bc%z%end/) <= -5) .and. all((/bc%z%beg, &
+                & bc%z%end/) >= -13) .or. bc%z%beg <= -5 .and. bc%z%beg >= -13 .or. bc%z%end <= -5 .and. bc%z%end >= -13) then
                 @:DEALLOCATE(fd_coef_z)
                 if (weno_order > 1) then
                     @:DEALLOCATE(pi_coef_z)

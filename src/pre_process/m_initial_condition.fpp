@@ -71,8 +71,8 @@ contains
 
         do l = 0, p
             do k = 0, n
-                bc_type(1, 1)%sf(0, k, l) = int(min(bc_x%beg, 0), kind=1)
-                bc_type(1, 2)%sf(0, k, l) = int(min(bc_x%end, 0), kind=1)
+                bc_type(1, 1)%sf(0, k, l) = int(min(bc%x%beg, 0), kind=1)
+                bc_type(1, 2)%sf(0, k, l) = int(min(bc%x%end, 0), kind=1)
             end do
         end do
 
@@ -82,8 +82,8 @@ contains
 
             do l = 0, p
                 do j = -buff_size, m + buff_size
-                    bc_type(2, 1)%sf(j, 0, l) = int(min(bc_y%beg, 0), kind=1)
-                    bc_type(2, 2)%sf(j, 0, l) = int(min(bc_y%end, 0), kind=1)
+                    bc_type(2, 1)%sf(j, 0, l) = int(min(bc%y%beg, 0), kind=1)
+                    bc_type(2, 2)%sf(j, 0, l) = int(min(bc%y%end, 0), kind=1)
                 end do
             end do
 
@@ -93,8 +93,8 @@ contains
 
                 do k = -buff_size, n + buff_size
                     do j = -buff_size, m + buff_size
-                        bc_type(3, 1)%sf(j, k, 0) = int(min(bc_z%beg, 0), kind=1)
-                        bc_type(3, 2)%sf(j, k, 0) = int(min(bc_z%end, 0), kind=1)
+                        bc_type(3, 1)%sf(j, k, 0) = int(min(bc%z%beg, 0), kind=1)
+                        bc_type(3, 2)%sf(j, k, 0) = int(min(bc%z%end, 0), kind=1)
                     end do
                 end do
             end if

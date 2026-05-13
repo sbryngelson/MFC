@@ -202,20 +202,20 @@ module m_global_parameters
     logical :: bc_io
     !> @name Boundary conditions (BC) in the x-, y- and z-directions, respectively
     !> @{
-    type(bc_dir_t) :: bc_x, bc_y, bc_z
+    type(bc_xyz_info) :: bc
     !> @}
     !> @name Original boundary conditions preserved for immersed boundary code
-    !> (bc_x/y/z get overwritten with MPI neighbor ranks during decomposition)
+    !> (bc%x/y/z get overwritten with MPI neighbor ranks during decomposition)
     !> @{
     type(bc_dir_t) :: ib_bc_x, ib_bc_y, ib_bc_z
     !> @}
 #if defined(MFC_OpenACC)
-    $:GPU_DECLARE(create='[bc_x%vb1, bc_x%vb2, bc_x%vb3, bc_x%ve1, bc_x%ve2, bc_x%ve3]')
-    $:GPU_DECLARE(create='[bc_y%vb1, bc_y%vb2, bc_y%vb3, bc_y%ve1, bc_y%ve2, bc_y%ve3]')
-    $:GPU_DECLARE(create='[bc_z%vb1, bc_z%vb2, bc_z%vb3, bc_z%ve1, bc_z%ve2, bc_z%ve3]')
+    $:GPU_DECLARE(create='[bc%x%vb1, bc%x%vb2, bc%x%vb3, bc%x%ve1, bc%x%ve2, bc%x%ve3]')
+    $:GPU_DECLARE(create='[bc%y%vb1, bc%y%vb2, bc%y%vb3, bc%y%ve1, bc%y%ve2, bc%y%ve3]')
+    $:GPU_DECLARE(create='[bc%z%vb1, bc%z%vb2, bc%z%vb3, bc%z%ve1, bc%z%ve2, bc%z%ve3]')
     $:GPU_DECLARE(create='[ib_bc_x%beg, ib_bc_y%beg, ib_bc_z%beg]')
 #elif defined(MFC_OpenMP)
-    $:GPU_DECLARE(create='[bc_x, bc_y, bc_z]')
+    $:GPU_DECLARE(create='[bc]')
     $:GPU_DECLARE(create='[ib_bc_x, ib_bc_y, ib_bc_z]')
 #endif
     type(bounds_info) :: x_domain, y_domain, z_domain
@@ -569,14 +569,14 @@ contains
         num_bc_patches = 0
         bc_io = .false.
 
-        bc_x%beg = dflt_int; bc_x%end = dflt_int
-        bc_y%beg = dflt_int; bc_y%end = dflt_int
-        bc_z%beg = dflt_int; bc_z%end = dflt_int
+        bc%x%beg = dflt_int; bc%x%end = dflt_int
+        bc%y%beg = dflt_int; bc%y%end = dflt_int
+        bc%z%beg = dflt_int; bc%z%end = dflt_int
 
         #:for DIM in ['x', 'y', 'z']
             #:for DIR in [1, 2, 3]
-                bc_${DIM}$%vb${DIR}$ = 0._wp
-                bc_${DIM}$%ve${DIR}$ = 0._wp
+                bc%${DIM}$%vb${DIR}$ = 0._wp
+                bc%${DIM}$%ve${DIR}$ = 0._wp
             #:endfor
         #:endfor
 
@@ -732,16 +732,16 @@ contains
 
         ! GRCBC flags
         #:for dir in {'x', 'y', 'z'}
-            bc_${dir}$%grcbc_in = .false.
-            bc_${dir}$%grcbc_out = .false.
-            bc_${dir}$%grcbc_vel_out = .false.
+            bc%${dir}$%grcbc_in = .false.
+            bc%${dir}$%grcbc_out = .false.
+            bc%${dir}$%grcbc_vel_out = .false.
         #:endfor
 
         #:for dir in {'x', 'y', 'z'}
-            bc_${dir}$%isothermal_in = .false.
-            bc_${dir}$%isothermal_out = .false.
-            bc_${dir}$%Twall_in = dflt_real
-            bc_${dir}$%Twall_out = dflt_real
+            bc%${dir}$%isothermal_in = .false.
+            bc%${dir}$%isothermal_out = .false.
+            bc%${dir}$%Twall_in = dflt_real
+            bc%${dir}$%Twall_out = dflt_real
         #:endfor
 
         ! Lagrangian subgrid bubble model

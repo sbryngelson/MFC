@@ -76,15 +76,15 @@ contains
 
         namelist /user_inputs/ case_dir, old_grid, old_ic, t_step_old, t_step_start, m, n, p, x_domain, y_domain, z_domain, &
             & stretch_x, stretch_y, stretch_z, a_x, a_y, a_z, x_stretch, y_stretch, z_stretch, model_eqns, num_fluids, mpp_lim, &
-            & weno_order, bc_x, bc_y, bc_z, num_patches, hypoelasticity, mhd, patch_icpp, fluid_pp, bub_pp, precision, &
-            & parallel_io, mixlayer_vel_profile, mixlayer_vel_coef, mixlayer_perturb, mixlayer_perturb_nk, mixlayer_perturb_k0, &
-            & pi_fac, perturb_flow, perturb_flow_fluid, perturb_flow_mag, perturb_sph, perturb_sph_fluid, fluid_rho, cyl_coord, &
-            & loops_x, loops_y, loops_z, rhoref, pref, bubbles_euler, R0ref, nb, polytropic, thermal, Ca, Web, Re_inv, &
-            & polydisperse, poly_sigma, qbmm, sigR, sigV, dist_type, rhoRV, file_per_process, relax, relax_model, palpha_eps, &
-            & ptgalpha_eps, ib, num_ibs, patch_ib, sigma, adv_n, cfl_adap_dt, cfl_const_dt, n_start, n_start_old, &
-            & surface_tension, hyperelasticity, pre_stress, elliptic_smoothing, elliptic_smoothing_iters, viscous, &
-            & bubbles_lagrange, num_bc_patches, patch_bc, Bx0, relativity, cont_damage, igr, igr_order, down_sample, recon_type, &
-            & muscl_order, hyper_cleaning, simplex_perturb, simplex_params, fft_wrt
+            & weno_order, bc, num_patches, hypoelasticity, mhd, patch_icpp, fluid_pp, bub_pp, precision, parallel_io, &
+            & mixlayer_vel_profile, mixlayer_vel_coef, mixlayer_perturb, mixlayer_perturb_nk, mixlayer_perturb_k0, pi_fac, &
+            & perturb_flow, perturb_flow_fluid, perturb_flow_mag, perturb_sph, perturb_sph_fluid, fluid_rho, cyl_coord, loops_x, &
+            & loops_y, loops_z, rhoref, pref, bubbles_euler, R0ref, nb, polytropic, thermal, Ca, Web, Re_inv, polydisperse, &
+            & poly_sigma, qbmm, sigR, sigV, dist_type, rhoRV, file_per_process, relax, relax_model, palpha_eps, ptgalpha_eps, ib, &
+            & num_ibs, patch_ib, sigma, adv_n, cfl_adap_dt, cfl_const_dt, n_start, n_start_old, surface_tension, hyperelasticity, &
+            & pre_stress, elliptic_smoothing, elliptic_smoothing_iters, viscous, bubbles_lagrange, num_bc_patches, patch_bc, Bx0, &
+            & relativity, cont_damage, igr, igr_order, down_sample, recon_type, muscl_order, hyper_cleaning, simplex_perturb, &
+            & simplex_params, fft_wrt
 
         file_loc = 'pre_process.inp'
         inquire (FILE=trim(file_loc), EXIST=file_check)
@@ -110,7 +110,7 @@ contains
 
             if (cfl_adap_dt .or. cfl_const_dt) cfl_dt = .true.
 
-            if (any((/bc_x%beg, bc_x%end, bc_y%beg, bc_y%end, bc_z%beg, bc_z%end/) == BC_DIRICHLET) .or. num_bc_patches > 0) then
+            if (any((/bc%x%beg, bc%x%end, bc%y%beg, bc%y%end, bc%z%beg, bc%z%end/) == BC_DIRICHLET) .or. num_bc_patches > 0) then
                 bc_io = .true.
             end if
         else

@@ -103,8 +103,8 @@ print(
             "riemann_solver": 2,
             "wave_speeds": 1,
             "avg_state": 2,
-            "bc_x%beg": -8,
-            "bc_x%end": -8,
+            "bc%x%beg": -8,
+            "bc%x%end": -8,
             # Formatted Database Files Structure Parameters
             "format": 1,
             "precision": 2,

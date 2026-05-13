@@ -39,10 +39,10 @@ print(
             "num_igr_iters": 3,
             "num_igr_warm_start_iters": 30,
             "alf_factor": 10,
-            "bc_x%beg": -3,  # 11,
-            "bc_x%end": -3,  # 12
-            "bc_y%beg": -3,
-            "bc_y%end": -3,
+            "bc%x%beg": -3,  # 11,
+            "bc%x%end": -3,  # 12
+            "bc%y%beg": -3,
+            "bc%y%end": -3,
             # Formatted Database Files Structure Parameters
             "format": 1,
             "precision": 2,

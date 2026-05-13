@@ -44,8 +44,8 @@ print(
             "riemann_solver": 1,
             "wave_speeds": 1,
             "avg_state": 2,
-            "bc_x%beg": -3,
-            "bc_x%end": -3,
+            "bc%x%beg": -3,
+            "bc%x%end": -3,
             # Turning on Hypoelasticity
             "hypoelasticity": "T",
             # Formatted Database Files Structure Parameters

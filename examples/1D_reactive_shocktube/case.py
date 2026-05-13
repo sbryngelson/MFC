@@ -78,8 +78,8 @@ case = {
     "riemann_solver": 2,
     "wave_speeds": 1,
     "avg_state": 2,
-    "bc_x%beg": -2,
-    "bc_x%end": -3,
+    "bc%x%beg": -2,
+    "bc%x%end": -3,
     # Chemistry
     "chemistry": "F" if not args.chemistry else "T",
     "chem_params%diffusion": "F",

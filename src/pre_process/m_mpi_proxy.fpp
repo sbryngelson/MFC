@@ -43,8 +43,8 @@ contains
             & 'mixlayer_perturb', 'bubbles_euler', 'polytropic', 'polydisperse',  &
             & 'qbmm', 'file_per_process', 'adv_n', 'ib' , 'cfl_adap_dt',          &
             & 'cfl_const_dt', 'cfl_dt', 'surface_tension',                        &
-            & 'bc_x%isothermal_in', 'bc_y%isothermal_in', 'bc_z%isothermal_in',   &
-            & 'bc_x%isothermal_out', 'bc_y%isothermal_out', 'bc_z%isothermal_out',&
+            & 'bc%x%isothermal_in', 'bc%y%isothermal_in', 'bc%z%isothermal_in',   &
+            & 'bc%x%isothermal_out', 'bc%y%isothermal_out', 'bc%z%isothermal_out',&
             & 'hyperelasticity', 'pre_stress', 'elliptic_smoothing', 'viscous',   &
             & 'bubbles_lagrange', 'bc_io', 'mhd', 'relativity', 'cont_damage',    &
             & 'igr', 'down_sample', 'simplex_perturb','fft_wrt', 'hyper_cleaning' ]
@@ -55,14 +55,14 @@ contains
         #:for VAR in [ 'x_domain%beg', 'x_domain%end', 'y_domain%beg',                         &
             & 'y_domain%end', 'z_domain%beg', 'z_domain%end', 'a_x', 'a_y',                   &
             & 'a_z', 'x_stretch%beg', 'x_stretch%end', 'y_stretch%beg', 'y_stretch%end',      &
-            & 'z_stretch%beg', 'z_stretch%end', 'bc_x%beg',     &
-            & 'bc_x%end', 'bc_y%beg', 'bc_y%end', 'bc_z%beg', 'bc_z%end',      &
+            & 'z_stretch%beg', 'z_stretch%end', 'bc%x%beg',     &
+            & 'bc%x%end', 'bc%y%beg', 'bc%y%end', 'bc%z%beg', 'bc%z%end',      &
             & 'perturb_flow_mag', 'pref', 'rhoref', 'poly_sigma', 'R0ref',     &
             & 'Web', 'Ca', 'Re_inv', 'sigR', 'sigV', 'rhoRV', 'palpha_eps',    &
             & 'ptgalpha_eps', 'sigma', 'pi_fac', 'mixlayer_vel_coef', 'Bx0',   &
-            & 'mixlayer_perturb_k0', 'bc_x%Twall_in', 'bc_x%Twall_out',        &
-            & 'bc_y%Twall_in', 'bc_y%Twall_out', 'bc_z%Twall_in',              &
-            & 'bc_z%Twall_out']
+            & 'mixlayer_perturb_k0', 'bc%x%Twall_in', 'bc%x%Twall_out',        &
+            & 'bc%y%Twall_in', 'bc%y%Twall_out', 'bc%z%Twall_in',              &
+            & 'bc%z%Twall_out']
             call MPI_BCAST(${VAR}$, 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
         #:endfor
 

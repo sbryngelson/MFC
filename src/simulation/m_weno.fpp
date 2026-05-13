@@ -191,11 +191,11 @@ contains
         ! Determine cell count, boundary locations, and BCs for selected WENO direction
 
         if (weno_dir == 1) then
-            s = m; s_cb => x%cb; bc_s = bc_x
+            s = m; s_cb => x%cb; bc_s = bc%x
         else if (weno_dir == 2) then
-            s = n; s_cb => y%cb; bc_s = bc_y
+            s = n; s_cb => y%cb; bc_s = bc%y
         else
-            s = p; s_cb => z%cb; bc_s = bc_z
+            s = p; s_cb => z%cb; bc_s = bc%z
         end if
 
         #:for WENO_DIR, XYZ in [(1, 'x'), (2, 'y'), (3, 'z')]

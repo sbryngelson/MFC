@@ -421,9 +421,9 @@ See @ref equations "Equations" for the mathematical models these parameters cont
 
 | Parameter                  | Type    | Description                                    |
 | ---:                       | :----:  |          :---                                  |
-| `bc_[x,y,z]%%beg[end]`     | Integer | Beginning [ending] boundary condition in the $[x,y,z]$-direction (negative integer, see table [Boundary Conditions](#boundary-conditions)) |
-| `bc_[x,y,z]%%vb[1,2,3]`‡   | Real    | Velocity in the (x,1), (y, 2), (z,3) direction applied to `bc_[x,y,z]%%beg` |
-| `bc_[x,y,z]%%ve[1,2,3]`‡   | Real    | Velocity in the (x,1), (y, 2), (z,3) direction applied to `bc_[x,y,z]%%end` |
+| `bc%%[x,y,z]%%beg[end]`     | Integer | Beginning [ending] boundary condition in the $[x,y,z]$-direction (negative integer, see table [Boundary Conditions](#boundary-conditions)) |
+| `bc%%[x,y,z]%%vb[1,2,3]`‡   | Real    | Velocity in the (x,1), (y, 2), (z,3) direction applied to `bc%%[x,y,z]%%beg` |
+| `bc%%[x,y,z]%%ve[1,2,3]`‡   | Real    | Velocity in the (x,1), (y, 2), (z,3) direction applied to `bc%%[x,y,z]%%end` |
 | `model_eqns`               | Integer | Multicomponent model: [1] \f$\Gamma/\Pi_\infty\f$; [2] 5-equation; [3] 6-equation; [4] 4-equation |
 | `alt_soundspeed` *         | Logical | Alternate sound speed and \f$K \nabla \cdot u\f$ for 5-equation model |
 | `adv_n`   	               | Logical | Solving directly for the number density (in the method of classes) and compute void fraction from the number density |
@@ -482,23 +482,23 @@ See @ref equations "Equations" for the mathematical models these parameters cont
 
 - \* Options that work only with `model_eqns = 2`.
 - † Options that work only with ``cyl_coord = 'F'``.
-- ‡ Options that work only with `bc_[x,y,z]%[beg,end] = -15` and/or `bc_[x,y,z]%[beg,end] = -16`.
+- ‡ Options that work only with `bc%[x,y,z]%[beg,end] = -15` and/or `bc%[x,y,z]%[beg,end] = -16`.
 
 The table lists simulation algorithm parameters.
 The parameters are used to specify options in algorithms that are used to integrate the governing equations of the multi-component flow based on the initial condition.
 Models and assumptions that are used to formulate and discretize the governing equations are described in \cite Wilfong26 and \cite Bryngelson21.
 Details of the simulation algorithms and implementation of the WENO scheme can be found in \cite Coralic15.
 
-- `bc_[x,y,z]%[beg,end]` specifies the boundary conditions at the beginning and the end of domain boundaries in each coordinate direction by a negative integer from -1 through -16.
+- `bc%[x,y,z]%[beg,end]` specifies the boundary conditions at the beginning and the end of domain boundaries in each coordinate direction by a negative integer from -1 through -16.
 See table [Boundary Conditions](#boundary-conditions) for details.
 Boundary condition patches can be used with non-characteristic boundary conditions.
 Their use is detailed in [Boundary Condition Patches](#boundary-condition-patches).
 
-- `bc_[x,y,z]%%vb[1,2,3]` specifies the velocity in the (x,1), (y,2), (z,3) direction applied to `bc_[x,y,z]%%beg` when using `bc_[x,y,z]%%beg = -16`.
-Tangential velocities require viscosity, `weno_avg = T`, and `bc_[x,y,z]%%beg = -16` to work properly. Normal velocities require `bc_[x,y,z]%%end = -15` or `bc_[x,y,z]%%end = -16` to work properly.
+- `bc%%[x,y,z]%%vb[1,2,3]` specifies the velocity in the (x,1), (y,2), (z,3) direction applied to `bc%%[x,y,z]%%beg` when using `bc%%[x,y,z]%%beg = -16`.
+Tangential velocities require viscosity, `weno_avg = T`, and `bc%%[x,y,z]%%beg = -16` to work properly. Normal velocities require `bc%%[x,y,z]%%end = -15` or `bc%%[x,y,z]%%end = -16` to work properly.
 
-- `bc_[x,y,z]%%ve[1,2,3]` specifies the velocity in the (x,1), (y,2), (z,3) direction applied to `bc_[x,y,z]%%beg` when using `bc_[x,y,z]%%end = -16`.
-Tangential velocities require viscosity, `weno_avg = T`, and `bc_[x,y,z]%%end = 16` to work properly. Normal velocities require `bc_[x,y,z]%%end = -15` or `bc_[x,y,z]%%end = -16` to work properly.
+- `bc%%[x,y,z]%%ve[1,2,3]` specifies the velocity in the (x,1), (y,2), (z,3) direction applied to `bc%%[x,y,z]%%beg` when using `bc%%[x,y,z]%%end = -16`.
+Tangential velocities require viscosity, `weno_avg = T`, and `bc%%[x,y,z]%%end = 16` to work properly. Normal velocities require `bc%%[x,y,z]%%end = -15` or `bc%%[x,y,z]%%end = -16` to work properly.
 
 - `model_eqns` specifies the choice of the multi-component model that is used to formulate the dynamics of the flow using integers from 1 through 3.
 `model_eqns = 1`, `2`, and `3` correspond to \f$\Gamma\f$-\f$\Pi_\infty\f$ model (\cite Johnsen08), 5-equation model (\cite Allaire02), and 6-equation model (\cite Saurel09), respectively.
@@ -534,7 +534,7 @@ It is recommended to set `weno_eps` to $10^{-6}$ for WENO-JS, and to $10^{-40}$ 
 
 - `teno_CT` specifies the threshold for the TENO scheme. This dimensionless constant, also known as $C_T$, sets a threshold to identify smooth and non-smooth stencils. Larger values make the scheme more robust but also more dissipative. A recommended value for teno_CT is `1e-6`. When adjusting this parameter, it is recommended to try values like `1e-5` or `1e-7` for TENO5. A smaller value can be used for TENO7.
 
-- `null_weights` activates nullification of the nonlinear WENO weights at the buffer regions outside the domain boundaries when the Riemann extrapolation boundary condition is specified (`bc_[x,y,z]%%beg[end]} = -4`).
+- `null_weights` activates nullification of the nonlinear WENO weights at the buffer regions outside the domain boundaries when the Riemann extrapolation boundary condition is specified (`bc%%[x,y,z]%%beg[end]} = -4`).
 
 - `mp_weno` activates monotonicity preservation in the WENO reconstruction (MPWENO) such that the values of reconstructed variables do not reside outside the range spanned by WENO stencil (\cite Balsara00; \cite Suresh97).
 
@@ -1046,9 +1046,9 @@ Note: For relativistic flow, the conservative and primitive densities are differ
 
 When ``cyl_coord = 'T'`` is set in 3D the following constraints must be met:
 
-- `bc_y%%beg = -14`  enables the axis boundary condition
+- `bc%%y%%beg = -14`  enables the axis boundary condition
 
-- `bc_z%%beg = bc_z%%end = -1`  enables periodic boundary conditions in the azimuthal direction
+- `bc%%z%%beg = bc%%z%%end = -1`  enables periodic boundary conditions in the azimuthal direction
 
 - `z_domain%%beg = 0`  sets the azimuthal starting point to 0
 
@@ -1056,7 +1056,7 @@ When ``cyl_coord = 'T'`` is set in 3D the following constraints must be met:
 
 When ``cyl_coord = 'T'`` is set in 2D the following constraints must be met:
 
-- `bc_y%%beg = -2` to enable reflective boundary conditions
+- `bc%%y%%beg = -2` to enable reflective boundary conditions
 
 ### 17. Chemistry
 
@@ -1077,12 +1077,12 @@ When ``cyl_coord = 'T'`` is set in 2D the following constraints must be met:
 
 | Parameter          | Type    | Description                                                                 |
 | ---:               | :----:  | :---                                                                        |
-| `bc_[x,y,z]%%isothermal_in`    | Logical | Enable isothermal wall at the domain entrance (minimum coordinate).         |
-| `bc_[x,y,z]%%isothermal_out`   | Logical | Enable isothermal wall at the domain exit (maximum coordinate).             |
-| `bc_[x,y,z]%%Twall_in`         | Real    | Temperature [K] of the entrance isothermal wall.                            |
-| `bc_[x,y,z]%%Twall_out`        | Real    | Temperature [K] of the exit isothermal wall.                                |
+| `bc%%[x,y,z]%%isothermal_in`    | Logical | Enable isothermal wall at the domain entrance (minimum coordinate).         |
+| `bc%%[x,y,z]%%isothermal_out`   | Logical | Enable isothermal wall at the domain exit (maximum coordinate).             |
+| `bc%%[x,y,z]%%Twall_in`         | Real    | Temperature [K] of the entrance isothermal wall.                            |
+| `bc%%[x,y,z]%%Twall_out`        | Real    | Temperature [K] of the exit isothermal wall.                                |
 
-This boundary condition can be used for fixed-temperature (isothermal) walls at the domain extremities. It is exclusively available for reacting flows and requires chemistry to be enabled. It properly evaluates heat and species fluxes at the interface when ``chemistry = 'T'``, ``chem_params%%diffusion = 'T'``, and the corresponding domain boundary is set to a slip wall (`bc_[x,y,z]%%[beg,end]` = -15) or a no-slip wall (`bc_[x,y,z]%%[beg,end]` = -16).
+This boundary condition can be used for fixed-temperature (isothermal) walls at the domain extremities. It is exclusively available for reacting flows and requires chemistry to be enabled. It properly evaluates heat and species fluxes at the interface when ``chemistry = 'T'``, ``chem_params%%diffusion = 'T'``, and the corresponding domain boundary is set to a slip wall (`bc%%[x,y,z]%%[beg,end]` = -15) or a no-slip wall (`bc%%[x,y,z]%%[beg,end]` = -16).
 
 
 
@@ -1118,27 +1118,27 @@ This boundary condition can be used for fixed-temperature (isothermal) walls at 
 |  -15 | Normal         | Slip wall |
 |  -16 | Normal         | No-slip wall |
 
-*: This boundary condition is only used for `bc_y%%beg` when using cylindrical coordinates (``cyl_coord = 'T'`` and 3D). For axisymmetric problems, use `bc_y%%beg = -2` with ``cyl_coord = 'T'`` in 2D.
+*: This boundary condition is only used for `bc%%y%%beg` when using cylindrical coordinates (``cyl_coord = 'T'`` and 3D). For axisymmetric problems, use `bc%%y%%beg = -2` with ``cyl_coord = 'T'`` in 2D.
 
 The boundary condition supported by the MFC are listed in table [Boundary Conditions](#boundary-conditions).
-Their number (`#`) corresponds to the input value in `input.py` labeled `bc_[x,y,z]%[beg,end]` (see table [Simulation Algorithm Parameters](#sec-simulation-algorithm)).
+Their number (`#`) corresponds to the input value in `input.py` labeled `bc%[x,y,z]%[beg,end]` (see table [Simulation Algorithm Parameters](#sec-simulation-algorithm)).
 The entries labeled "Characteristic." are characteristic boundary conditions based on \cite Thompson87 and \cite Thompson90.
 
 ### Generalized Characteristic Boundary conditions
 
 | Parameter                     | Type    | Description |
 | ---:                          | :----:  | :--- |
-| `bc_[x,y,z]%%grcbc_in`         | Logical | Enable grcbc for subsonic inflow |
-| `bc_[x,y,z]%%grcbc_out`        | Logical | Enable grcbc for subsonic outflow (pressure)|
-| `bc_[x,y,z]%%grcbc_vel_out`    | Logical | Enable grcbc for subsonic outflow (pressure + normal velocity) |
-| `bc_[x,y,z]%%vel_in`           | Real Array | Inflow velocities in x, y and z directions |
-| `bc_[x,y,z]%%vel_out`          | Real Array | Outflow velocities in x, y and z directions |
-| `bc_[x,y,z]%%pres_in`          | Real    | Inflow pressure |
-| `bc_[x,y,z]%%pres_out`         | Real    | Outflow pressure |
-| `bc_[x,y,z]%%alpha_rho_in`     | Real Array | Inflow density |
-| `bc_[x,y,z]%%alpha_in`         | Real Array | Inflow void fraction |
+| `bc%%[x,y,z]%%grcbc_in`         | Logical | Enable grcbc for subsonic inflow |
+| `bc%%[x,y,z]%%grcbc_out`        | Logical | Enable grcbc for subsonic outflow (pressure)|
+| `bc%%[x,y,z]%%grcbc_vel_out`    | Logical | Enable grcbc for subsonic outflow (pressure + normal velocity) |
+| `bc%%[x,y,z]%%vel_in`           | Real Array | Inflow velocities in x, y and z directions |
+| `bc%%[x,y,z]%%vel_out`          | Real Array | Outflow velocities in x, y and z directions |
+| `bc%%[x,y,z]%%pres_in`          | Real    | Inflow pressure |
+| `bc%%[x,y,z]%%pres_out`         | Real    | Outflow pressure |
+| `bc%%[x,y,z]%%alpha_rho_in`     | Real Array | Inflow density |
+| `bc%%[x,y,z]%%alpha_in`         | Real Array | Inflow void fraction |
 
-This boundary condition can be used for subsonic inflow (`bc_[x,y,z]%[beg,end]` = -7) and subsonic outflow (`bc_[x,y,z]%[beg,end]` = -8) characteristic boundary conditions. These are based on \cite Pirozzoli13. This enables to provide inflow and outflow conditions outside the computational domain.
+This boundary condition can be used for subsonic inflow (`bc%[x,y,z]%[beg,end]` = -7) and subsonic outflow (`bc%[x,y,z]%[beg,end]` = -8) characteristic boundary conditions. These are based on \cite Pirozzoli13. This enables to provide inflow and outflow conditions outside the computational domain.
 
 ### Patch types {#patch-types}
 

@@ -329,7 +329,7 @@ def _auto_describe(name: str) -> str:
         attr_desc = _ATTR_DESCS.get(attr, attr.replace("_", " "))
         return f"{attr_desc} for {prefix_desc} {idx}"
 
-    # Handle bc_x%attr style (no index in prefix)
+    # Handle bc%x%attr style (no index in prefix)
     if "%" in name:
         prefix, attr = name.split("%", 1)
         # Check for indexed attr
@@ -477,7 +477,7 @@ def _lookup_hint(name):
         return ""
     # Compound name: extract family and attribute
     prefix, attr_full = name.split("%", 1)
-    # Normalize family: "bc_x" → "bc", "patch_bc(1)" → "patch"
+    # Normalize family: strip underscore/index suffix — "patch_bc(1)" → "patch"
     family = re.sub(r"[_(].*", "", prefix)
     if family not in HINTS:
         # Fallback: keep underscores — "patch_bc" → "patch_bc", "simplex_params" → "simplex_params"
@@ -995,8 +995,8 @@ def _load():
 
     # Boundary conditions
     for d in ["x", "y", "z"]:
-        _r(f"bc_{d}%beg", INT, {"bc"})
-        _r(f"bc_{d}%end", INT, {"bc"})
+        _r(f"bc%{d}%beg", INT, {"bc"})
+        _r(f"bc%{d}%end", INT, {"bc"})
 
     # Relativity
     _r("relativity", LOG, {"relativity"})
@@ -1252,7 +1252,7 @@ def _load():
 
     # Extended BC
     for d in ["x", "y", "z"]:
-        px = f"bc_{d}%"
+        px = f"bc%{d}%"
         for a in ["vb1", "vb2", "vb3", "ve1", "ve2", "ve3", "pres_in", "pres_out"]:
             _r(f"{px}{a}", REAL, {"bc"})
         for a in ["grcbc_in", "grcbc_out", "grcbc_vel_out"]:

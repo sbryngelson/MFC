@@ -70,8 +70,8 @@ contains
 
         #:for VAR in [ 'm', 'n', 'p', 'm_glb', 'n_glb', 'p_glb',               &
             & 't_step_start', 't_step_stop', 't_step_save', 'weno_order',      &
-            & 'model_eqns', 'num_fluids', 'bc_x%beg', 'bc_x%end', 'bc_y%beg',  &
-            & 'bc_y%end', 'bc_z%beg', 'bc_z%end', 'flux_lim', 'format',        &
+            & 'model_eqns', 'num_fluids', 'bc%x%beg', 'bc%x%end', 'bc%y%beg',  &
+            & 'bc%y%end', 'bc%z%beg', 'bc%z%end', 'flux_lim', 'format',        &
             & 'precision', 'fd_order', 'thermal', 'nb', 'relax_model',         &
             & 'n_start', 'num_ibs', 'muscl_order' ]
             call MPI_BCAST(${VAR}$, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
@@ -84,8 +84,8 @@ contains
             & 'prim_vars_wrt', 'c_wrt', 'qm_wrt','schlieren_wrt','chem_wrt_T',    &
             & 'bubbles_euler', 'qbmm', 'polytropic', 'polydisperse',              &
             & 'file_per_process', 'relax', 'cf_wrt', 'igr', 'liutex_wrt',         &
-            & 'bc_x%isothermal_in', 'bc_y%isothermal_in', 'bc_z%isothermal_in',   &
-            & 'bc_x%isothermal_out', 'bc_y%isothermal_out', 'bc_z%isothermal_out',&
+            & 'bc%x%isothermal_in', 'bc%y%isothermal_in', 'bc%z%isothermal_in',   &
+            & 'bc%x%isothermal_out', 'bc%y%isothermal_out', 'bc%z%isothermal_out',&
             & 'adv_n', 'ib', 'cfl_adap_dt', 'cfl_const_dt', 'cfl_dt',             &
             & 'surface_tension', 'hyperelasticity', 'bubbles_lagrange',           &
             & 'output_partial_domain', 'relativity', 'cont_damage', 'bc_io',      &
@@ -133,8 +133,8 @@ contains
             & 'Re_inv', 'Bx0', 'sigma', 't_save', 't_stop',      &
             & 'x_output%beg', 'x_output%end', 'y_output%beg',    &
             & 'y_output%end', 'z_output%beg', 'z_output%end',    &
-            & 'bc_x%Twall_in', 'bc_x%Twall_out', 'bc_y%Twall_in',&
-            & 'bc_y%Twall_out','bc_z%Twall_in', 'bc_z%Twall_out' ]
+            & 'bc%x%Twall_in', 'bc%x%Twall_out', 'bc%y%Twall_in',&
+            & 'bc%y%Twall_out','bc%z%Twall_in', 'bc%z%Twall_out' ]
             call MPI_BCAST(${VAR}$, 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
         #:endfor
         call MPI_BCAST(schlieren_alpha(1), num_fluids_max, mpi_p, 0, MPI_COMM_WORLD, ierr)

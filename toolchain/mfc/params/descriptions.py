@@ -80,12 +80,12 @@ DESCRIPTIONS = {
     "avg_state": "Average state for Riemann solver",
     "low_Mach": "Low Mach number correction",
     # Boundary conditions
-    "bc_x%beg": "Boundary condition at x-begin (-1=periodic, -2=reflective, -3=symmetric, etc.)",
-    "bc_x%end": "Boundary condition at x-end",
-    "bc_y%beg": "Boundary condition at y-begin",
-    "bc_y%end": "Boundary condition at y-end",
-    "bc_z%beg": "Boundary condition at z-begin",
-    "bc_z%end": "Boundary condition at z-end",
+    "bc%x%beg": "Boundary condition at x-begin (-1=periodic, -2=reflective, -3=symmetric, etc.)",
+    "bc%x%end": "Boundary condition at x-end",
+    "bc%y%beg": "Boundary condition at y-begin",
+    "bc%y%end": "Boundary condition at y-end",
+    "bc%z%beg": "Boundary condition at z-begin",
+    "bc%z%end": "Boundary condition at z-end",
     "num_bc_patches": "Number of boundary condition patches",
     # Physics models
     "bubbles_euler": "Enable Euler-Euler bubble model",

@@ -47,10 +47,10 @@ MUTATIONS = {
     "mpp_lim": ["X", "yes"],
     "cyl_coord": ["X", "maybe"],
     # BOUNDARY CONDITIONS
-    "bc_x%beg": [None, 100, -100],
-    "bc_x%end": [None, 100, -100],
-    "bc_y%beg": [100, -100],
-    "bc_y%end": [100, -100],
+    "bc%x%beg": [None, 100, -100],
+    "bc%x%end": [None, 100, -100],
+    "bc%y%beg": [100, -100],
+    "bc%y%end": [100, -100],
     # DOMAIN PARAMETERS
     "x_domain%beg": [None],
     "x_domain%end": [None],

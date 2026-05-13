@@ -48,7 +48,7 @@ _SEVERITY_ICON = {
 
 # Regex to detect code-like tokens in validation messages.
 # Matches (in order of priority):
-#   1. Fortran-style accessors:  fluid_pp(i)%gamma, bc_y%beg
+#   1. Fortran-style accessors:  fluid_pp(i)%gamma, bc%y%beg
 #   2. Known short param names with optional array index: alpha(j), vel(2), Re(1), nb, dt
 #   3. Snake_case identifiers with optional array index: model_eqns, weno_order, alpha_rho(j)
 #   4. Single-letter grid dimension params: m, n, p

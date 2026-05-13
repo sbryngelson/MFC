@@ -81,8 +81,8 @@ print(json.dumps({
     "avg_state": 2,
 
     # Boundary Conditions (-3 = extrapolation)
-    "bc_x%beg": -3,
-    "bc_x%end": -3,
+    "bc%x%beg": -3,
+    "bc%x%end": -3,
 
     # Output
     "format": 1,
@@ -187,10 +187,10 @@ print(json.dumps({
     "avg_state": 2,
 
     # Boundary Conditions
-    "bc_x%beg": -3,
-    "bc_x%end": -3,
-    "bc_y%beg": -3,
-    "bc_y%end": -3,
+    "bc%x%beg": -3,
+    "bc%x%end": -3,
+    "bc%y%beg": -3,
+    "bc%y%end": -3,
 
     # Output
     "format": 1,
@@ -304,12 +304,12 @@ print(json.dumps({
     "avg_state": 2,
 
     # Boundary Conditions
-    "bc_x%beg": -3,
-    "bc_x%end": -3,
-    "bc_y%beg": -3,
-    "bc_y%end": -3,
-    "bc_z%beg": -3,
-    "bc_z%end": -3,
+    "bc%x%beg": -3,
+    "bc%x%end": -3,
+    "bc%y%beg": -3,
+    "bc%y%end": -3,
+    "bc%z%beg": -3,
+    "bc%z%end": -3,
 
     # Output
     "format": 1,

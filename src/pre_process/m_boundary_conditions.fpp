@@ -41,7 +41,7 @@ contains
 
             ! Apply patch if x boundary is a domain boundary
             #:for BOUND, X, LOC, IDX in [('beg', '-i', -1, 1), ('end', 'm+i', 1, 2)]
-                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc_x%${BOUND}$ < 0) then
+                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc%x%${BOUND}$ < 0) then
                     do j = 0, n
                         if (y%cc(j) > y_boundary%beg .and. y%cc(j) < y_boundary%end) then
                             bc_type(1, ${IDX}$)%sf(0, j, 0) = patch_bc(patch_id)%type
@@ -61,7 +61,7 @@ contains
 
             ! Apply patch if y boundary is a domain boundary
             #:for BOUND, Y, LOC, IDX in [('beg', '-i', -1, 1), ('end', 'n+i', 1, 2)]
-                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc_y%${BOUND}$ < 0) then
+                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc%y%${BOUND}$ < 0) then
                     do j = 0, m
                         if (x%cc(j) > x_boundary%beg .and. x%cc(j) < x_boundary%end) then
                             bc_type(2, ${IDX}$)%sf(j, 0, 0) = patch_bc(patch_id)%type
@@ -86,7 +86,7 @@ contains
             radius = patch_bc(patch_id)%radius
             ! Patch is a circle at x_beg and x_beg is a domain boundary
             #:for BOUND, X, LOC, IDX in [('beg', '-i', -1, 1), ('end', 'm+i', 1, 2)]
-                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc_x%${BOUND}$ < 0) then
+                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc%x%${BOUND}$ < 0) then
                     do k = 0, p
                         do j = 0, n
                             if ((z%cc(k) - z_centroid)**2._wp + (y%cc(j) - y_centroid)**2._wp <= radius**2._wp) then
@@ -103,7 +103,7 @@ contains
             radius = patch_bc(patch_id)%radius
             ! Patch is a circle at y_beg and y_beg is a domain boundary
             #:for BOUND, Y, LOC, IDX in [('beg', '-i', -1, 1), ('end', 'n+i', 1, 2)]
-                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc_y%${BOUND}$ < 0) then
+                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc%y%${BOUND}$ < 0) then
                     do k = 0, p
                         do j = 0, m
                             if ((z%cc(k) - z_centroid)**2._wp + (x%cc(j) - x_centroid)**2._wp <= radius**2._wp) then
@@ -119,7 +119,7 @@ contains
             y_centroid = patch_bc(patch_id)%centroid(2)
             radius = patch_bc(patch_id)%radius
             #:for BOUND, Z, LOC, IDX in [('beg', '-i', -1, 1), ('end', 'p+i', 1, 2)]
-                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc_z%${BOUND}$ < 0) then
+                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc%z%${BOUND}$ < 0) then
                     do k = 0, n
                         do j = 0, m
                             if ((y%cc(k) - y_centroid)**2._wp + (x%cc(j) - x_centroid)**2._wp <= radius**2._wp) then
@@ -153,7 +153,7 @@ contains
             z_boundary%end = z_centroid + 0.5_wp*length_z
             ! Patch is a rectangle on the x-boundary face
             #:for BOUND, X, LOC, IDX in [('beg', '-i', -1, 1), ('end', 'm+i', 1, 2)]
-                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc_x%${BOUND}$ < 0) then
+                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc%x%${BOUND}$ < 0) then
                     do k = 0, p
                         do j = 0, n
                             if (y_boundary%beg <= y%cc(j) .and. y_boundary%end >= y%cc(j) .and. z_boundary%beg <= z%cc(k) &
@@ -178,7 +178,7 @@ contains
             z_boundary%end = z_centroid + 0.5_wp*length_z
             ! Patch is a rectangle on the y-boundary face
             #:for BOUND, Y, LOC, IDX in [('beg', '-i', -1, 1), ('end', 'n+i', 1, 2)]
-                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc_y%${BOUND}$ < 0) then
+                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc%y%${BOUND}$ < 0) then
                     do k = 0, p
                         do j = 0, m
                             if (x_boundary%beg <= x%cc(j) .and. x_boundary%end >= x%cc(j) .and. z_boundary%beg <= z%cc(k) &
@@ -202,7 +202,7 @@ contains
             y_boundary%beg = y_centroid - 0.5_wp*length_y
             y_boundary%end = y_centroid + 0.5_wp*length_y
             #:for BOUND, Z, LOC, IDX in [('beg', '-i', -1, 1), ('end', 'p+i', 1, 2)]
-                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc_z%${BOUND}$ < 0) then
+                if (patch_bc(patch_id)%loc == ${LOC}$ .and. bc%z%${BOUND}$ < 0) then
                     do k = 0, n
                         do j = 0, m
                             if (x_boundary%beg <= x%cc(j) .and. x_boundary%end >= x%cc(j) .and. y_boundary%beg <= y%cc(k) &

@@ -1225,7 +1225,7 @@ contains
             end if
         end if
 
-        if (bc_x%beg <= BC_GHOST_EXTRAP) then
+        if (bc%x%beg <= BC_GHOST_EXTRAP) then
             $:GPU_PARALLEL_LOOP(collapse=2)
             do l = idwbuff(3)%beg, idwbuff(3)%end
                 do k = idwbuff(2)%beg, idwbuff(2)%end
@@ -1234,7 +1234,7 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
         end if
-        if (bc_x%end <= BC_GHOST_EXTRAP) then
+        if (bc%x%end <= BC_GHOST_EXTRAP) then
             $:GPU_PARALLEL_LOOP(collapse=2)
             do l = idwbuff(3)%beg, idwbuff(3)%end
                 do k = idwbuff(2)%beg, idwbuff(2)%end
@@ -1245,7 +1245,7 @@ contains
             $:END_GPU_PARALLEL_LOOP()
         end if
         if (n > 0) then
-            if (bc_y%beg <= BC_GHOST_EXTRAP .and. bc_y%beg /= BC_NULL) then
+            if (bc%y%beg <= BC_GHOST_EXTRAP .and. bc%y%beg /= BC_NULL) then
                 $:GPU_PARALLEL_LOOP(collapse=2)
                 do l = idwbuff(3)%beg, idwbuff(3)%end
                     do j = idwbuff(1)%beg, idwbuff(1)%end
@@ -1254,7 +1254,7 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
             end if
-            if (bc_y%end <= BC_GHOST_EXTRAP) then
+            if (bc%y%end <= BC_GHOST_EXTRAP) then
                 $:GPU_PARALLEL_LOOP(collapse=2)
                 do l = idwbuff(3)%beg, idwbuff(3)%end
                     do j = idwbuff(1)%beg, idwbuff(1)%end
@@ -1265,7 +1265,7 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
             end if
             if (p > 0) then
-                if (bc_z%beg <= BC_GHOST_EXTRAP) then
+                if (bc%z%beg <= BC_GHOST_EXTRAP) then
                     $:GPU_PARALLEL_LOOP(collapse=2)
                     do k = idwbuff(2)%beg, idwbuff(2)%end
                         do j = idwbuff(1)%beg, idwbuff(1)%end
@@ -1275,7 +1275,7 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 end if
-                if (bc_z%end <= BC_GHOST_EXTRAP) then
+                if (bc%z%end <= BC_GHOST_EXTRAP) then
                     $:GPU_PARALLEL_LOOP(collapse=2)
                     do k = idwbuff(2)%beg, idwbuff(2)%end
                         do j = idwbuff(1)%beg, idwbuff(1)%end

@@ -74,10 +74,10 @@ print(
             "riemann_solver": 2,
             "wave_speeds": 1,
             # We use ghost-cell
-            "bc_x%beg": -17,
-            "bc_x%end": -8,
-            "bc_y%beg": -15,
-            "bc_y%end": -15,
+            "bc%x%beg": -17,
+            "bc%x%end": -8,
+            "bc%y%beg": -15,
+            "bc%y%end": -15,
             # Set IB to True and add 1 patch
             "ib": "T",
             "num_ibs": 1,

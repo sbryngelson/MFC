@@ -416,22 +416,22 @@ class CaseValidator:
             var_val = {"m": m, "n": n, "p": p}[var]
 
             for bound in ["beg", "end"]:
-                bc_key = f"bc_{dir}%{bound}"
+                bc_key = f"bc%{dir}%{bound}"
                 bc_val = self.get(bc_key)
 
                 self.prohibit(var_val is not None and var_val == 0 and bc_val is not None, f"{bc_key} is not supported for {var} = 0")
                 self.prohibit(var_val is not None and var_val > 0 and bc_val is None, f"{var} != 0 but {bc_key} is not set")
 
             # Check periodicity matches
-            beg_bc = self.get(f"bc_{dir}%beg")
-            end_bc = self.get(f"bc_{dir}%end")
+            beg_bc = self.get(f"bc%{dir}%beg")
+            end_bc = self.get(f"bc%{dir}%end")
             if beg_bc is not None and end_bc is not None:
-                self.prohibit((beg_bc == -1 and end_bc != -1) or (end_bc == -1 and beg_bc != -1), f"bc_{dir}%beg and bc_{dir}%end must be both periodic (= -1) or both non-periodic")
+                self.prohibit((beg_bc == -1 and end_bc != -1) or (end_bc == -1 and beg_bc != -1), f"bc%{dir}%beg and bc_{dir}%end must be both periodic (= -1) or both non-periodic")
 
             # Range check (skip for cylindrical y/z)
             skip_check = cyl_coord and dir in ["y", "z"]
             for bound in ["beg", "end"]:
-                bc_key = f"bc_{dir}%{bound}"
+                bc_key = f"bc%{dir}%{bound}"
                 bc_val = self.get(bc_key)
 
                 if not skip_check and bc_val is not None:
@@ -441,28 +441,28 @@ class CaseValidator:
         # Check BC_NULL is not used
         for dir in ["x", "y", "z"]:
             for bound in ["beg", "end"]:
-                bc_val = self.get(f"bc_{dir}%{bound}")
+                bc_val = self.get(f"bc%{dir}%{bound}")
                 self.prohibit(bc_val == -13, "Boundary condition -13 (BC_NULL) is not supported")
 
         # Cylindrical specific checks
         if cyl_coord:
             self.prohibit(n is not None and n == 0, "n must be positive (2D or 3D) for cylindrical coordinates")
-            bc_y_beg = self.get("bc_y%beg")
-            bc_y_end = self.get("bc_y%end")
-            bc_z_beg = self.get("bc_z%beg")
-            bc_z_end = self.get("bc_z%end")
+            bc_y_beg = self.get("bc%y%beg")
+            bc_y_end = self.get("bc%y%end")
+            bc_z_beg = self.get("bc%z%beg")
+            bc_z_end = self.get("bc%z%end")
 
-            self.prohibit(p is not None and p == 0 and bc_y_beg != -2, "bc_y%beg must be -2 (BC_REFLECTIVE) for 2D cylindrical coordinates (p = 0)")
-            self.prohibit(p is not None and p > 0 and bc_y_beg != -14, "bc_y%beg must be -14 (BC_AXIS) for 3D cylindrical coordinates (p > 0)")
+            self.prohibit(p is not None and p == 0 and bc_y_beg != -2, "bc%y%beg must be -2 (BC_REFLECTIVE) for 2D cylindrical coordinates (p = 0)")
+            self.prohibit(p is not None and p > 0 and bc_y_beg != -14, "bc%y%beg must be -14 (BC_AXIS) for 3D cylindrical coordinates (p > 0)")
 
             if bc_y_end is not None:
-                self.prohibit(bc_y_end > -1 or bc_y_end < -17, "bc_y%end must be between -1 and -17")
-                self.prohibit(bc_y_end == -14, "bc_y%end must not be -14 (BC_AXIS)")
+                self.prohibit(bc_y_end > -1 or bc_y_end < -17, "bc%y%end must be between -1 and -17")
+                self.prohibit(bc_y_end == -14, "bc%y%end must not be -14 (BC_AXIS)")
 
             # 3D cylindrical
             if p is not None and p > 0:
-                self.prohibit(bc_z_beg is not None and bc_z_beg not in [-1, -2], "bc_z%beg must be -1 (periodic) or -2 (reflective) for 3D cylindrical coordinates")
-                self.prohibit(bc_z_end is not None and bc_z_end not in [-1, -2], "bc_z%end must be -1 (periodic) or -2 (reflective) for 3D cylindrical coordinates")
+                self.prohibit(bc_z_beg is not None and bc_z_beg not in [-1, -2], "bc%z%beg must be -1 (periodic) or -2 (reflective) for 3D cylindrical coordinates")
+                self.prohibit(bc_z_end is not None and bc_z_end not in [-1, -2], "bc%z%end must be -1 (periodic) or -2 (reflective) for 3D cylindrical coordinates")
 
     def check_bubbles_euler(self):
         """Checks constraints on bubble parameters"""
@@ -952,7 +952,7 @@ class CaseValidator:
         # Characteristic BCs are BC_CHAR_SLIP_WALL (-5) through BC_CHAR_SUP_OUTFLOW (-12)
         for dir in ["x", "y", "z"]:
             for bound in ["beg", "end"]:
-                bc = self.get(f"bc_{dir}%{bound}")
+                bc = self.get(f"bc%{dir}%{bound}")
                 if bc is not None:
                     self.prohibit(-12 <= bc <= -5, f"Characteristic boundary condition bc_{dir}%{bound} is not compatible with IGR")
 
@@ -1183,11 +1183,11 @@ class CaseValidator:
     def check_grcbc(self):
         """Checks Generalized Relaxation Characteristics BC (simulation)"""
         for dir in ["x", "y", "z"]:
-            grcbc_in = self.get(f"bc_{dir}%grcbc_in", "F") == "T"
-            grcbc_out = self.get(f"bc_{dir}%grcbc_out", "F") == "T"
-            grcbc_vel_out = self.get(f"bc_{dir}%grcbc_vel_out", "F") == "T"
-            bc_beg = self.get(f"bc_{dir}%beg")
-            bc_end = self.get(f"bc_{dir}%end")
+            grcbc_in = self.get(f"bc%{dir}%grcbc_in", "F") == "T"
+            grcbc_out = self.get(f"bc%{dir}%grcbc_out", "F") == "T"
+            grcbc_vel_out = self.get(f"bc%{dir}%grcbc_vel_out", "F") == "T"
+            bc_beg = self.get(f"bc%{dir}%beg")
+            bc_end = self.get(f"bc%{dir}%end")
 
             if grcbc_in:
                 # Check if EITHER beg OR end is set to -7
@@ -1350,10 +1350,10 @@ class CaseValidator:
         wall_bcs = [-15, -16]
 
         for dir in ["x", "y", "z"]:
-            isothermal_in = self.get(f"bc_{dir}%isothermal_in", "F") == "T"
-            isothermal_out = self.get(f"bc_{dir}%isothermal_out", "F") == "T"
-            bc_beg = self.get(f"bc_{dir}%beg")
-            bc_end = self.get(f"bc_{dir}%end")
+            isothermal_in = self.get(f"bc%{dir}%isothermal_in", "F") == "T"
+            isothermal_out = self.get(f"bc%{dir}%isothermal_out", "F") == "T"
+            bc_beg = self.get(f"bc%{dir}%beg")
+            bc_end = self.get(f"bc%{dir}%end")
 
             if isothermal_in:
                 # Prohibit isothermal boundaries if chemistry or diffusion are disabled
@@ -1363,7 +1363,7 @@ class CaseValidator:
                 self.prohibit(bc_beg not in wall_bcs, f"Isothermal In (bc_{dir}%isothermal_in) requires a wall. Set bc_{dir}%beg to -15 (slip) or -16 (no-slip).")
 
                 # Check that the wall temperature is defined and physically valid (> 0 K)
-                tw_in = self.get(f"bc_{dir}%Twall_in")
+                tw_in = self.get(f"bc%{dir}%Twall_in")
                 self.prohibit(tw_in is None, f"Isothermal In (bc_{dir}%isothermal_in) requires a wall temperature to be set (e.g., bc_{dir}%Twall_in).")
                 if tw_in is not None and self._is_numeric(tw_in):
                     self.prohibit(tw_in <= 0.0, f"Wall temperature bc_{dir}%Twall_in must be strictly positive for thermodynamics (got {tw_in}).")
@@ -1376,7 +1376,7 @@ class CaseValidator:
                 self.prohibit(bc_end not in wall_bcs, f"Isothermal Out (bc_{dir}%isothermal_out) requires a wall. Set bc_{dir}%end to -15 (slip) or -16 (no-slip).")
 
                 # Check that the wall temperature is defined and physically valid (> 0 K)
-                tw_out = self.get(f"bc_{dir}%Twall_out")
+                tw_out = self.get(f"bc%{dir}%Twall_out")
                 self.prohibit(tw_out is None, f"Isothermal Out (bc_{dir}%isothermal_out) requires a wall temperature to be set (e.g., bc_{dir}%Twall_out).")
                 if tw_out is not None and self._is_numeric(tw_out):
                     self.prohibit(tw_out <= 0.0, f"Wall temperature bc_{dir}%Tw_out must be strictly positive for thermodynamics (got {tw_out}).")
@@ -1704,7 +1704,7 @@ class CaseValidator:
         # BC checks: all boundaries must be periodic (-1)
         for direction in ["x", "y", "z"]:
             for end in ["beg", "end"]:
-                bc_val = self.get(f"bc_{direction}%{end}")
+                bc_val = self.get(f"bc%{direction}%{end}")
                 if bc_val is not None:
                     self.prohibit(bc_val != -1, "FFT WRT requires periodic BCs (all BCs should be -1)")
 

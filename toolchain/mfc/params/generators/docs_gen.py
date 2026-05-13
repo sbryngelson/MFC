@@ -53,7 +53,7 @@ def _collapse_indices(name: str) -> str:
     Examples:
         patch_icpp(1)%vel(2) -> patch_icpp(N)%vel(M)
         simplex_params%perturb_dens_offset(1, 2) -> simplex_params%perturb_dens_offset(N, M)
-        bc_x%vel_in(1) -> bc_x%vel_in(N)
+        bc%x%vel_in(1) -> bc%x%vel_in(N)
     """
     placeholders = ["N", "M", "K", "L", "P", "Q"]
     placeholder_idx = 0
@@ -388,9 +388,7 @@ def generate_parameter_docs() -> str:
         "patch_bc": "Boundary condition patch parameters",
         "fluid_pp": "Fluid material properties",
         "acoustic": "Acoustic source parameters",
-        "bc_x": "X-direction boundary conditions",
-        "bc_y": "Y-direction boundary conditions",
-        "bc_z": "Z-direction boundary conditions",
+        "bc": "Boundary conditions (x/y/z directions)",
         "probe": "Probe/monitoring point parameters",
         "integral": "Integral region parameters",
         "simplex_params": "Simplex noise perturbation parameters",

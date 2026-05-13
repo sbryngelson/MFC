@@ -87,7 +87,7 @@ contains
             model_eqns, mpp_lim, time_stepper, weno_eps, muscl_eps, &
             rdma_mpi, teno_CT, mp_weno, weno_avg, &
             riemann_solver, low_Mach, wave_speeds, avg_state, &
-            bc_x, bc_y, bc_z, &
+            bc, &
             x_stretch, y_stretch, z_stretch, &
             x_domain, y_domain, z_domain, &
             hypoelasticity, &
@@ -141,7 +141,7 @@ contains
 
             if (cfl_adap_dt .or. cfl_const_dt) cfl_dt = .true.
 
-            if (any((/bc_x%beg, bc_x%end, bc_y%beg, bc_y%end, bc_z%beg, bc_z%end/) == -17) .or. num_bc_patches > 0) then
+            if (any((/bc%x%beg, bc%x%end, bc%y%beg, bc%y%end, bc%z%beg, bc%z%end/) == -17) .or. num_bc_patches > 0) then
                 bc_io = .true.
             end if
         else
@@ -857,11 +857,11 @@ contains
         call s_initialize_global_parameters_module()
         #:if USING_AMD
             #:for BC in {-5, -6, -7, -8, -9, -10, -11, -12, -13}
-                @:PROHIBIT(any((/bc_x%beg, bc_x%end, bc_y%beg, bc_y%end, bc_z%beg, &
-                           & bc_z%end/) == ${BC}$) .and. eqn_idx%adv%end > 20 .and. (.not. chemistry), &
+                @:PROHIBIT(any((/bc%x%beg, bc%x%end, bc%y%beg, bc%y%end, bc%z%beg, &
+                           & bc%z%end/) == ${BC}$) .and. eqn_idx%adv%end > 20 .and. (.not. chemistry), &
                            & "CBC module with AMD compiler requires eqn_idx%adv%end <= 20 when case optimization is turned off")
-                @:PROHIBIT(any((/bc_x%beg, bc_x%end, bc_y%beg, bc_y%end, bc_z%beg, &
-                           & bc_z%end/) == ${BC}$) .and. sys_size > 20 .and. (chemistry), &
+                @:PROHIBIT(any((/bc%x%beg, bc%x%end, bc%y%beg, bc%y%end, bc%z%beg, &
+                           & bc%z%end/) == ${BC}$) .and. sys_size > 20 .and. (chemistry), &
                            & "CBC module with AMD compiler and chemistry requires sys_size <= 20 when case optimization is turned off")
             #:endfor
         #:endif
@@ -1031,9 +1031,9 @@ contains
         call s_mpi_bcast_user_inputs()
 
         ! Save original BCs before decomposition overwrites them with MPI neighbor ranks
-        ib_bc_x = bc_x
-        ib_bc_y = bc_y
-        ib_bc_z = bc_z
+        ib_bc_x = bc%x
+        ib_bc_y = bc%y
+        ib_bc_z = bc%z
 
         call s_initialize_parallel_io()
 
@@ -1081,19 +1081,19 @@ contains
         $:GPU_UPDATE(device='[sigma, surface_tension]')
 
         $:GPU_UPDATE(device='[x%spacing, y%spacing, z%spacing, x%cb, x%cc, y%cb, y%cc, z%cb, z%cc]')
-        $:GPU_UPDATE(device='[bc_x%beg, bc_x%end, bc_y%beg, bc_y%end, bc_z%beg, bc_z%end]')
-        $:GPU_UPDATE(device='[bc_x%vb1, bc_x%vb2, bc_x%vb3, bc_x%ve1, bc_x%ve2, bc_x%ve3]')
-        $:GPU_UPDATE(device='[bc_y%vb1, bc_y%vb2, bc_y%vb3, bc_y%ve1, bc_y%ve2, bc_y%ve3]')
-        $:GPU_UPDATE(device='[bc_z%vb1, bc_z%vb2, bc_z%vb3, bc_z%ve1, bc_z%ve2, bc_z%ve3]')
+        $:GPU_UPDATE(device='[bc%x%beg, bc%x%end, bc%y%beg, bc%y%end, bc%z%beg, bc%z%end]')
+        $:GPU_UPDATE(device='[bc%x%vb1, bc%x%vb2, bc%x%vb3, bc%x%ve1, bc%x%ve2, bc%x%ve3]')
+        $:GPU_UPDATE(device='[bc%y%vb1, bc%y%vb2, bc%y%vb3, bc%y%ve1, bc%y%ve2, bc%y%ve3]')
+        $:GPU_UPDATE(device='[bc%z%vb1, bc%z%vb2, bc%z%vb3, bc%z%ve1, bc%z%ve2, bc%z%ve3]')
 
-        $:GPU_UPDATE(device='[bc_x%grcbc_in, bc_x%grcbc_out, bc_x%grcbc_vel_out]')
-        $:GPU_UPDATE(device='[bc_y%grcbc_in, bc_y%grcbc_out, bc_y%grcbc_vel_out]')
-        $:GPU_UPDATE(device='[bc_z%grcbc_in, bc_z%grcbc_out, bc_z%grcbc_vel_out]')
+        $:GPU_UPDATE(device='[bc%x%grcbc_in, bc%x%grcbc_out, bc%x%grcbc_vel_out]')
+        $:GPU_UPDATE(device='[bc%y%grcbc_in, bc%y%grcbc_out, bc%y%grcbc_vel_out]')
+        $:GPU_UPDATE(device='[bc%z%grcbc_in, bc%z%grcbc_out, bc%z%grcbc_vel_out]')
 
-        $:GPU_UPDATE(device='[bc_x%isothermal_in, bc_x%isothermal_out]')
-        $:GPU_UPDATE(device='[bc_y%isothermal_in, bc_y%isothermal_out]')
-        $:GPU_UPDATE(device='[bc_z%isothermal_in, bc_z%isothermal_out]')
-        $:GPU_UPDATE(device='[bc_x%Twall_in, bc_x%Twall_out, bc_y%Twall_in, bc_y%Twall_out, bc_z%Twall_in, bc_z%Twall_out]')
+        $:GPU_UPDATE(device='[bc%x%isothermal_in, bc%x%isothermal_out]')
+        $:GPU_UPDATE(device='[bc%y%isothermal_in, bc%y%isothermal_out]')
+        $:GPU_UPDATE(device='[bc%z%isothermal_in, bc%z%isothermal_out]')
+        $:GPU_UPDATE(device='[bc%x%Twall_in, bc%x%Twall_out, bc%y%Twall_in, bc%y%Twall_out, bc%z%Twall_in, bc%z%Twall_out]')
 
         $:GPU_UPDATE(device='[relax, relax_model]')
         if (relax) then

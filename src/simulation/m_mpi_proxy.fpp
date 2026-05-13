@@ -72,8 +72,8 @@ contains
         #:for VAR in ['t_step_old', 'm', 'n', 'p', 'm_glb', 'n_glb', 'p_glb',  &
             & 't_step_start','t_step_stop','t_step_save','t_step_print',       &
             & 'model_eqns','time_stepper', 'riemann_solver', 'low_Mach',       &
-            & 'wave_speeds', 'avg_state', 'precision', 'bc_x%beg', 'bc_x%end', &
-            & 'bc_y%beg', 'bc_y%end', 'bc_z%beg', 'bc_z%end',  'fd_order',     &
+            & 'wave_speeds', 'avg_state', 'precision', 'bc%x%beg', 'bc%x%end', &
+            & 'bc%y%beg', 'bc%y%end', 'bc%z%beg', 'bc%z%end',  'fd_order',     &
             & 'num_probes', 'num_integrals', 'bubble_model', 'thermal',        &
             & 'num_source', 'relax_model', 'num_ibs', 'n_start',    &
             & 'num_bc_patches', 'num_igr_iters', 'num_igr_warm_start_iters', &
@@ -88,11 +88,11 @@ contains
             & 'polydisperse', 'qbmm', 'acoustic_source', 'probe_wrt', 'integral_wrt',   &
             & 'prim_vars_wrt', 'weno_avg', 'file_per_process', 'relax',          &
             & 'adv_n', 'adap_dt', 'ib', 'bodyForces', 'bf_x%enabled', 'bf_y%enabled', 'bf_z%enabled',    &
-            & 'bc_x%grcbc_in', 'bc_x%grcbc_out', 'bc_x%grcbc_vel_out',          &
-            & 'bc_y%grcbc_in', 'bc_y%grcbc_out', 'bc_y%grcbc_vel_out',          &
-            & 'bc_z%grcbc_in', 'bc_z%grcbc_out', 'bc_z%grcbc_vel_out',          &
-            & 'bc_x%isothermal_in', 'bc_y%isothermal_in', 'bc_z%isothermal_in',        &
-            & 'bc_x%isothermal_out', 'bc_y%isothermal_out', 'bc_z%isothermal_out', &
+            & 'bc%x%grcbc_in', 'bc%x%grcbc_out', 'bc%x%grcbc_vel_out',          &
+            & 'bc%y%grcbc_in', 'bc%y%grcbc_out', 'bc%y%grcbc_vel_out',          &
+            & 'bc%z%grcbc_in', 'bc%z%grcbc_out', 'bc%z%grcbc_vel_out',          &
+            & 'bc%x%isothermal_in', 'bc%y%isothermal_in', 'bc%z%isothermal_in',        &
+            & 'bc%x%isothermal_out', 'bc%y%isothermal_out', 'bc%z%isothermal_out', &
             & 'cfl_adap_dt', 'cfl_const_dt', 'cfl_dt', 'surface_tension',       &
             & 'shear_stress', 'bulk_stress', 'bubbles_lagrange',                &
             & 'hyperelasticity', 'down_sample', 'fft_wrt', &
@@ -127,15 +127,15 @@ contains
 
         #:for VAR in [ 'dt','weno_eps','teno_CT','pref','rhoref','R0ref','Web','Ca', 'sigma', &
             & 'Re_inv', 'poly_sigma', 'palpha_eps', 'ptgalpha_eps', 'pi_fac',    &
-            & 'bc_x%vb1','bc_x%vb2','bc_x%vb3','bc_x%ve1','bc_x%ve2','bc_x%ve3', &
-            & 'bc_y%vb1','bc_y%vb2','bc_y%vb3','bc_y%ve1','bc_y%ve2','bc_y%ve3', &
-            & 'bc_z%vb1','bc_z%vb2','bc_z%vb3','bc_z%ve1','bc_z%ve2','bc_z%ve3', &
-            & 'bc_x%pres_in','bc_x%pres_out','bc_y%pres_in','bc_y%pres_out', 'bc_z%pres_in','bc_z%pres_out', &
+            & 'bc%x%vb1','bc%x%vb2','bc%x%vb3','bc%x%ve1','bc%x%ve2','bc%x%ve3', &
+            & 'bc%y%vb1','bc%y%vb2','bc%y%vb3','bc%y%ve1','bc%y%ve2','bc%y%ve3', &
+            & 'bc%z%vb1','bc%z%vb2','bc%z%vb3','bc%z%ve1','bc%z%ve2','bc%z%ve3', &
+            & 'bc%x%pres_in','bc%x%pres_out','bc%y%pres_in','bc%y%pres_out', 'bc%z%pres_in','bc%z%pres_out', &
             & 'x_domain%beg', 'x_domain%end', 'y_domain%beg', 'y_domain%end',              &
             & 'z_domain%beg', 'z_domain%end', 'x_stretch%beg', 'x_stretch%end',           &
             & 'y_stretch%beg', 'y_stretch%end', 'z_stretch%beg', 'z_stretch%end',         &
-            & 'bc_x%Twall_in', 'bc_x%Twall_out', 'bc_y%Twall_in', 'bc_y%Twall_out',      &
-            & 'bc_z%Twall_in', 'bc_z%Twall_out', &
+            & 'bc%x%Twall_in', 'bc%x%Twall_out', 'bc%y%Twall_in', 'bc%y%Twall_out',      &
+            & 'bc%z%Twall_in', 'bc%z%Twall_out', &
             & 't_stop', 't_save', 'cfl_target', 'Bx0', 'alf_factor',  &
             & 'tau_star', 'cont_damage_s', 'alpha_bar', 'adap_dt_tol', &
             & 'ic_eps', 'ic_beta', 'hyper_cleaning_speed', &
@@ -145,8 +145,8 @@ contains
         #:endfor
 
         do i = 1, 3
-            #:for VAR in [ 'bc_x%vel_in', 'bc_x%vel_out', 'bc_y%vel_in', 'bc_y%vel_out',  &
-                & 'bc_z%vel_in', 'bc_z%vel_out' ]
+            #:for VAR in [ 'bc%x%vel_in', 'bc%x%vel_out', 'bc%y%vel_in', 'bc%y%vel_out',  &
+                & 'bc%z%vel_in', 'bc%z%vel_out' ]
                 call MPI_BCAST(${VAR}$ (i), 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
             #:endfor
         end do
@@ -187,8 +187,8 @@ contains
         end if
 
         do i = 1, num_fluids_max
-            #:for VAR in ['bc_x%alpha_rho_in','bc_x%alpha_in','bc_y%alpha_rho_in','bc_y%alpha_in','bc_z%alpha_rho_in', &
-                & 'bc_z%alpha_in']
+            #:for VAR in ['bc%x%alpha_rho_in','bc%x%alpha_in','bc%y%alpha_rho_in','bc%y%alpha_in','bc%z%alpha_rho_in', &
+                & 'bc%z%alpha_in']
                 call MPI_BCAST(${VAR}$ (i), 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
             #:endfor
         end do

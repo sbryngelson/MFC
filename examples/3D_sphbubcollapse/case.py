@@ -72,12 +72,12 @@ print(
             "wave_speeds": 1,
             # We use reflective boundary conditions at octant edges and
             # non-reflective boundary conditions at the domain edges
-            "bc_x%beg": -2,
-            "bc_x%end": -6,
-            "bc_y%beg": -2,
-            "bc_y%end": -6,
-            "bc_z%beg": -2,
-            "bc_z%end": -6,
+            "bc%x%beg": -2,
+            "bc%x%end": -6,
+            "bc%y%beg": -2,
+            "bc%y%end": -6,
+            "bc%z%beg": -2,
+            "bc%z%end": -6,
             # Formatted Database Files Structure Parameters
             # Export primitive variables in double precision with parallel
             # I/O to minimize I/O computational time during large simulations

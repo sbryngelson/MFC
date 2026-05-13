@@ -3729,7 +3729,7 @@ contains
 
         ! Population of Buffers in x-direction
         if (norm_dir == 1) then
-            if (bc_x%beg == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at beginning
+            if (bc%x%beg == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at beginning
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size
                     do l = is3%beg, is3%end
@@ -3777,7 +3777,7 @@ contains
                 end if
             end if
 
-            if (bc_x%end == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at end
+            if (bc%x%end == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at end
 
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size
@@ -3829,7 +3829,7 @@ contains
 
             ! Population of Buffers in y-direction
         else if (norm_dir == 2) then
-            if (bc_y%beg == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at beginning
+            if (bc%y%beg == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at beginning
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size
                     do l = is3%beg, is3%end
@@ -3875,7 +3875,7 @@ contains
                 end if
             end if
 
-            if (bc_y%end == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at end
+            if (bc%y%end == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at end
 
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size
@@ -3925,7 +3925,7 @@ contains
 
             ! Population of Buffers in z-direction
         else
-            if (bc_z%beg == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at beginning
+            if (bc%z%beg == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at beginning
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size
                     do l = is3%beg, is3%end
@@ -3967,7 +3967,7 @@ contains
                 end if
             end if
 
-            if (bc_z%end == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at end
+            if (bc%z%end == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at end
 
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size

@@ -49,7 +49,7 @@ def _param_appears_in_case_md(param_base: str, tokens: set[str], text: str) -> b
         attr = param_base.split("%", 1)[1]
         if f"`{attr}`" in text or f"`{attr}(" in text:
             return True
-    # x/y/z axis variants: bc_x%beg matches bc_[x,y,z]%beg[end]
+    # x/y/z axis variants: stretch_x%beg matches stretch_[x,y,z]%beg[end]
     for axis in ("x", "y", "z"):
         if param_base.startswith(f"{axis}_") or param_base.startswith(f"{axis}%"):
             rest = param_base[len(axis) :]
@@ -60,10 +60,21 @@ def _param_appears_in_case_md(param_base: str, tokens: set[str], text: str) -> b
                         return True
             if re.search(rf"`[^`]*\[.*{re.escape(axis)}.*\]{re.escape(rest)}", text):
                 return True
-        # stretch_x -> stretch_x[y,z] or bc_x%beg -> bc_[x,y,z]%beg
+        # stretch_x -> stretch_x[y,z] or a_x -> a_[x,y,z]
         m = re.match(rf"^(.+_){axis}(.*)$", param_base)
         if m:
             pfx, sfx = m.group(1), m.group(2)
+            if re.search(rf"`{re.escape(pfx)}\[.*{re.escape(axis)}.*\]{re.escape(sfx)}", text):
+                return True
+            for other in ("x", "y", "z"):
+                if other != axis:
+                    sib = pfx + other + sfx
+                    if re.search(rf"`[^`]*\b{re.escape(sib)}\b[^`]*`", text):
+                        return True
+        # bc%x%beg -> bc%[x,y,z]%beg (percent-delimited axis component)
+        m2 = re.match(rf"^(.+%)({axis})(%.*|$)", param_base)
+        if m2:
+            pfx, sfx = m2.group(1), m2.group(3)
             if re.search(rf"`{re.escape(pfx)}\[.*{re.escape(axis)}.*\]{re.escape(sfx)}", text):
                 return True
             for other in ("x", "y", "z"):

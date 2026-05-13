@@ -42,8 +42,8 @@ class TestParameterDefinitions(unittest.TestCase):
         for d in ["x", "y", "z"]:
             self.assertIn(f"{d}_domain%beg", REGISTRY.all_params)
             self.assertIn(f"{d}_domain%end", REGISTRY.all_params)
-            self.assertIn(f"bc_{d}%beg", REGISTRY.all_params)
-            self.assertIn(f"bc_{d}%end", REGISTRY.all_params)
+            self.assertIn(f"bc%{d}%beg", REGISTRY.all_params)
+            self.assertIn(f"bc%{d}%end", REGISTRY.all_params)
 
 
 class TestConstraintValidation(unittest.TestCase):

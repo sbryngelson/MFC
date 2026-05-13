@@ -117,7 +117,7 @@ module m_global_parameters
     logical               :: bc_io
     !> @name Boundary conditions in the x-, y- and z-coordinate directions
     !> @{
-    type(bc_dir_t) :: bc_x, bc_y, bc_z
+    type(bc_xyz_info) :: bc
     !> @}
 
     integer                            :: shear_num  !< Number of shear stress components
@@ -314,24 +314,24 @@ contains
         hyper_cleaning = .false.
         igr = .false.
 
-        bc_x%beg = dflt_int; bc_x%end = dflt_int
-        bc_y%beg = dflt_int; bc_y%end = dflt_int
-        bc_z%beg = dflt_int; bc_z%end = dflt_int
+        bc%x%beg = dflt_int; bc%x%end = dflt_int
+        bc%y%beg = dflt_int; bc%y%end = dflt_int
+        bc%z%beg = dflt_int; bc%z%end = dflt_int
         bc_io = .false.
         num_bc_patches = dflt_int
 
         #:for DIM in ['x', 'y', 'z']
             #:for DIR in [1, 2, 3]
-                bc_${DIM}$%vb${DIR}$ = 0._wp
-                bc_${DIM}$%ve${DIR}$ = 0._wp
+                bc%${DIM}$%vb${DIR}$ = 0._wp
+                bc%${DIM}$%ve${DIR}$ = 0._wp
             #:endfor
         #:endfor
 
         #:for dir in {'x', 'y', 'z'}
-            bc_${dir}$%isothermal_in = .false.
-            bc_${dir}$%isothermal_out = .false.
-            bc_${dir}$%Twall_in = dflt_real
-            bc_${dir}$%Twall_out = dflt_real
+            bc%${dir}$%isothermal_in = .false.
+            bc%${dir}$%isothermal_out = .false.
+            bc%${dir}$%Twall_in = dflt_real
+            bc%${dir}$%Twall_out = dflt_real
         #:endfor
 
         chem_params%gamma_method = 1

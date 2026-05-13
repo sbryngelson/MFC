@@ -928,10 +928,10 @@ contains
 
         select case (idir)
         case (1)  ! x-direction
-            if (bc_x%beg <= BC_CHAR_SLIP_WALL .and. bc_x%beg >= BC_CHAR_SUP_OUTFLOW) then
+            if (bc%x%beg <= BC_CHAR_SLIP_WALL .and. bc%x%beg >= BC_CHAR_SUP_OUTFLOW) then
                 call s_cbc(q_prim_vf%vf, flux_n(idir)%vf, flux_src_n_vf%vf, idir, -1, irx, iry, irz)
             end if
-            if (bc_x%end <= BC_CHAR_SLIP_WALL .and. bc_x%end >= BC_CHAR_SUP_OUTFLOW) then
+            if (bc%x%end <= BC_CHAR_SLIP_WALL .and. bc%x%end >= BC_CHAR_SUP_OUTFLOW) then
                 call s_cbc(q_prim_vf%vf, flux_n(idir)%vf, flux_src_n_vf%vf, idir, 1, irx, iry, irz)
             end if
 
@@ -974,10 +974,10 @@ contains
 
             call s_add_directional_advection_source_terms(idir, rhs_vf, q_cons_vf, q_prim_vf, flux_src_n_vf, Kterm)
         case (2)  ! y-direction
-            if (bc_y%beg <= BC_CHAR_SLIP_WALL .and. bc_y%beg >= BC_CHAR_SUP_OUTFLOW) then
+            if (bc%y%beg <= BC_CHAR_SLIP_WALL .and. bc%y%beg >= BC_CHAR_SUP_OUTFLOW) then
                 call s_cbc(q_prim_vf%vf, flux_n(idir)%vf, flux_src_n_vf%vf, idir, -1, irx, iry, irz)
             end if
-            if (bc_y%end <= BC_CHAR_SLIP_WALL .and. bc_y%end >= BC_CHAR_SUP_OUTFLOW) then
+            if (bc%y%end <= BC_CHAR_SLIP_WALL .and. bc%y%end >= BC_CHAR_SUP_OUTFLOW) then
                 call s_cbc(q_prim_vf%vf, flux_n(idir)%vf, flux_src_n_vf%vf, idir, 1, irx, iry, irz)
             end if
 
@@ -1041,10 +1041,10 @@ contains
 
             call s_add_directional_advection_source_terms(idir, rhs_vf, q_cons_vf, q_prim_vf, flux_src_n_vf, Kterm)
         case (3)  ! z-direction
-            if (bc_z%beg <= BC_CHAR_SLIP_WALL .and. bc_z%beg >= BC_CHAR_SUP_OUTFLOW) then
+            if (bc%z%beg <= BC_CHAR_SLIP_WALL .and. bc%z%beg >= BC_CHAR_SUP_OUTFLOW) then
                 call s_cbc(q_prim_vf%vf, flux_n(idir)%vf, flux_src_n_vf%vf, idir, -1, irx, iry, irz)
             end if
-            if (bc_z%end <= BC_CHAR_SLIP_WALL .and. bc_z%end >= BC_CHAR_SUP_OUTFLOW) then
+            if (bc%z%end <= BC_CHAR_SLIP_WALL .and. bc%z%end >= BC_CHAR_SUP_OUTFLOW) then
                 call s_cbc(q_prim_vf%vf, flux_n(idir)%vf, flux_src_n_vf%vf, idir, 1, irx, iry, irz)
             end if
 
@@ -1437,7 +1437,7 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
             end if
 
-            if (cyl_coord .and. ((bc_y%beg == -2) .or. (bc_y%beg == -14))) then
+            if (cyl_coord .and. ((bc%y%beg == -2) .or. (bc%y%beg == -14))) then
                 if (viscous .or. dummy) then
                     if (p > 0) then
                         call s_compute_viscous_stress_cylindrical_boundary(q_prim_vf, &
@@ -1512,7 +1512,7 @@ contains
 
             ! Applying the geometrical viscous Riemann source fluxes calculated as average of values at cell boundaries
             if (cyl_coord) then
-                if ((bc_y%beg == -2) .or. (bc_y%beg == -14)) then
+                if ((bc%y%beg == -2) .or. (bc%y%beg == -14)) then
                     $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=3)
                     do l = 0, p
                         do k = 1, n
