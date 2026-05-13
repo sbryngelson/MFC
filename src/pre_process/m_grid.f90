@@ -34,8 +34,9 @@ contains
     impure subroutine s_generate_serial_grid
 
         ! Generic loop iterator
-        integer  :: i, j    !< generic loop operators
-        real(wp) :: length  !< domain lengths
+        integer  :: i, j        !< generic loop operators
+        real(wp) :: length      !< domain lengths
+        real(wp) :: dx, dy, dz  !< local uniform spacing temporaries
         ! Uniform grid: dx = (x_end - x_beg) / (m + 1)
 
         dx = (x_domain%end - x_domain%beg)/real(m + 1, wp)
@@ -68,6 +69,7 @@ contains
             print *, 'Stretched grid: min/max x grid: ', minval(x%cc(:)), maxval(x%cc(:))
             if (num_procs > 1) call s_mpi_reduce_min(dx)
         end if
+        x%min_spacing = dx
 
         ! Grid Generation in the y-direction
         if (n == 0) return
@@ -115,6 +117,7 @@ contains
 
             if (num_procs > 1) call s_mpi_reduce_min(dy)
         end if
+        y%min_spacing = dy
 
         ! Grid Generation in the z-direction
         if (p == 0) return
@@ -149,6 +152,7 @@ contains
 
             if (num_procs > 1) call s_mpi_reduce_min(dz)
         end if
+        z%min_spacing = dz
 
     end subroutine s_generate_serial_grid
 
@@ -156,7 +160,8 @@ contains
     impure subroutine s_generate_parallel_grid
 
 #ifdef MFC_MPI
-        real(wp) :: length  !< domain lengths
+        real(wp) :: length      !< domain lengths
+        real(wp) :: dx, dy, dz  !< local uniform spacing temporaries
         ! Locations of cell boundaries
         real(wp), allocatable, dimension(:) :: x_cb_glb, y_cb_glb, z_cb_glb  !< Locations of cell boundaries
         character(LEN=path_len + name_len)  :: file_loc                      !< Generic string used to store the address of a file

@@ -1022,12 +1022,15 @@ contains
         integer :: num_procs_x, num_procs_y, num_procs_z  !< Optimal number of processors in the x-, y- and z-directions
         !> Non-optimal number of processors in the x-, y- and z-directions
         real(wp) :: tmp_num_procs_x, tmp_num_procs_y, tmp_num_procs_z
-        real(wp) :: fct_min        !< Processor factorization (fct) minimization parameter
-        integer  :: MPI_COMM_CART  !< Cartesian processor topology communicator
-        integer  :: rem_cells      !< Remaining cells after distribution among processors
-        integer  :: recon_order    !< WENO or MUSCL reconstruction order
-        integer  :: i, j           !< Generic loop iterators
-        integer  :: ierr           !< Generic flag used to identify and report MPI errors
+        real(wp) :: fct_min  !< Processor factorization (fct) minimization parameter
+#ifdef MFC_PRE_PROCESS
+        real(wp) :: dx, dy, dz  !< uniform spacing temporaries for domain decomposition
+#endif
+        integer :: MPI_COMM_CART  !< Cartesian processor topology communicator
+        integer :: rem_cells      !< Remaining cells after distribution among processors
+        integer :: recon_order    !< WENO or MUSCL reconstruction order
+        integer :: i, j           !< Generic loop iterators
+        integer :: ierr           !< Generic flag used to identify and report MPI errors
 
         if (recon_type == WENO_TYPE) then
             recon_order = weno_order

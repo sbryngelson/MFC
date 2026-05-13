@@ -312,8 +312,9 @@ contains
             do i = 0, m
                 if (patch_icpp(patch_id)%smoothen) then
                     ! Smooth Heaviside via hyperbolic tangent; smooth_coeff controls interface sharpness
-                    eta = tanh(smooth_coeff/min(dx, &
-                               & dy)*(sqrt((x%cc(i) - x_centroid)**2 + (y%cc(j) - y_centroid)**2) - radius))*(-0.5_wp) + 0.5_wp
+                    eta = tanh(smooth_coeff/min(x%min_spacing, &
+                               & y%min_spacing)*(sqrt((x%cc(i) - x_centroid)**2 + (y%cc(j) - y_centroid)**2) - radius))*(-0.5_wp) &
+                               & + 0.5_wp
                 end if
 
                 if (((x%cc(i) - x_centroid)**2 + (y%cc(j) - y_centroid)**2 <= radius**2 &
@@ -485,9 +486,9 @@ contains
         do j = 0, n
             do i = 0, m
                 if (patch_icpp(patch_id)%smoothen) then
-                    eta = tanh(smooth_coeff/min(dx, &
-                               & dy)*(sqrt(((x%cc(i) - x_centroid)/a)**2 + ((y%cc(j) - y_centroid)/b)**2) - 1._wp))*(-0.5_wp) &
-                               & + 0.5_wp
+                    eta = tanh(smooth_coeff/min(x%min_spacing, &
+                               & y%min_spacing)*(sqrt(((x%cc(i) - x_centroid)/a)**2 + ((y%cc(j) - y_centroid)/b)**2) - 1._wp)) &
+                               & *(-0.5_wp) + 0.5_wp
                 end if
 
                 if ((((x%cc(i) - x_centroid)/a)**2 + ((y%cc(j) - y_centroid)/b)**2 <= 1._wp &
@@ -555,8 +556,8 @@ contains
                     end if
 
                     if (patch_icpp(patch_id)%smoothen) then
-                        eta = tanh(smooth_coeff/min(dx, dy, &
-                                   & dz)*(sqrt(((x%cc(i) - x_centroid)/a)**2 + ((cart_y - y_centroid)/b)**2 + ((cart_z &
+                        eta = tanh(smooth_coeff/min(x%min_spacing, y%min_spacing, &
+                                   & z%min_spacing)*(sqrt(((x%cc(i) - x_centroid)/a)**2 + ((cart_y - y_centroid)/b)**2 + ((cart_z &
                                    & - z_centroid)/c)**2) - 1._wp))*(-0.5_wp) + 0.5_wp
                     end if
 
@@ -688,7 +689,8 @@ contains
         do j = 0, n
             do i = 0, m
                 if (patch_icpp(patch_id)%smoothen) then
-                    eta = 5.e-1_wp + 5.e-1_wp*tanh(smooth_coeff/min(dx, dy)*(a*x%cc(i) + b*y%cc(j) + c)/sqrt(a**2 + b**2))
+                    eta = 5.e-1_wp + 5.e-1_wp*tanh(smooth_coeff/min(x%min_spacing, &
+                                                   & y%min_spacing)*(a*x%cc(i) + b*y%cc(j) + c)/sqrt(a**2 + b**2))
                 end if
 
                 if ((a*x%cc(i) + b*y%cc(j) + c >= 0._wp .and. patch_icpp(patch_id)%alter_patch(patch_id_fp(i, j, &
@@ -878,7 +880,7 @@ contains
                     end if
                 end if
                 if (patch_icpp(patch_id)%smoothen) then
-                    eta = 0.5_wp + 0.5_wp*tanh(smooth_coeff/min(dx, dy)*(R_boundary - r))
+                    eta = 0.5_wp + 0.5_wp*tanh(smooth_coeff/min(x%min_spacing, y%min_spacing)*(R_boundary - r))
                 end if
                 if ((r <= R_boundary .and. patch_icpp(patch_id)%alter_patch(patch_id_fp(i, j, 0))) .or. patch_id_fp(i, j, &
                     & 0) == smooth_patch_id) then
@@ -940,7 +942,8 @@ contains
                         end do
                     end do
                     if (patch_icpp(patch_id)%smoothen) then
-                        eta_local = 0.5_wp + 0.5_wp*tanh(smooth_coeff/min(dx, dy, dz)*(R_surface - r))
+                        eta_local = 0.5_wp + 0.5_wp*tanh(smooth_coeff/min(x%min_spacing, y%min_spacing, &
+                                                         & z%min_spacing)*(R_surface - r))
                     end if
                     if ((r <= R_surface .and. patch_icpp(patch_id)%alter_patch(patch_id_fp(i, j, k))) .or. patch_id_fp(i, j, &
                         & k) == smooth_patch_id) then
@@ -998,9 +1001,9 @@ contains
                     end if
 
                     if (patch_icpp(patch_id)%smoothen) then
-                        eta = tanh(smooth_coeff/min(dx, dy, &
-                                   & dz)*(sqrt((x%cc(i) - x_centroid)**2 + (cart_y - y_centroid)**2 + (cart_z - z_centroid)**2) &
-                                   & - radius))*(-0.5_wp) + 0.5_wp
+                        eta = tanh(smooth_coeff/min(x%min_spacing, y%min_spacing, &
+                                   & z%min_spacing)*(sqrt((x%cc(i) - x_centroid)**2 + (cart_y - y_centroid)**2 + (cart_z &
+                                   & - z_centroid)**2) - radius))*(-0.5_wp) + 0.5_wp
                     end if
 
                     if ((((x%cc(i) - x_centroid)**2 + (cart_y - y_centroid)**2 + (cart_z - z_centroid)**2 <= radius**2) &
@@ -1146,17 +1149,17 @@ contains
 
                     if (patch_icpp(patch_id)%smoothen) then
                         if (.not. f_is_default(length_x)) then
-                            eta = tanh(smooth_coeff/min(dy, &
-                                       & dz)*(sqrt((cart_y - y_centroid)**2 + (cart_z - z_centroid)**2) - radius))*(-0.5_wp) &
-                                       & + 0.5_wp
+                            eta = tanh(smooth_coeff/min(y%min_spacing, &
+                                       & z%min_spacing)*(sqrt((cart_y - y_centroid)**2 + (cart_z - z_centroid)**2) - radius)) &
+                                       & *(-0.5_wp) + 0.5_wp
                         else if (.not. f_is_default(length_y)) then
-                            eta = tanh(smooth_coeff/min(dx, &
-                                       & dz)*(sqrt((x%cc(i) - x_centroid)**2 + (cart_z - z_centroid)**2) - radius))*(-0.5_wp) &
-                                       & + 0.5_wp
+                            eta = tanh(smooth_coeff/min(x%min_spacing, &
+                                       & z%min_spacing)*(sqrt((x%cc(i) - x_centroid)**2 + (cart_z - z_centroid)**2) - radius)) &
+                                       & *(-0.5_wp) + 0.5_wp
                         else
-                            eta = tanh(smooth_coeff/min(dx, &
-                                       & dy)*(sqrt((x%cc(i) - x_centroid)**2 + (cart_y - y_centroid)**2) - radius))*(-0.5_wp) &
-                                       & + 0.5_wp
+                            eta = tanh(smooth_coeff/min(x%min_spacing, &
+                                       & y%min_spacing)*(sqrt((x%cc(i) - x_centroid)**2 + (cart_y - y_centroid)**2) - radius)) &
+                                       & *(-0.5_wp) + 0.5_wp
                         end if
                     end if
 
@@ -1232,8 +1235,9 @@ contains
                     end if
 
                     if (patch_icpp(patch_id)%smoothen) then
-                        eta = 5.e-1_wp + 5.e-1_wp*tanh(smooth_coeff/min(dx, dy, &
-                                                       & dz)*(a*x%cc(i) + b*cart_y + c*cart_z + d)/sqrt(a**2 + b**2 + c**2))
+                        eta = 5.e-1_wp + 5.e-1_wp*tanh(smooth_coeff/min(x%min_spacing, y%min_spacing, &
+                                                       & z%min_spacing)*(a*x%cc(i) + b*cart_y + c*cart_z + d)/sqrt(a**2 + b**2 &
+                                                       & + c**2))
                     end if
 
                     if ((a*x%cc(i) + b*cart_y + c*cart_z + d >= 0._wp .and. patch_icpp(patch_id)%alter_patch(patch_id_fp(i, j, &
@@ -1326,11 +1330,11 @@ contains
             write (*, "(A, 3(2X, F20.10))") "    >         Cen:", (bbox%min(1:3) + bbox%max(1:3))/2._wp
             write (*, "(A, 3(2X, F20.10))") "    >         Max:", bbox%max(1:3)
 
-            grid_mm(1,:) = (/minval(x%cc) - 0.e5_wp*dx, maxval(x%cc) + 0.e5_wp*dx/)
-            grid_mm(2,:) = (/minval(y%cc) - 0.e5_wp*dy, maxval(y%cc) + 0.e5_wp*dy/)
+            grid_mm(1,:) = (/minval(x%cc) - 0.e5_wp*x%min_spacing, maxval(x%cc) + 0.e5_wp*x%min_spacing/)
+            grid_mm(2,:) = (/minval(y%cc) - 0.e5_wp*y%min_spacing, maxval(y%cc) + 0.e5_wp*y%min_spacing/)
 
             if (p > 0) then
-                grid_mm(3,:) = (/minval(z%cc) - 0.e5_wp*dz, maxval(z%cc) + 0.e5_wp*dz/)
+                grid_mm(3,:) = (/minval(z%cc) - 0.e5_wp*z%min_spacing, maxval(z%cc) + 0.e5_wp*z%min_spacing/)
             else
                 grid_mm(3,:) = (/0._wp, 0._wp/)
             end if
@@ -1356,7 +1360,7 @@ contains
                 point = f_convert_cyl_to_cart(point)
             end if
 
-            eta = f_model_is_inside(model, point, (/dx, dy, dz/), patch_icpp(patch_id)%model_spc)
+            eta = f_model_is_inside(model, point, (/x%min_spacing, y%min_spacing, z%min_spacing/), patch_icpp(patch_id)%model_spc)
 
             if (eta > patch_icpp(patch_id)%model_threshold) then
                 eta = 1._wp

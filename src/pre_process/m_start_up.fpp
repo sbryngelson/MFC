@@ -181,8 +181,8 @@ contains
 
         x%cc(0:m) = (x%cb(0:m) + x%cb(-1:(m - 1)))/2._wp
 
-        dx = minval(x%cb(0:m) - x%cb(-1:m - 1))
-        if (num_procs > 1) call s_mpi_reduce_min(dx)
+        x%min_spacing = minval(x%cb(0:m) - x%cb(-1:m - 1))
+        if (num_procs > 1) call s_mpi_reduce_min(x%min_spacing)
 
         x_domain%beg = x%cb(-1)
         x_domain%end = x%cb(m)
@@ -201,8 +201,8 @@ contains
 
             y%cc(0:n) = (y%cb(0:n) + y%cb(-1:(n - 1)))/2._wp
 
-            dy = minval(y%cb(0:n) - y%cb(-1:n - 1))
-            if (num_procs > 1) call s_mpi_reduce_min(dy)
+            y%min_spacing = minval(y%cb(0:n) - y%cb(-1:n - 1))
+            if (num_procs > 1) call s_mpi_reduce_min(y%min_spacing)
 
             y_domain%beg = y%cb(-1)
             y_domain%end = y%cb(n)
@@ -221,8 +221,8 @@ contains
 
                 z%cc(0:p) = (z%cb(0:p) + z%cb(-1:(p - 1)))/2._wp
 
-                dz = minval(z%cb(0:p) - z%cb(-1:p - 1))
-                if (num_procs > 1) call s_mpi_reduce_min(dz)
+                z%min_spacing = minval(z%cb(0:p) - z%cb(-1:p - 1))
+                if (num_procs > 1) call s_mpi_reduce_min(z%min_spacing)
 
                 z_domain%beg = z%cb(-1)
                 z_domain%end = z%cb(p)
@@ -354,8 +354,8 @@ contains
 
         x%cb(-1:m) = x_cb_glb((start_idx(1) - 1):(start_idx(1) + m))
         x%cc(0:m) = (x%cb(0:m) + x%cb(-1:(m - 1)))/2._wp
-        dx = minval(x%cb(0:m) - x%cb(-1:(m - 1)))
-        if (num_procs > 1) call s_mpi_reduce_min(dx)
+        x%min_spacing = minval(x%cb(0:m) - x%cb(-1:(m - 1)))
+        if (num_procs > 1) call s_mpi_reduce_min(x%min_spacing)
         x_domain%beg = x%cb(-1)
         x_domain%end = x%cb(m)
 
@@ -374,8 +374,8 @@ contains
 
             y%cb(-1:n) = y_cb_glb((start_idx(2) - 1):(start_idx(2) + n))
             y%cc(0:n) = (y%cb(0:n) + y%cb(-1:(n - 1)))/2._wp
-            dy = minval(y%cb(0:n) - y%cb(-1:(n - 1)))
-            if (num_procs > 1) call s_mpi_reduce_min(dy)
+            y%min_spacing = minval(y%cb(0:n) - y%cb(-1:(n - 1)))
+            if (num_procs > 1) call s_mpi_reduce_min(y%min_spacing)
             y_domain%beg = y%cb(-1)
             y_domain%end = y%cb(n)
 
@@ -394,8 +394,8 @@ contains
 
                 z%cb(-1:p) = z_cb_glb((start_idx(3) - 1):(start_idx(3) + p))
                 z%cc(0:p) = (z%cb(0:p) + z%cb(-1:(p - 1)))/2._wp
-                dz = minval(z%cb(0:p) - z%cb(-1:(p - 1)))
-                if (num_procs > 1) call s_mpi_reduce_min(dz)
+                z%min_spacing = minval(z%cb(0:p) - z%cb(-1:(p - 1)))
+                if (num_procs > 1) call s_mpi_reduce_min(z%min_spacing)
                 z_domain%beg = z%cb(-1)
                 z_domain%end = z%cb(p)
             end if

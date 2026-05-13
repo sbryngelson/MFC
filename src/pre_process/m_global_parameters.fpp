@@ -41,9 +41,8 @@ module m_global_parameters
     integer               :: num_vels             !< Number of velocity components (different from num_dims for mhd)
     logical               :: cyl_coord
     integer               :: grid_geometry        !< Cylindrical coordinates (either axisymmetric or full 3D)
-    !> Cell-boundary (cb) and cell-center (cc) arrays per direction
+    !> Cell-boundary (cb), cell-center (cc), per-cell spacing, and minimum spacing per direction
     type(grid_axis)   :: x, y, z
-    real(wp)          :: dx, dy, dz  !< Minimum cell-widths in the x-, y- and z-coordinate directions
     type(bounds_info) :: x_domain, y_domain, z_domain  !< Locations of the domain bounds in the x-, y- and z-coordinate directions
     logical           :: stretch_x, stretch_y, stretch_z  !< Grid stretching flags for the x-, y- and z-coordinate directions
     ! Grid stretching: a_x/a_y/a_z = rate, x_stretch%beg/end = locations

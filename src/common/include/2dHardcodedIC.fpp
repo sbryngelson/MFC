@@ -157,7 +157,7 @@
         if (x%cc(i) <= 0.7_wp*lam) then
             d = x%cc(i) - lam*(0.4_wp - 0.1_wp*sin(2.0_wp*pi*(y%cc(j)/lam + 0.25_wp)))
 #ifdef MFC_PRE_PROCESS
-            fsm = 0.5_wp*(1.0_wp + erf(d/(ei*sqrt(dx*dy))))
+            fsm = 0.5_wp*(1.0_wp + erf(d/(ei*sqrt(x%min_spacing*y%min_spacing))))
 #else
             fsm = 0.5_wp*(1.0_wp + erf(d/(ei*sqrt(x%spacing(i)*y%spacing(j)))))
 #endif
