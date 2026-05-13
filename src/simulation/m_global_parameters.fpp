@@ -210,6 +210,7 @@ module m_global_parameters
     type(bc_dir_t) :: ib_bc_x, ib_bc_y, ib_bc_z
     !> @}
 #if defined(MFC_OpenACC)
+    $:GPU_DECLARE(create='[bc]')
     $:GPU_DECLARE(create='[ib_bc_x%beg, ib_bc_y%beg, ib_bc_z%beg]')
 #elif defined(MFC_OpenMP)
     $:GPU_DECLARE(create='[bc]')
