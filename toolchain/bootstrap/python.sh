@@ -417,7 +417,7 @@ fi
 FYPP_PY="$(python3 -c "import fypp; print(fypp.__file__)" 2>/dev/null)"
 FYPP_PATCH="$(pwd)/toolchain/patches/fypp-linemarker-resync.patch"
 if [ -n "$FYPP_PY" ] && [ -f "$FYPP_PATCH" ]; then
-    if ! grep -q "or True" "$FYPP_PY" 2>/dev/null; then
+    if ! grep -q "Always emit a resync marker" "$FYPP_PY" 2>/dev/null; then
         if patch -p1 --forward --silent "$FYPP_PY" < "$FYPP_PATCH" 2>/dev/null; then
             ok "(venv) Applied$MAGENTA fypp$COLOR_RESET linemarker-resync patch."
         else
