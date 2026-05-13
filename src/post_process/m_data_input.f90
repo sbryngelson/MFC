@@ -216,12 +216,18 @@ contains
         ! assumed-shape re-mapping shifts the read by that many slots and leaves the last interior cells uninitialized - corrupting
         ! downstream ghost-cell extrapolation.
         call s_read_grid_data_direction(t_step_dir, 'x', x%cb(-1:m), x%spacing(0:m), x%cc(0:m), m)
+        x%min_spacing = minval(x%spacing(0:m))
+        if (num_procs > 1) call s_mpi_reduce_min(x%min_spacing)
 
         if (n > 0) then
             call s_read_grid_data_direction(t_step_dir, 'y', y%cb(-1:n), y%spacing(0:n), y%cc(0:n), n)
+            y%min_spacing = minval(y%spacing(0:n))
+            if (num_procs > 1) call s_mpi_reduce_min(y%min_spacing)
 
             if (p > 0) then
                 call s_read_grid_data_direction(t_step_dir, 'z', z%cb(-1:p), z%spacing(0:p), z%cc(0:p), p)
+                z%min_spacing = minval(z%spacing(0:p))
+                if (num_procs > 1) call s_mpi_reduce_min(z%min_spacing)
             end if
         end if
 
@@ -299,6 +305,8 @@ contains
         x%cb(-1:m) = x_cb_glb((start_idx(1) - 1):(start_idx(1) + m))
         x%spacing(0:m) = x%cb(0:m) - x%cb(-1:m - 1)
         x%cc(0:m) = x%cb(-1:m - 1) + x%spacing(0:m)/2._wp
+        x%min_spacing = minval(x%spacing(0:m))
+        if (num_procs > 1) call s_mpi_reduce_min(x%min_spacing)
 
         if (n > 0) then
             file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'y_cb.dat'
@@ -323,6 +331,8 @@ contains
             y%cb(-1:n) = y_cb_glb((start_idx(2) - 1):(start_idx(2) + n))
             y%spacing(0:n) = y%cb(0:n) - y%cb(-1:n - 1)
             y%cc(0:n) = y%cb(-1:n - 1) + y%spacing(0:n)/2._wp
+            y%min_spacing = minval(y%spacing(0:n))
+            if (num_procs > 1) call s_mpi_reduce_min(y%min_spacing)
 
             if (p > 0) then
                 file_loc = trim(case_dir) // '/restart_data' // trim(mpiiofs) // 'z_cb.dat'
@@ -347,6 +357,8 @@ contains
                 z%cb(-1:p) = z_cb_glb((start_idx(3) - 1):(start_idx(3) + p))
                 z%spacing(0:p) = z%cb(0:p) - z%cb(-1:p - 1)
                 z%cc(0:p) = z%cb(-1:p - 1) + z%spacing(0:p)/2._wp
+                z%min_spacing = minval(z%spacing(0:p))
+                if (num_procs > 1) call s_mpi_reduce_min(z%min_spacing)
             end if
         end if
 
