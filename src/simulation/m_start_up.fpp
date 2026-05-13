@@ -1082,18 +1082,19 @@ contains
 
         $:GPU_UPDATE(device='[x%spacing, y%spacing, z%spacing, x%cb, x%cc, y%cb, y%cc, z%cb, z%cc]')
         $:GPU_UPDATE(device='[bc%x%beg, bc%x%end, bc%y%beg, bc%y%end, bc%z%beg, bc%z%end]')
-        $:GPU_UPDATE(device='[bc%x%vb1, bc%x%vb2, bc%x%vb3, bc%x%ve1, bc%x%ve2, bc%x%ve3]')
-        $:GPU_UPDATE(device='[bc%y%vb1, bc%y%vb2, bc%y%vb3, bc%y%ve1, bc%y%ve2, bc%y%ve3]')
-        $:GPU_UPDATE(device='[bc%z%vb1, bc%z%vb2, bc%z%vb3, bc%z%ve1, bc%z%ve2, bc%z%ve3]')
+        $:GPU_UPDATE(device='[bc%x%beg_side%vel_wall, bc%x%end_side%vel_wall]')
+        $:GPU_UPDATE(device='[bc%y%beg_side%vel_wall, bc%y%end_side%vel_wall]')
+        $:GPU_UPDATE(device='[bc%z%beg_side%vel_wall, bc%z%end_side%vel_wall]')
 
-        $:GPU_UPDATE(device='[bc%x%grcbc_in, bc%x%grcbc_out, bc%x%grcbc_vel_out]')
-        $:GPU_UPDATE(device='[bc%y%grcbc_in, bc%y%grcbc_out, bc%y%grcbc_vel_out]')
-        $:GPU_UPDATE(device='[bc%z%grcbc_in, bc%z%grcbc_out, bc%z%grcbc_vel_out]')
+        $:GPU_UPDATE(device='[bc%x%beg_side%grcbc, bc%x%end_side%grcbc, bc%x%end_side%grcbc_vel]')
+        $:GPU_UPDATE(device='[bc%y%beg_side%grcbc, bc%y%end_side%grcbc, bc%y%end_side%grcbc_vel]')
+        $:GPU_UPDATE(device='[bc%z%beg_side%grcbc, bc%z%end_side%grcbc, bc%z%end_side%grcbc_vel]')
 
-        $:GPU_UPDATE(device='[bc%x%isothermal_in, bc%x%isothermal_out]')
-        $:GPU_UPDATE(device='[bc%y%isothermal_in, bc%y%isothermal_out]')
-        $:GPU_UPDATE(device='[bc%z%isothermal_in, bc%z%isothermal_out]')
-        $:GPU_UPDATE(device='[bc%x%Twall_in, bc%x%Twall_out, bc%y%Twall_in, bc%y%Twall_out, bc%z%Twall_in, bc%z%Twall_out]')
+        $:GPU_UPDATE(device='[bc%x%beg_side%isothermal, bc%x%end_side%isothermal]')
+        $:GPU_UPDATE(device='[bc%y%beg_side%isothermal, bc%y%end_side%isothermal]')
+        $:GPU_UPDATE(device='[bc%z%beg_side%isothermal, bc%z%end_side%isothermal]')
+        $:GPU_UPDATE(device='[bc%x%beg_side%T_wall, bc%x%end_side%T_wall, bc%y%beg_side%T_wall, bc%y%end_side%T_wall, &
+                     & bc%z%beg_side%T_wall, bc%z%end_side%T_wall]')
 
         $:GPU_UPDATE(device='[relax, relax_model]')
         if (relax) then

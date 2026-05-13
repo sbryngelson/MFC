@@ -43,8 +43,8 @@ contains
             & 'mixlayer_perturb', 'bubbles_euler', 'polytropic', 'polydisperse',  &
             & 'qbmm', 'file_per_process', 'adv_n', 'ib' , 'cfl_adap_dt',          &
             & 'cfl_const_dt', 'cfl_dt', 'surface_tension',                        &
-            & 'bc%x%isothermal_in', 'bc%y%isothermal_in', 'bc%z%isothermal_in',   &
-            & 'bc%x%isothermal_out', 'bc%y%isothermal_out', 'bc%z%isothermal_out',&
+            & 'bc%x%beg_side%isothermal', 'bc%y%beg_side%isothermal', 'bc%z%beg_side%isothermal',   &
+            & 'bc%x%end_side%isothermal', 'bc%y%end_side%isothermal', 'bc%z%end_side%isothermal',&
             & 'hyperelasticity', 'pre_stress', 'elliptic_smoothing', 'viscous',   &
             & 'bubbles_lagrange', 'bc_io', 'mhd', 'relativity', 'cont_damage',    &
             & 'igr', 'down_sample', 'simplex_perturb','fft_wrt', 'hyper_cleaning' ]
@@ -60,9 +60,9 @@ contains
             & 'perturb_flow_mag', 'pref', 'rhoref', 'poly_sigma', 'R0ref',     &
             & 'Web', 'Ca', 'Re_inv', 'sigR', 'sigV', 'rhoRV', 'palpha_eps',    &
             & 'ptgalpha_eps', 'sigma', 'pi_fac', 'mixlayer_vel_coef', 'Bx0',   &
-            & 'mixlayer_perturb_k0', 'bc%x%Twall_in', 'bc%x%Twall_out',        &
-            & 'bc%y%Twall_in', 'bc%y%Twall_out', 'bc%z%Twall_in',              &
-            & 'bc%z%Twall_out']
+            & 'mixlayer_perturb_k0', 'bc%x%beg_side%T_wall', 'bc%x%end_side%T_wall',        &
+            & 'bc%y%beg_side%T_wall', 'bc%y%end_side%T_wall', 'bc%z%beg_side%T_wall',              &
+            & 'bc%z%end_side%T_wall']
             call MPI_BCAST(${VAR}$, 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
         #:endfor
 

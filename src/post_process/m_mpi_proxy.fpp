@@ -84,8 +84,8 @@ contains
             & 'prim_vars_wrt', 'c_wrt', 'qm_wrt','schlieren_wrt','chem_wrt_T',    &
             & 'bubbles_euler', 'qbmm', 'polytropic', 'polydisperse',              &
             & 'file_per_process', 'relax', 'cf_wrt', 'igr', 'liutex_wrt',         &
-            & 'bc%x%isothermal_in', 'bc%y%isothermal_in', 'bc%z%isothermal_in',   &
-            & 'bc%x%isothermal_out', 'bc%y%isothermal_out', 'bc%z%isothermal_out',&
+            & 'bc%x%beg_side%isothermal', 'bc%y%beg_side%isothermal', 'bc%z%beg_side%isothermal',   &
+            & 'bc%x%end_side%isothermal', 'bc%y%end_side%isothermal', 'bc%z%end_side%isothermal',&
             & 'adv_n', 'ib', 'cfl_adap_dt', 'cfl_const_dt', 'cfl_dt',             &
             & 'surface_tension', 'hyperelasticity', 'bubbles_lagrange',           &
             & 'output_partial_domain', 'relativity', 'cont_damage', 'bc_io',      &
@@ -133,8 +133,8 @@ contains
             & 'Re_inv', 'Bx0', 'sigma', 't_save', 't_stop',      &
             & 'x_output%beg', 'x_output%end', 'y_output%beg',    &
             & 'y_output%end', 'z_output%beg', 'z_output%end',    &
-            & 'bc%x%Twall_in', 'bc%x%Twall_out', 'bc%y%Twall_in',&
-            & 'bc%y%Twall_out','bc%z%Twall_in', 'bc%z%Twall_out' ]
+            & 'bc%x%beg_side%T_wall', 'bc%x%end_side%T_wall', 'bc%y%beg_side%T_wall',&
+            & 'bc%y%end_side%T_wall','bc%z%beg_side%T_wall', 'bc%z%end_side%T_wall' ]
             call MPI_BCAST(${VAR}$, 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
         #:endfor
         call MPI_BCAST(schlieren_alpha(1), num_fluids_max, mpi_p, 0, MPI_COMM_WORLD, ierr)

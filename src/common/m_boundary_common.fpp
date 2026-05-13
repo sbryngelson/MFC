@@ -844,7 +844,7 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%beg) then
-                            q_prim_vf(i)%sf(-j, k, l) = -q_prim_vf(i)%sf(j - 1, k, l) + 2._wp*bc%x%vb1
+                            q_prim_vf(i)%sf(-j, k, l) = -q_prim_vf(i)%sf(j - 1, k, l) + 2._wp*bc%x%beg_side%vel_wall(1)
                         else
                             q_prim_vf(i)%sf(-j, k, l) = q_prim_vf(i)%sf(0, k, l)
                         end if
@@ -852,9 +852,9 @@ contains
                 end do
 
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%x%isothermal_in) then
+                    if (bc%x%beg_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(-j, k, l) = 2._wp*bc%x%Twall_in - q_T_sf%sf(j - 1, k, l)
+                            q_T_sf%sf(-j, k, l) = 2._wp*bc%x%beg_side%T_wall - q_T_sf%sf(j - 1, k, l)
                         end do
                     else
                         do j = 1, buff_size
@@ -866,7 +866,7 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%beg) then
-                            q_prim_vf(i)%sf(m + j, k, l) = -q_prim_vf(i)%sf(m - (j - 1), k, l) + 2._wp*bc%x%ve1
+                            q_prim_vf(i)%sf(m + j, k, l) = -q_prim_vf(i)%sf(m - (j - 1), k, l) + 2._wp*bc%x%end_side%vel_wall(1)
                         else
                             q_prim_vf(i)%sf(m + j, k, l) = q_prim_vf(i)%sf(m, k, l)
                         end if
@@ -874,9 +874,9 @@ contains
                 end do
 
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%x%isothermal_out) then
+                    if (bc%x%end_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(m + j, k, l) = 2._wp*bc%x%Twall_out - q_T_sf%sf(m - (j - 1), k, l)
+                            q_T_sf%sf(m + j, k, l) = 2._wp*bc%x%end_side%T_wall - q_T_sf%sf(m - (j - 1), k, l)
                         end do
                     else
                         do j = 1, buff_size
@@ -890,7 +890,7 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%beg + 1) then
-                            q_prim_vf(i)%sf(k, -j, l) = -q_prim_vf(i)%sf(k, j - 1, l) + 2._wp*bc%y%vb2
+                            q_prim_vf(i)%sf(k, -j, l) = -q_prim_vf(i)%sf(k, j - 1, l) + 2._wp*bc%y%beg_side%vel_wall(2)
                         else
                             q_prim_vf(i)%sf(k, -j, l) = q_prim_vf(i)%sf(k, 0, l)
                         end if
@@ -898,9 +898,9 @@ contains
                 end do
 
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%y%isothermal_in) then
+                    if (bc%y%beg_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(k, -j, l) = 2._wp*bc%y%Twall_in - q_T_sf%sf(k, j - 1, l)
+                            q_T_sf%sf(k, -j, l) = 2._wp*bc%y%beg_side%T_wall - q_T_sf%sf(k, j - 1, l)
                         end do
                     else
                         do j = 1, buff_size
@@ -912,7 +912,7 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%beg + 1) then
-                            q_prim_vf(i)%sf(k, n + j, l) = -q_prim_vf(i)%sf(k, n - (j - 1), l) + 2._wp*bc%y%ve2
+                            q_prim_vf(i)%sf(k, n + j, l) = -q_prim_vf(i)%sf(k, n - (j - 1), l) + 2._wp*bc%y%end_side%vel_wall(2)
                         else
                             q_prim_vf(i)%sf(k, n + j, l) = q_prim_vf(i)%sf(k, n, l)
                         end if
@@ -920,9 +920,9 @@ contains
                 end do
 
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%y%isothermal_out) then
+                    if (bc%y%end_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(k, n + j, l) = 2._wp*bc%y%Twall_out - q_T_sf%sf(k, n - (j - 1), l)
+                            q_T_sf%sf(k, n + j, l) = 2._wp*bc%y%end_side%T_wall - q_T_sf%sf(k, n - (j - 1), l)
                         end do
                     else
                         do j = 1, buff_size
@@ -936,7 +936,7 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%end) then
-                            q_prim_vf(i)%sf(k, l, -j) = -q_prim_vf(i)%sf(k, l, j - 1) + 2._wp*bc%z%vb3
+                            q_prim_vf(i)%sf(k, l, -j) = -q_prim_vf(i)%sf(k, l, j - 1) + 2._wp*bc%z%beg_side%vel_wall(3)
                         else
                             q_prim_vf(i)%sf(k, l, -j) = q_prim_vf(i)%sf(k, l, 0)
                         end if
@@ -944,9 +944,9 @@ contains
                 end do
 
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%z%isothermal_in) then
+                    if (bc%z%beg_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(k, l, -j) = 2._wp*bc%z%Twall_in - q_T_sf%sf(k, l, j - 1)
+                            q_T_sf%sf(k, l, -j) = 2._wp*bc%z%beg_side%T_wall - q_T_sf%sf(k, l, j - 1)
                         end do
                     else
                         do j = 1, buff_size
@@ -958,7 +958,7 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%end) then
-                            q_prim_vf(i)%sf(k, l, p + j) = -q_prim_vf(i)%sf(k, l, p - (j - 1)) + 2._wp*bc%z%ve3
+                            q_prim_vf(i)%sf(k, l, p + j) = -q_prim_vf(i)%sf(k, l, p - (j - 1)) + 2._wp*bc%z%end_side%vel_wall(3)
                         else
                             q_prim_vf(i)%sf(k, l, p + j) = q_prim_vf(i)%sf(k, l, p)
                         end if
@@ -966,9 +966,9 @@ contains
                 end do
 
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%z%isothermal_out) then
+                    if (bc%z%end_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(k, l, p + j) = 2._wp*bc%z%Twall_out - q_T_sf%sf(k, l, p - (j - 1))
+                            q_T_sf%sf(k, l, p + j) = 2._wp*bc%z%end_side%T_wall - q_T_sf%sf(k, l, p - (j - 1))
                         end do
                     else
                         do j = 1, buff_size
@@ -997,11 +997,11 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%beg) then
-                            q_prim_vf(i)%sf(-j, k, l) = -q_prim_vf(i)%sf(j - 1, k, l) + 2._wp*bc%x%vb1
+                            q_prim_vf(i)%sf(-j, k, l) = -q_prim_vf(i)%sf(j - 1, k, l) + 2._wp*bc%x%beg_side%vel_wall(1)
                         else if (i == eqn_idx%mom%beg + 1 .and. num_dims > 1) then
-                            q_prim_vf(i)%sf(-j, k, l) = -q_prim_vf(i)%sf(j - 1, k, l) + 2._wp*bc%x%vb2
+                            q_prim_vf(i)%sf(-j, k, l) = -q_prim_vf(i)%sf(j - 1, k, l) + 2._wp*bc%x%beg_side%vel_wall(2)
                         else if (i == eqn_idx%mom%beg + 2 .and. num_dims > 2) then
-                            q_prim_vf(i)%sf(-j, k, l) = -q_prim_vf(i)%sf(j - 1, k, l) + 2._wp*bc%x%vb3
+                            q_prim_vf(i)%sf(-j, k, l) = -q_prim_vf(i)%sf(j - 1, k, l) + 2._wp*bc%x%beg_side%vel_wall(3)
                         else
                             q_prim_vf(i)%sf(-j, k, l) = q_prim_vf(i)%sf(0, k, l)
                         end if
@@ -1009,9 +1009,9 @@ contains
                 end do
 
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%x%isothermal_in) then
+                    if (bc%x%beg_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(-j, k, l) = 2._wp*bc%x%Twall_in - q_T_sf%sf(j - 1, k, l)
+                            q_T_sf%sf(-j, k, l) = 2._wp*bc%x%beg_side%T_wall - q_T_sf%sf(j - 1, k, l)
                         end do
                     else
                         do j = 1, buff_size
@@ -1023,11 +1023,11 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%beg) then
-                            q_prim_vf(i)%sf(m + j, k, l) = -q_prim_vf(i)%sf(m - (j - 1), k, l) + 2._wp*bc%x%ve1
+                            q_prim_vf(i)%sf(m + j, k, l) = -q_prim_vf(i)%sf(m - (j - 1), k, l) + 2._wp*bc%x%end_side%vel_wall(1)
                         else if (i == eqn_idx%mom%beg + 1 .and. num_dims > 1) then
-                            q_prim_vf(i)%sf(m + j, k, l) = -q_prim_vf(i)%sf(m - (j - 1), k, l) + 2._wp*bc%x%ve2
+                            q_prim_vf(i)%sf(m + j, k, l) = -q_prim_vf(i)%sf(m - (j - 1), k, l) + 2._wp*bc%x%end_side%vel_wall(2)
                         else if (i == eqn_idx%mom%beg + 2 .and. num_dims > 2) then
-                            q_prim_vf(i)%sf(m + j, k, l) = -q_prim_vf(i)%sf(m - (j - 1), k, l) + 2._wp*bc%x%ve3
+                            q_prim_vf(i)%sf(m + j, k, l) = -q_prim_vf(i)%sf(m - (j - 1), k, l) + 2._wp*bc%x%end_side%vel_wall(3)
                         else
                             q_prim_vf(i)%sf(m + j, k, l) = q_prim_vf(i)%sf(m, k, l)
                         end if
@@ -1035,9 +1035,9 @@ contains
                 end do
 
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%x%isothermal_out) then
+                    if (bc%x%end_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(m + j, k, l) = 2._wp*bc%x%Twall_out - q_T_sf%sf(m - (j - 1), k, l)
+                            q_T_sf%sf(m + j, k, l) = 2._wp*bc%x%end_side%T_wall - q_T_sf%sf(m - (j - 1), k, l)
                         end do
                     else
                         do j = 1, buff_size
@@ -1051,20 +1051,20 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%beg) then
-                            q_prim_vf(i)%sf(k, -j, l) = -q_prim_vf(i)%sf(k, j - 1, l) + 2._wp*bc%y%vb1
+                            q_prim_vf(i)%sf(k, -j, l) = -q_prim_vf(i)%sf(k, j - 1, l) + 2._wp*bc%y%beg_side%vel_wall(1)
                         else if (i == eqn_idx%mom%beg + 1 .and. num_dims > 1) then
-                            q_prim_vf(i)%sf(k, -j, l) = -q_prim_vf(i)%sf(k, j - 1, l) + 2._wp*bc%y%vb2
+                            q_prim_vf(i)%sf(k, -j, l) = -q_prim_vf(i)%sf(k, j - 1, l) + 2._wp*bc%y%beg_side%vel_wall(2)
                         else if (i == eqn_idx%mom%beg + 2 .and. num_dims > 2) then
-                            q_prim_vf(i)%sf(k, -j, l) = -q_prim_vf(i)%sf(k, j - 1, l) + 2._wp*bc%y%vb3
+                            q_prim_vf(i)%sf(k, -j, l) = -q_prim_vf(i)%sf(k, j - 1, l) + 2._wp*bc%y%beg_side%vel_wall(3)
                         else
                             q_prim_vf(i)%sf(k, -j, l) = q_prim_vf(i)%sf(k, 0, l)
                         end if
                     end do
                 end do
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%y%isothermal_in) then
+                    if (bc%y%beg_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(k, -j, l) = 2._wp*bc%y%Twall_in - q_T_sf%sf(k, j - 1, l)
+                            q_T_sf%sf(k, -j, l) = 2._wp*bc%y%beg_side%T_wall - q_T_sf%sf(k, j - 1, l)
                         end do
                     else
                         do j = 1, buff_size
@@ -1076,20 +1076,20 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%beg) then
-                            q_prim_vf(i)%sf(k, n + j, l) = -q_prim_vf(i)%sf(k, n - (j - 1), l) + 2._wp*bc%y%ve1
+                            q_prim_vf(i)%sf(k, n + j, l) = -q_prim_vf(i)%sf(k, n - (j - 1), l) + 2._wp*bc%y%end_side%vel_wall(1)
                         else if (i == eqn_idx%mom%beg + 1 .and. num_dims > 1) then
-                            q_prim_vf(i)%sf(k, n + j, l) = -q_prim_vf(i)%sf(k, n - (j - 1), l) + 2._wp*bc%y%ve2
+                            q_prim_vf(i)%sf(k, n + j, l) = -q_prim_vf(i)%sf(k, n - (j - 1), l) + 2._wp*bc%y%end_side%vel_wall(2)
                         else if (i == eqn_idx%mom%beg + 2 .and. num_dims > 2) then
-                            q_prim_vf(i)%sf(k, n + j, l) = -q_prim_vf(i)%sf(k, n - (j - 1), l) + 2._wp*bc%y%ve3
+                            q_prim_vf(i)%sf(k, n + j, l) = -q_prim_vf(i)%sf(k, n - (j - 1), l) + 2._wp*bc%y%end_side%vel_wall(3)
                         else
                             q_prim_vf(i)%sf(k, n + j, l) = q_prim_vf(i)%sf(k, n, l)
                         end if
                     end do
                 end do
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%y%isothermal_out) then
+                    if (bc%y%end_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(k, n + j, l) = 2._wp*bc%y%Twall_out - q_T_sf%sf(k, n - (j - 1), l)
+                            q_T_sf%sf(k, n + j, l) = 2._wp*bc%y%end_side%T_wall - q_T_sf%sf(k, n - (j - 1), l)
                         end do
                     else
                         do j = 1, buff_size
@@ -1103,20 +1103,20 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%beg) then
-                            q_prim_vf(i)%sf(k, l, -j) = -q_prim_vf(i)%sf(k, l, j - 1) + 2._wp*bc%z%vb1
+                            q_prim_vf(i)%sf(k, l, -j) = -q_prim_vf(i)%sf(k, l, j - 1) + 2._wp*bc%z%beg_side%vel_wall(1)
                         else if (i == eqn_idx%mom%beg + 1 .and. num_dims > 1) then
-                            q_prim_vf(i)%sf(k, l, -j) = -q_prim_vf(i)%sf(k, l, j - 1) + 2._wp*bc%z%vb2
+                            q_prim_vf(i)%sf(k, l, -j) = -q_prim_vf(i)%sf(k, l, j - 1) + 2._wp*bc%z%beg_side%vel_wall(2)
                         else if (i == eqn_idx%mom%beg + 2 .and. num_dims > 2) then
-                            q_prim_vf(i)%sf(k, l, -j) = -q_prim_vf(i)%sf(k, l, j - 1) + 2._wp*bc%z%vb3
+                            q_prim_vf(i)%sf(k, l, -j) = -q_prim_vf(i)%sf(k, l, j - 1) + 2._wp*bc%z%beg_side%vel_wall(3)
                         else
                             q_prim_vf(i)%sf(k, l, -j) = q_prim_vf(i)%sf(k, l, 0)
                         end if
                     end do
                 end do
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%z%isothermal_in) then
+                    if (bc%z%beg_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(k, l, -j) = 2._wp*bc%z%Twall_in - q_T_sf%sf(k, l, j - 1)
+                            q_T_sf%sf(k, l, -j) = 2._wp*bc%z%beg_side%T_wall - q_T_sf%sf(k, l, j - 1)
                         end do
                     else
                         do j = 1, buff_size
@@ -1128,20 +1128,20 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         if (i == eqn_idx%mom%beg) then
-                            q_prim_vf(i)%sf(k, l, p + j) = -q_prim_vf(i)%sf(k, l, p - (j - 1)) + 2._wp*bc%z%ve1
+                            q_prim_vf(i)%sf(k, l, p + j) = -q_prim_vf(i)%sf(k, l, p - (j - 1)) + 2._wp*bc%z%end_side%vel_wall(1)
                         else if (i == eqn_idx%mom%beg + 1 .and. num_dims > 1) then
-                            q_prim_vf(i)%sf(k, l, p + j) = -q_prim_vf(i)%sf(k, l, p - (j - 1)) + 2._wp*bc%z%ve2
+                            q_prim_vf(i)%sf(k, l, p + j) = -q_prim_vf(i)%sf(k, l, p - (j - 1)) + 2._wp*bc%z%end_side%vel_wall(2)
                         else if (i == eqn_idx%mom%beg + 2 .and. num_dims > 2) then
-                            q_prim_vf(i)%sf(k, l, p + j) = -q_prim_vf(i)%sf(k, l, p - (j - 1)) + 2._wp*bc%z%ve3
+                            q_prim_vf(i)%sf(k, l, p + j) = -q_prim_vf(i)%sf(k, l, p - (j - 1)) + 2._wp*bc%z%end_side%vel_wall(3)
                         else
                             q_prim_vf(i)%sf(k, l, p + j) = q_prim_vf(i)%sf(k, l, p)
                         end if
                     end do
                 end do
                 if (chemistry .and. present(q_T_sf)) then
-                    if (bc%z%isothermal_out) then
+                    if (bc%z%end_side%isothermal) then
                         do j = 1, buff_size
-                            q_T_sf%sf(k, l, p + j) = 2._wp*bc%z%Twall_out - q_T_sf%sf(k, l, p - (j - 1))
+                            q_T_sf%sf(k, l, p + j) = 2._wp*bc%z%end_side%T_wall - q_T_sf%sf(k, l, p - (j - 1))
                         end do
                     else
                         do j = 1, buff_size

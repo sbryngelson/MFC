@@ -110,17 +110,20 @@ module m_derived_types
         integer :: end
     end type int_bounds_info
 
+    !> Boundary condition data for one face (beg or end) of a coordinate direction.
+    type bc_side_t
+        real(wp)                            :: pres
+        real(wp), dimension(3)              :: vel
+        real(wp), dimension(3)              :: vel_wall
+        real(wp), dimension(num_fluids_max) :: alpha_rho, alpha
+        real(wp)                            :: T_wall
+        logical                             :: grcbc, grcbc_vel, isothermal
+    end type bc_side_t
+
     !> Boundary condition parameters for one coordinate direction (beg/end faces + face data).
     type bc_dir_t
-        integer                             :: beg, end
-        real(wp)                            :: vb1, vb2, vb3
-        real(wp)                            :: ve1, ve2, ve3
-        real(wp)                            :: pres_in, pres_out
-        real(wp), dimension(3)              :: vel_in, vel_out
-        real(wp), dimension(num_fluids_max) :: alpha_rho_in, alpha_in
-        logical                             :: grcbc_in, grcbc_out, grcbc_vel_out
-        logical                             :: isothermal_in, isothermal_out
-        real(wp)                            :: Twall_in, Twall_out
+        integer         :: beg, end
+        type(bc_side_t) :: beg_side, end_side
     end type bc_dir_t
 
     !> Groups the x, y, z boundary condition structs for passing as a single argument.

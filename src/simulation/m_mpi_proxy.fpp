@@ -88,11 +88,11 @@ contains
             & 'polydisperse', 'qbmm', 'acoustic_source', 'probe_wrt', 'integral_wrt',   &
             & 'prim_vars_wrt', 'weno_avg', 'file_per_process', 'relax',          &
             & 'adv_n', 'adap_dt', 'ib', 'bodyForces', 'bf_x%enabled', 'bf_y%enabled', 'bf_z%enabled',    &
-            & 'bc%x%grcbc_in', 'bc%x%grcbc_out', 'bc%x%grcbc_vel_out',          &
-            & 'bc%y%grcbc_in', 'bc%y%grcbc_out', 'bc%y%grcbc_vel_out',          &
-            & 'bc%z%grcbc_in', 'bc%z%grcbc_out', 'bc%z%grcbc_vel_out',          &
-            & 'bc%x%isothermal_in', 'bc%y%isothermal_in', 'bc%z%isothermal_in',        &
-            & 'bc%x%isothermal_out', 'bc%y%isothermal_out', 'bc%z%isothermal_out', &
+            & 'bc%x%beg_side%grcbc', 'bc%x%end_side%grcbc', 'bc%x%end_side%grcbc_vel',          &
+            & 'bc%y%beg_side%grcbc', 'bc%y%end_side%grcbc', 'bc%y%end_side%grcbc_vel',          &
+            & 'bc%z%beg_side%grcbc', 'bc%z%end_side%grcbc', 'bc%z%end_side%grcbc_vel',          &
+            & 'bc%x%beg_side%isothermal', 'bc%y%beg_side%isothermal', 'bc%z%beg_side%isothermal',        &
+            & 'bc%x%end_side%isothermal', 'bc%y%end_side%isothermal', 'bc%z%end_side%isothermal', &
             & 'cfl_adap_dt', 'cfl_const_dt', 'cfl_dt', 'surface_tension',       &
             & 'shear_stress', 'bulk_stress', 'bubbles_lagrange',                &
             & 'hyperelasticity', 'down_sample', 'fft_wrt', &
@@ -127,15 +127,18 @@ contains
 
         #:for VAR in [ 'dt','weno_eps','teno_CT','pref','rhoref','R0ref','Web','Ca', 'sigma', &
             & 'Re_inv', 'poly_sigma', 'palpha_eps', 'ptgalpha_eps', 'pi_fac',    &
-            & 'bc%x%vb1','bc%x%vb2','bc%x%vb3','bc%x%ve1','bc%x%ve2','bc%x%ve3', &
-            & 'bc%y%vb1','bc%y%vb2','bc%y%vb3','bc%y%ve1','bc%y%ve2','bc%y%ve3', &
-            & 'bc%z%vb1','bc%z%vb2','bc%z%vb3','bc%z%ve1','bc%z%ve2','bc%z%ve3', &
-            & 'bc%x%pres_in','bc%x%pres_out','bc%y%pres_in','bc%y%pres_out', 'bc%z%pres_in','bc%z%pres_out', &
+            & 'bc%x%beg_side%vel_wall(1)', 'bc%x%beg_side%vel_wall(2)', 'bc%x%beg_side%vel_wall(3)', &
+            & 'bc%x%end_side%vel_wall(1)', 'bc%x%end_side%vel_wall(2)', 'bc%x%end_side%vel_wall(3)', &
+            & 'bc%y%beg_side%vel_wall(1)', 'bc%y%beg_side%vel_wall(2)', 'bc%y%beg_side%vel_wall(3)', &
+            & 'bc%y%end_side%vel_wall(1)', 'bc%y%end_side%vel_wall(2)', 'bc%y%end_side%vel_wall(3)', &
+            & 'bc%z%beg_side%vel_wall(1)', 'bc%z%beg_side%vel_wall(2)', 'bc%z%beg_side%vel_wall(3)', &
+            & 'bc%z%end_side%vel_wall(1)', 'bc%z%end_side%vel_wall(2)', 'bc%z%end_side%vel_wall(3)', &
+            & 'bc%x%beg_side%pres','bc%x%end_side%pres','bc%y%beg_side%pres','bc%y%end_side%pres', 'bc%z%beg_side%pres','bc%z%end_side%pres', &
             & 'x_domain%beg', 'x_domain%end', 'y_domain%beg', 'y_domain%end',              &
             & 'z_domain%beg', 'z_domain%end', 'x_stretch%beg', 'x_stretch%end',           &
             & 'y_stretch%beg', 'y_stretch%end', 'z_stretch%beg', 'z_stretch%end',         &
-            & 'bc%x%Twall_in', 'bc%x%Twall_out', 'bc%y%Twall_in', 'bc%y%Twall_out',      &
-            & 'bc%z%Twall_in', 'bc%z%Twall_out', &
+            & 'bc%x%beg_side%T_wall', 'bc%x%end_side%T_wall', 'bc%y%beg_side%T_wall', 'bc%y%end_side%T_wall',      &
+            & 'bc%z%beg_side%T_wall', 'bc%z%end_side%T_wall', &
             & 't_stop', 't_save', 'cfl_target', 'Bx0', 'alf_factor',  &
             & 'tau_star', 'cont_damage_s', 'alpha_bar', 'adap_dt_tol', &
             & 'ic_eps', 'ic_beta', 'hyper_cleaning_speed', &
@@ -145,8 +148,8 @@ contains
         #:endfor
 
         do i = 1, 3
-            #:for VAR in [ 'bc%x%vel_in', 'bc%x%vel_out', 'bc%y%vel_in', 'bc%y%vel_out',  &
-                & 'bc%z%vel_in', 'bc%z%vel_out' ]
+            #:for VAR in [ 'bc%x%beg_side%vel', 'bc%x%end_side%vel', 'bc%y%beg_side%vel', 'bc%y%end_side%vel',  &
+                & 'bc%z%beg_side%vel', 'bc%z%end_side%vel' ]
                 call MPI_BCAST(${VAR}$ (i), 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
             #:endfor
         end do
@@ -187,8 +190,8 @@ contains
         end if
 
         do i = 1, num_fluids_max
-            #:for VAR in ['bc%x%alpha_rho_in','bc%x%alpha_in','bc%y%alpha_rho_in','bc%y%alpha_in','bc%z%alpha_rho_in', &
-                & 'bc%z%alpha_in']
+            #:for VAR in ['bc%x%beg_side%alpha_rho','bc%x%beg_side%alpha','bc%y%beg_side%alpha_rho','bc%y%beg_side%alpha','bc%z%beg_side%alpha_rho', &
+                & 'bc%z%beg_side%alpha']
                 call MPI_BCAST(${VAR}$ (i), 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
             #:endfor
         end do

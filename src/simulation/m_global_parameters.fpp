@@ -210,9 +210,6 @@ module m_global_parameters
     type(bc_dir_t) :: ib_bc_x, ib_bc_y, ib_bc_z
     !> @}
 #if defined(MFC_OpenACC)
-    $:GPU_DECLARE(create='[bc%x%vb1, bc%x%vb2, bc%x%vb3, bc%x%ve1, bc%x%ve2, bc%x%ve3]')
-    $:GPU_DECLARE(create='[bc%y%vb1, bc%y%vb2, bc%y%vb3, bc%y%ve1, bc%y%ve2, bc%y%ve3]')
-    $:GPU_DECLARE(create='[bc%z%vb1, bc%z%vb2, bc%z%vb3, bc%z%ve1, bc%z%ve2, bc%z%ve3]')
     $:GPU_DECLARE(create='[ib_bc_x%beg, ib_bc_y%beg, ib_bc_z%beg]')
 #elif defined(MFC_OpenMP)
     $:GPU_DECLARE(create='[bc]')
@@ -573,10 +570,8 @@ contains
         bc%z%beg = dflt_int; bc%z%end = dflt_int
 
         #:for DIM in ['x', 'y', 'z']
-            #:for DIR in [1, 2, 3]
-                bc%${DIM}$%vb${DIR}$ = 0._wp
-                bc%${DIM}$%ve${DIR}$ = 0._wp
-            #:endfor
+            bc%${DIM}$%beg_side%vel_wall = 0._wp
+            bc%${DIM}$%end_side%vel_wall = 0._wp
         #:endfor
 
         x_domain%beg = dflt_real; x_domain%end = dflt_real
@@ -730,16 +725,16 @@ contains
 
         ! GRCBC flags
         #:for dir in {'x', 'y', 'z'}
-            bc%${dir}$%grcbc_in = .false.
-            bc%${dir}$%grcbc_out = .false.
-            bc%${dir}$%grcbc_vel_out = .false.
+            bc%${dir}$%beg_side%grcbc = .false.
+            bc%${dir}$%end_side%grcbc = .false.
+            bc%${dir}$%end_side%grcbc_vel = .false.
         #:endfor
 
         #:for dir in {'x', 'y', 'z'}
-            bc%${dir}$%isothermal_in = .false.
-            bc%${dir}$%isothermal_out = .false.
-            bc%${dir}$%Twall_in = dflt_real
-            bc%${dir}$%Twall_out = dflt_real
+            bc%${dir}$%beg_side%isothermal = .false.
+            bc%${dir}$%end_side%isothermal = .false.
+            bc%${dir}$%beg_side%T_wall = dflt_real
+            bc%${dir}$%end_side%T_wall = dflt_real
         #:endfor
 
         ! Lagrangian subgrid bubble model

@@ -302,23 +302,23 @@ contains
         ! Assign and update GRCBC inputs
         #:for CBC_DIR, XYZ in [(1, 'x'), (2, 'y'), (3, 'z')]
             if (${CBC_DIR}$ <= num_dims) then
-                vel_in(${CBC_DIR}$, 1) = bc%${XYZ}$%vel_in(1)
-                vel_out(${CBC_DIR}$, 1) = bc%${XYZ}$%vel_out(1)
+                vel_in(${CBC_DIR}$, 1) = bc%${XYZ}$%beg_side%vel(1)
+                vel_out(${CBC_DIR}$, 1) = bc%${XYZ}$%end_side%vel(1)
                 if (n > 0) then
-                    vel_in(${CBC_DIR}$, 2) = bc%${XYZ}$%vel_in(2)
-                    vel_out(${CBC_DIR}$, 2) = bc%${XYZ}$%vel_out(2)
+                    vel_in(${CBC_DIR}$, 2) = bc%${XYZ}$%beg_side%vel(2)
+                    vel_out(${CBC_DIR}$, 2) = bc%${XYZ}$%end_side%vel(2)
                     if (p > 0) then
-                        vel_in(${CBC_DIR}$, 3) = bc%${XYZ}$%vel_in(3)
-                        vel_out(${CBC_DIR}$, 3) = bc%${XYZ}$%vel_out(3)
+                        vel_in(${CBC_DIR}$, 3) = bc%${XYZ}$%beg_side%vel(3)
+                        vel_out(${CBC_DIR}$, 3) = bc%${XYZ}$%end_side%vel(3)
                     end if
                 end if
                 Del_in(${CBC_DIR}$) = maxval(${XYZ}$%spacing)
                 Del_out(${CBC_DIR}$) = maxval(${XYZ}$%spacing)
-                pres_in(${CBC_DIR}$) = bc%${XYZ}$%pres_in
-                pres_out(${CBC_DIR}$) = bc%${XYZ}$%pres_out
+                pres_in(${CBC_DIR}$) = bc%${XYZ}$%beg_side%pres
+                pres_out(${CBC_DIR}$) = bc%${XYZ}$%end_side%pres
                 do i = 1, num_fluids
-                    alpha_rho_in(i, ${CBC_DIR}$) = bc%${XYZ}$%alpha_rho_in(i)
-                    alpha_in(i, ${CBC_DIR}$) = bc%${XYZ}$%alpha_in(i)
+                    alpha_rho_in(i, ${CBC_DIR}$) = bc%${XYZ}$%beg_side%alpha_rho(i)
+                    alpha_in(i, ${CBC_DIR}$) = bc%${XYZ}$%beg_side%alpha(i)
                 end do
             end if
         #:endfor
@@ -736,7 +736,7 @@ contains
                                  & .and. bc%${XYZ}$%end == BC_CHAR_NR_SUB_INFLOW)) then
                             call s_compute_nonreflecting_subsonic_inflow_L(lambda, L, rho, c, dpres_ds, dvel_ds)
                             ! Add GRCBC for Subsonic Inflow
-                            if (bc%${XYZ}$%grcbc_in) then
+                            if (bc%${XYZ}$%beg_side%grcbc) then
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = 2, eqn_idx%mom%beg
                                     L(i) = c**3._wp*Ma*(alpha_rho(i - 1) - alpha_rho_in(i - 1, &
@@ -764,11 +764,11 @@ contains
                             call s_compute_nonreflecting_subsonic_outflow_L(lambda, L, rho, c, mf, dalpha_rho_ds, dpres_ds, &
                                 & dvel_ds, dadv_ds, dYs_ds)
                             ! Add GRCBC for Subsonic Outflow (Pressure)
-                            if (bc%${XYZ}$%grcbc_out) then
+                            if (bc%${XYZ}$%end_side%grcbc) then
                                 L(eqn_idx%adv%end) = c*(1._wp - Ma)*(pres - pres_out(${CBC_DIR}$))/Del_out(${CBC_DIR}$)
 
                                 ! Add GRCBC for Subsonic Outflow (Normal Velocity)
-                                if (bc%${XYZ}$%grcbc_vel_out) then
+                                if (bc%${XYZ}$%end_side%grcbc_vel) then
                                     L(eqn_idx%adv%end) = L(eqn_idx%adv%end) + rho*c**2._wp*(1._wp - Ma)*(vel(dir_idx(1)) &
                                       & + vel_out(${CBC_DIR}$, dir_idx(1))*sign(1, cbc_loc))/Del_out(${CBC_DIR}$)
                                 end if

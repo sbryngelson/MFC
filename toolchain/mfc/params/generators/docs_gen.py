@@ -53,7 +53,7 @@ def _collapse_indices(name: str) -> str:
     Examples:
         patch_icpp(1)%vel(2) -> patch_icpp(N)%vel(M)
         simplex_params%perturb_dens_offset(1, 2) -> simplex_params%perturb_dens_offset(N, M)
-        bc%x%vel_in(1) -> bc%x%vel_in(N)
+        bc%x%beg_side%vel(1) -> bc%x%beg_side%vel(N)
     """
     placeholders = ["N", "M", "K", "L", "P", "Q"]
     placeholder_idx = 0

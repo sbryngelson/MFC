@@ -41,7 +41,7 @@ print(
             "bc%x%end": -16,
             "bc%y%beg": -16,
             "bc%y%end": -16,
-            "bc%y%ve1": 0.5,
+            "bc%y%end_side%vel_wall(1)": 0.5,
             "viscous": "T",
             # Formatted Database Files Structure Parameters
             "format": 1,

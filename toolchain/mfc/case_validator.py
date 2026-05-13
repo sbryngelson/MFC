@@ -1183,20 +1183,20 @@ class CaseValidator:
     def check_grcbc(self):
         """Checks Generalized Relaxation Characteristics BC (simulation)"""
         for dir in ["x", "y", "z"]:
-            grcbc_in = self.get(f"bc%{dir}%grcbc_in", "F") == "T"
-            grcbc_out = self.get(f"bc%{dir}%grcbc_out", "F") == "T"
-            grcbc_vel_out = self.get(f"bc%{dir}%grcbc_vel_out", "F") == "T"
+            grcbc_in = self.get(f"bc%{dir}%beg_side%grcbc", "F") == "T"
+            grcbc_out = self.get(f"bc%{dir}%end_side%grcbc", "F") == "T"
+            grcbc_vel_out = self.get(f"bc%{dir}%end_side%grcbc_vel", "F") == "T"
             bc_beg = self.get(f"bc%{dir}%beg")
             bc_end = self.get(f"bc%{dir}%end")
 
             if grcbc_in:
                 # Check if EITHER beg OR end is set to -7
-                self.prohibit(bc_beg != -7 and bc_end != -7, f"Subsonic Inflow (grcbc_in) requires bc_{dir}%beg = -7 or bc_{dir}%end = -7")
+                self.prohibit(bc_beg != -7 and bc_end != -7, f"Subsonic Inflow (beg_side%grcbc) requires bc_{dir}%beg = -7 or bc_{dir}%end = -7")
             if grcbc_out:
                 # Check if EITHER beg OR end is set to -8
-                self.prohibit(bc_beg != -8 and bc_end != -8, f"Subsonic Outflow (grcbc_out) requires bc_{dir}%beg = -8 or bc_{dir}%end = -8")
+                self.prohibit(bc_beg != -8 and bc_end != -8, f"Subsonic Outflow (end_side%grcbc) requires bc_{dir}%beg = -8 or bc_{dir}%end = -8")
             if grcbc_vel_out:
-                self.prohibit(bc_beg != -8 and bc_end != -8, f"Subsonic Outflow Velocity (grcbc_vel_out) requires bc_{dir}%beg = -8 or bc_{dir}%end = -8")
+                self.prohibit(bc_beg != -8 and bc_end != -8, f"Subsonic Outflow Velocity (end_side%grcbc_vel) requires bc_{dir}%beg = -8 or bc_{dir}%end = -8")
 
     def check_probe_integral_output(self):
         """Checks probe and integral output requirements (simulation)"""
@@ -1350,36 +1350,36 @@ class CaseValidator:
         wall_bcs = [-15, -16]
 
         for dir in ["x", "y", "z"]:
-            isothermal_in = self.get(f"bc%{dir}%isothermal_in", "F") == "T"
-            isothermal_out = self.get(f"bc%{dir}%isothermal_out", "F") == "T"
+            isothermal_in = self.get(f"bc%{dir}%beg_side%isothermal", "F") == "T"
+            isothermal_out = self.get(f"bc%{dir}%end_side%isothermal", "F") == "T"
             bc_beg = self.get(f"bc%{dir}%beg")
             bc_end = self.get(f"bc%{dir}%end")
 
             if isothermal_in:
                 # Prohibit isothermal boundaries if chemistry or diffusion are disabled
-                self.prohibit(not chemistry or not diffusion, f"Isothermal In (bc_{dir}%isothermal_in) requires both chemistry='T' and chem_params%diffusion='T' to calculate heat conduction.")
+                self.prohibit(not chemistry or not diffusion, f"Isothermal In (bc_{dir}%beg_side%isothermal) requires both chemistry='T' and chem_params%diffusion='T' to calculate heat conduction.")
 
                 # Prohibit if neither beg nor end is set to a valid wall condition
-                self.prohibit(bc_beg not in wall_bcs, f"Isothermal In (bc_{dir}%isothermal_in) requires a wall. Set bc_{dir}%beg to -15 (slip) or -16 (no-slip).")
+                self.prohibit(bc_beg not in wall_bcs, f"Isothermal In (bc_{dir}%beg_side%isothermal) requires a wall. Set bc_{dir}%beg to -15 (slip) or -16 (no-slip).")
 
                 # Check that the wall temperature is defined and physically valid (> 0 K)
-                tw_in = self.get(f"bc%{dir}%Twall_in")
-                self.prohibit(tw_in is None, f"Isothermal In (bc_{dir}%isothermal_in) requires a wall temperature to be set (e.g., bc_{dir}%Twall_in).")
+                tw_in = self.get(f"bc%{dir}%beg_side%T_wall")
+                self.prohibit(tw_in is None, f"Isothermal In (bc_{dir}%beg_side%isothermal) requires a wall temperature to be set (e.g., bc_{dir}%beg_side%T_wall).")
                 if tw_in is not None and self._is_numeric(tw_in):
-                    self.prohibit(tw_in <= 0.0, f"Wall temperature bc_{dir}%Twall_in must be strictly positive for thermodynamics (got {tw_in}).")
+                    self.prohibit(tw_in <= 0.0, f"Wall temperature bc_{dir}%beg_side%T_wall must be strictly positive for thermodynamics (got {tw_in}).")
 
             if isothermal_out:
                 # Prohibit isothermal boundaries if chemistry or diffusion are disabled
-                self.prohibit(not chemistry or not diffusion, f"Isothermal Out (bc_{dir}%isothermal_out) requires both chemistry='T' and chem_params%diffusion='T' to calculate heat conduction.")
+                self.prohibit(not chemistry or not diffusion, f"Isothermal Out (bc_{dir}%end_side%isothermal) requires both chemistry='T' and chem_params%diffusion='T' to calculate heat conduction.")
 
                 # Prohibit if neither beg nor end is set to a valid wall condition
-                self.prohibit(bc_end not in wall_bcs, f"Isothermal Out (bc_{dir}%isothermal_out) requires a wall. Set bc_{dir}%end to -15 (slip) or -16 (no-slip).")
+                self.prohibit(bc_end not in wall_bcs, f"Isothermal Out (bc_{dir}%end_side%isothermal) requires a wall. Set bc_{dir}%end to -15 (slip) or -16 (no-slip).")
 
                 # Check that the wall temperature is defined and physically valid (> 0 K)
-                tw_out = self.get(f"bc%{dir}%Twall_out")
-                self.prohibit(tw_out is None, f"Isothermal Out (bc_{dir}%isothermal_out) requires a wall temperature to be set (e.g., bc_{dir}%Twall_out).")
+                tw_out = self.get(f"bc%{dir}%end_side%T_wall")
+                self.prohibit(tw_out is None, f"Isothermal Out (bc_{dir}%end_side%isothermal) requires a wall temperature to be set (e.g., bc_{dir}%end_side%T_wall).")
                 if tw_out is not None and self._is_numeric(tw_out):
-                    self.prohibit(tw_out <= 0.0, f"Wall temperature bc_{dir}%Tw_out must be strictly positive for thermodynamics (got {tw_out}).")
+                    self.prohibit(tw_out <= 0.0, f"Wall temperature bc_{dir}%end_side%T_wall must be strictly positive for thermodynamics (got {tw_out}).")
 
     def check_misc_pre_process(self):
         """Checks miscellaneous pre-process constraints"""

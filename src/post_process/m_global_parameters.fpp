@@ -321,16 +321,16 @@ contains
 
         #:for DIM in ['x', 'y', 'z']
             #:for DIR in [1, 2, 3]
-                bc%${DIM}$%vb${DIR}$ = 0._wp
-                bc%${DIM}$%ve${DIR}$ = 0._wp
+                bc%${DIM}$%beg_side%vel_wall(${DIR}$) = 0._wp
+                bc%${DIM}$%end_side%vel_wall(${DIR}$) = 0._wp
             #:endfor
         #:endfor
 
         #:for dir in {'x', 'y', 'z'}
-            bc%${dir}$%isothermal_in = .false.
-            bc%${dir}$%isothermal_out = .false.
-            bc%${dir}$%Twall_in = dflt_real
-            bc%${dir}$%Twall_out = dflt_real
+            bc%${dir}$%beg_side%isothermal = .false.
+            bc%${dir}$%end_side%isothermal = .false.
+            bc%${dir}$%beg_side%T_wall = dflt_real
+            bc%${dir}$%end_side%T_wall = dflt_real
         #:endfor
 
         chem_params%gamma_method = 1

@@ -53,7 +53,7 @@ def _collapse_indexed_params(matches):
     Collapse indexed parameters into patterns.
 
     Handles multiple index patterns:
-    - Suffix index: bc%z%alpha_in(1) -> bc%z%alpha_in(N)
+    - Suffix index: bc%z%beg_side%alpha(1) -> bc%z%beg_side%alpha(N)
     - Prefix index: patch_icpp(1)%geometry -> patch_icpp(N)%geometry
     - Both: patch_icpp(1)%alpha(1) -> patch_icpp(N)%alpha(M)
     """

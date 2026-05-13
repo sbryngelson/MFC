@@ -111,17 +111,11 @@ _ATTR_DESCS = {
     "angular_vel": "Angular velocity",
     "mass": "Mass",
     # BC specific
-    "vel_in": "Inlet velocity",
-    "vel_out": "Outlet velocity",
-    "alpha_rho_in": "Inlet partial density",
-    "alpha_in": "Inlet volume fraction",
-    "pres_in": "Inlet pressure",
-    "pres_out": "Outlet pressure",
-    "grcbc_in": "Enable GRCBC inlet",
-    "grcbc_out": "Enable GRCBC outlet",
-    "grcbc_vel_out": "Enable GRCBC velocity outlet",
-    "isothermal_in": "Enable isothermal wall at the domain entrance (minimum coordinate)",
-    "isothermal_out": "Enable isothermal wall at the domain exit (maximum coordinate)",
+    "grcbc": "Enable GRCBC",
+    "grcbc_vel": "Enable GRCBC velocity",
+    "isothermal": "Enable isothermal wall",
+    "T_wall": "Isothermal wall temperature",
+    "vel_wall": "Wall velocity component",
     # Acoustic
     "loc": "Location",
     "mag": "Magnitude",
@@ -393,23 +387,15 @@ CASE_OPT_PARAMS = {
 
 HINTS = {
     "bc": {
-        "grcbc_in": "Enables GRCBC subsonic inflow (bc type -7)",
-        "grcbc_out": "Enables GRCBC subsonic outflow (bc type -8)",
-        "grcbc_vel_out": "GRCBC velocity outlet (requires `grcbc_out`)",
-        "vel_in": "Inlet velocity component (used with `grcbc_in`)",
-        "vel_out": "Outlet velocity component (used with `grcbc_vel_out`)",
-        "pres_in": "Inlet pressure (used with `grcbc_in`)",
-        "pres_out": "Outlet pressure (used with `grcbc_out`)",
-        "alpha_rho_in": "Inlet partial density per fluid (used with `grcbc_in`)",
-        "alpha_in": "Inlet volume fraction per fluid (used with `grcbc_in`)",
-        "vb1": "Boundary velocity component 1 at domain begin",
-        "vb2": "Boundary velocity component 2 at domain begin",
-        "vb3": "Boundary velocity component 3 at domain begin",
-        "ve1": "Boundary velocity component 1 at domain end",
-        "ve2": "Boundary velocity component 2 at domain end",
-        "ve3": "Boundary velocity component 3 at domain end",
-        "Twall_in": "Temperature of the entrance-side isothermal wall.",
-        "Twall_out": "Temperature of the exit-side isothermal wall.",
+        "grcbc": "Enable GRCBC (subsonic inflow bc type -7, outflow bc type -8)",
+        "grcbc_vel": "GRCBC velocity outlet (requires end_side%grcbc)",
+        "vel": "Velocity component (used with beg_side%grcbc / end_side%grcbc_vel)",
+        "pres": "Pressure (beg_side: inlet, end_side: outlet)",
+        "alpha_rho": "Partial density per fluid (used with beg_side%grcbc)",
+        "alpha": "Volume fraction per fluid (used with beg_side%grcbc)",
+        "vel_wall": "Wall velocity component",
+        "T_wall": "Isothermal wall temperature",
+        "isothermal": "Enable isothermal wall",
     },
     "patch_bc": {
         "geometry": "Patch shape: 1=line, 2=circle, 3=rectangle",
@@ -1252,22 +1238,19 @@ def _load():
 
     # Extended BC
     for d in ["x", "y", "z"]:
-        px = f"bc%{d}%"
-        for a in ["vb1", "vb2", "vb3", "ve1", "ve2", "ve3", "pres_in", "pres_out"]:
-            _r(f"{px}{a}", REAL, {"bc"})
-        for a in ["grcbc_in", "grcbc_out", "grcbc_vel_out"]:
-            _r(f"{px}{a}", LOG, {"bc"})
-        for f in range(1, NF + 1):
-            _r(f"{px}alpha_rho_in({f})", REAL, {"bc"})
-            _r(f"{px}alpha_in({f})", REAL, {"bc"})
-        for j in range(1, 4):
-            _r(f"{px}vel_in({j})", REAL, {"bc"})
-            _r(f"{px}vel_out({j})", REAL, {"bc"})
-
-        for a in ["Twall_in", "Twall_out"]:
-            _r(f"{px}{a}", REAL, {"bc"})
-        for a in ["isothermal_in", "isothermal_out"]:
-            _r(f"{px}{a}", LOG, {"bc"})
+        for side, prefix in [("beg_side", "beg"), ("end_side", "end")]:
+            px = f"bc%{d}%{side}%"
+            _r(f"{px}pres", REAL, {"bc"})
+            for j in range(1, 4):
+                _r(f"{px}vel({j})", REAL, {"bc"})
+                _r(f"{px}vel_wall({j})", REAL, {"bc"})
+            for f in range(1, NF + 1):
+                _r(f"{px}alpha_rho({f})", REAL, {"bc"})
+                _r(f"{px}alpha({f})", REAL, {"bc"})
+            _r(f"{px}T_wall", REAL, {"bc"})
+            _r(f"{px}grcbc", LOG, {"bc"})
+            _r(f"{px}grcbc_vel", LOG, {"bc"})
+            _r(f"{px}isothermal", LOG, {"bc"})
 
     # patch_bc (10 BC patches)
     for i in range(1, NB + 1):
