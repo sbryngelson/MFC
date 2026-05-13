@@ -11,7 +11,7 @@ def remove_higher_dimensional_keys(case: dict, ndims: int) -> dict:
     rm_keys = set()
     for key in case.keys():
         for dim in rm_dims:
-            if any([re.match(f".+_{dim}", key), re.match(f"{dim}_.+", key), re.match(f"%{dim}", key), f"%vel({dim_ids[dim]})" in key]):
+            if any([re.match(f".+_{dim}", key), re.match(f"{dim}_.+", key), re.match(f"%{dim}", key), f"%vel({dim_ids[dim]})" in key, f"%{dim}%" in key]):
                 rm_keys.add(key)
                 break
 
