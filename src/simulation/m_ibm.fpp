@@ -1015,13 +1015,13 @@ contains
 
         ! consider body forces after reducing to avoid double counting
         do i = 1, num_ibs
-            if (bf_x%enabled) then
+            if (bf%x%enabled) then
                 forces(i, 1) = forces(i, 1) + accel_bf(1)*patch_ib(i)%mass
             end if
-            if (bf_y%enabled) then
+            if (bf%y%enabled) then
                 forces(i, 2) = forces(i, 2) + accel_bf(2)*patch_ib(i)%mass
             end if
-            if (bf_z%enabled) then
+            if (bf%z%enabled) then
                 forces(i, 3) = forces(i, 3) + accel_bf(3)*patch_ib(i)%mass
             end if
         end do

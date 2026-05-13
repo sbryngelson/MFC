@@ -186,6 +186,11 @@ module m_derived_types
         logical  :: enabled
     end type body_force_axis
 
+    !> Groups the x, y, z body force structs for passing as a single argument.
+    type body_force_t
+        type(body_force_axis) :: x, y, z
+    end type body_force_t
+
     !> Groups per-body allocatable arrays (x, y, z) for one IB dynamics quantity
     type ib_dynamics_t
         real(wp), allocatable, dimension(:) :: x, y, z

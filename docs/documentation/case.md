@@ -987,15 +987,15 @@ This parameter enables the use of true `pi_\infty` in bubble dynamics models whe
 
 | Parameter         | Type    | Description                                |
 | ---:              | :---:   | :---                                       |
-| `bf_[x,y,z]%%enabled` | Logical | Enable body forces in the [x,y,z] direction |
-| `bf_[x,y,z]%%k`      | Real    | Magnitude of oscillating acceleration       |
-| `bf_[x,y,z]%%w`      | Real    | Frequency of oscillating acceleration       |
-| `bf_[x,y,z]%%p`      | Real    | Phase shift of oscillating acceleration     |
-| `bf_[x,y,z]%%g`      | Real    | Magnitude of background acceleration        |
+| `bf%%[x,y,z]%%enabled` | Logical | Enable body forces in the [x,y,z] direction |
+| `bf%%[x,y,z]%%k`      | Real    | Magnitude of oscillating acceleration       |
+| `bf%%[x,y,z]%%w`      | Real    | Frequency of oscillating acceleration       |
+| `bf%%[x,y,z]%%p`      | Real    | Phase shift of oscillating acceleration     |
+| `bf%%[x,y,z]%%g`      | Real    | Magnitude of background acceleration        |
 
-`bf_[x,y,z]%%k`, `bf_[x,y,z]%%w`, `bf_[x,y,z]%%p`, and `bf_[x,y,z]%%g` define an oscillating acceleration in the `[x,y,z]` direction with the form
+`bf%%[x,y,z]%%k`, `bf%%[x,y,z]%%w`, `bf%%[x,y,z]%%p`, and `bf%%[x,y,z]%%g` define an oscillating acceleration in the `[x,y,z]` direction with the form
 
-\f[ a_{[x,y,z]} = bf_{[x,y,z]}\%g + bf_{[x,y,z]}\%k\sin\left(bf_{[x,y,z]}\%w \cdot t + bf_{[x,y,z]}\%p\right). \f]
+\f[ a_{[x,y,z]} = bf\%[x,y,z]\%g + bf\%[x,y,z]\%k\sin\left(bf\%[x,y,z]\%w \cdot t + bf\%[x,y,z]\%p\right). \f]
 
 By convention, positive accelerations in the `x[y,z]` direction are in the positive `x[y,z]` direction.
 

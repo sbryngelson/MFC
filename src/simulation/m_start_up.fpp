@@ -108,11 +108,11 @@ contains
         #:endif
         Ca, Web, Re_inv, acoustic_source, acoustic, num_source, polytropic, thermal, integral, integral_wrt, num_integrals, &
             & polydisperse, poly_sigma, qbmm, relax, relax_model, palpha_eps, ptgalpha_eps, file_per_process, sigma, pi_fac, &
-            & adv_n, adap_dt, adap_dt_tol, adap_dt_max_iters, bf_x, bf_y, bf_z, n_start, t_save, t_stop, cfl_adap_dt, &
-            & cfl_const_dt, cfl_target, surface_tension, bubbles_lagrange, lag_params, hyperelasticity, R0ref, num_bc_patches, &
-            & Bx0, cont_damage, tau_star, cont_damage_s, alpha_bar, hyper_cleaning, hyper_cleaning_speed, hyper_cleaning_tau, &
-            & alf_factor, num_igr_iters, num_igr_warm_start_iters, int_comp, ic_eps, ic_beta, nv_uvm_out_of_core, &
-            & nv_uvm_igr_temps_on_gpu, nv_uvm_pref_gpu, down_sample, fft_wrt
+            & adv_n, adap_dt, adap_dt_tol, adap_dt_max_iters, bf, n_start, t_save, t_stop, cfl_adap_dt, cfl_const_dt, cfl_target, &
+            & surface_tension, bubbles_lagrange, lag_params, hyperelasticity, R0ref, num_bc_patches, Bx0, cont_damage, tau_star, &
+            & cont_damage_s, alpha_bar, hyper_cleaning, hyper_cleaning_speed, hyper_cleaning_tau, alf_factor, num_igr_iters, &
+            & num_igr_warm_start_iters, int_comp, ic_eps, ic_beta, nv_uvm_out_of_core, nv_uvm_igr_temps_on_gpu, nv_uvm_pref_gpu, &
+            & down_sample, fft_wrt
 
         inquire (FILE=trim(file_path), EXIST=file_exist)
 
@@ -129,7 +129,7 @@ contains
 
             close (1)
 
-            if (bf_x%enabled .or. bf_y%enabled .or. bf_z%enabled) then
+            if (bf%x%enabled .or. bf%y%enabled .or. bf%z%enabled) then
                 bodyForces = .true.
             end if
 

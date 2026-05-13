@@ -63,9 +63,9 @@ contains
 
         call MPI_BCAST(case_dir, len(case_dir), MPI_CHARACTER, 0, MPI_COMM_WORLD, ierr)
 
-        #:for VAR in ['bf_x%k', 'bf_x%w', 'bf_x%p', 'bf_x%g', &
-            & 'bf_y%k', 'bf_y%w', 'bf_y%p', 'bf_y%g', &
-            & 'bf_z%k', 'bf_z%w', 'bf_z%p', 'bf_z%g']
+        #:for VAR in ['bf%x%k', 'bf%x%w', 'bf%x%p', 'bf%x%g', &
+            & 'bf%y%k', 'bf%y%w', 'bf%y%p', 'bf%y%g', &
+            & 'bf%z%k', 'bf%z%w', 'bf%z%p', 'bf%z%g']
             call MPI_BCAST(${VAR}$, 1, mpi_p, 0, MPI_COMM_WORLD, ierr)
         #:endfor
 
@@ -87,7 +87,7 @@ contains
             & 'parallel_io', 'hypoelasticity', 'bubbles_euler', 'polytropic',    &
             & 'polydisperse', 'qbmm', 'acoustic_source', 'probe_wrt', 'integral_wrt',   &
             & 'prim_vars_wrt', 'weno_avg', 'file_per_process', 'relax',          &
-            & 'adv_n', 'adap_dt', 'ib', 'bodyForces', 'bf_x%enabled', 'bf_y%enabled', 'bf_z%enabled',    &
+            & 'adv_n', 'adap_dt', 'ib', 'bodyForces', 'bf%x%enabled', 'bf%y%enabled', 'bf%z%enabled',    &
             & 'bc%x%beg_side%grcbc', 'bc%x%end_side%grcbc', 'bc%x%end_side%grcbc_vel',          &
             & 'bc%y%beg_side%grcbc', 'bc%y%end_side%grcbc', 'bc%y%end_side%grcbc_vel',          &
             & 'bc%z%beg_side%grcbc', 'bc%z%end_side%grcbc', 'bc%z%end_side%grcbc_vel',          &

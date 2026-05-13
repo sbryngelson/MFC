@@ -1186,13 +1186,13 @@ def list_cases() -> typing.List[TestCaseBuilder]:
     def alter_body_forces(dimInfo):
         ndims = len(dimInfo[0])
 
-        stack.push("Bodyforces", {"bf_x%enabled": "T", "bf_x%k": 1, "bf_x%w": 1, "bf_x%p": 1, "bf_x%g": 10})
+        stack.push("Bodyforces", {"bf%x%enabled": "T", "bf%x%k": 1, "bf%x%w": 1, "bf%x%p": 1, "bf%x%g": 10})
 
         if ndims >= 2:
-            stack.push("", {"bf_y%enabled": "T", "bf_y%k": 1, "bf_y%w": 1, "bf_y%p": 1, "bf_y%g": 10})
+            stack.push("", {"bf%y%enabled": "T", "bf%y%k": 1, "bf%y%w": 1, "bf%y%p": 1, "bf%y%g": 10})
 
         if ndims == 3:
-            stack.push("", {"bf_z%enabled": "T", "bf_z%k": 1, "bf_z%w": 1, "bf_z%p": 1, "bf_z%g": 10})
+            stack.push("", {"bf%z%enabled": "T", "bf%z%k": 1, "bf%z%w": 1, "bf%z%p": 1, "bf%z%g": 10})
 
         cases.append(define_case_d(stack, "", {}))
 

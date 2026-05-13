@@ -172,7 +172,7 @@ module m_global_parameters
     integer                :: num_igr_warm_start_iters     !< number of warm start iterations for elliptic solve
     real(wp)               :: alf_factor                   !< alpha factor for IGR
     logical                :: bodyForces
-    type(body_force_axis)  :: bf_x, bf_y, bf_z             !< body force parameters per direction
+    type(body_force_t)     :: bf                           !< body force parameters per direction
     real(wp), dimension(3) :: accel_bf
     $:GPU_DECLARE(create='[accel_bf]')
 
@@ -666,10 +666,10 @@ contains
         surface_tension = .false.
 
         bodyForces = .false.
-        bf_x%enabled = .false.; bf_y%enabled = .false.; bf_z%enabled = .false.
-        bf_x%k = 0._wp; bf_x%w = 0._wp; bf_x%p = 0._wp; bf_x%g = 0._wp
-        bf_y%k = 0._wp; bf_y%w = 0._wp; bf_y%p = 0._wp; bf_y%g = 0._wp
-        bf_z%k = 0._wp; bf_z%w = 0._wp; bf_z%p = 0._wp; bf_z%g = 0._wp
+        bf%x%enabled = .false.; bf%y%enabled = .false.; bf%z%enabled = .false.
+        bf%x%k = 0._wp; bf%x%w = 0._wp; bf%x%p = 0._wp; bf%x%g = 0._wp
+        bf%y%k = 0._wp; bf%y%w = 0._wp; bf%y%p = 0._wp; bf%y%g = 0._wp
+        bf%z%k = 0._wp; bf%z%w = 0._wp; bf%z%p = 0._wp; bf%z%g = 0._wp
 
         fft_wrt = .false.
 

@@ -746,7 +746,7 @@ Uses Lax-Friedrichs flux (replaces WENO + Riemann solver).
 
 ---
 
-## 13. Body Forces (`bf_x`, `bf_y`, `bf_z`)
+## 13. Body Forces (`bf%%x`, `bf%%y`, `bf%%z`)
 
 **Source:** `src/simulation/m_body_forces.fpp`
 

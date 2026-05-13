@@ -79,11 +79,11 @@ data = {
     "fluid_pp(2)%pi_inf": 0.0e00,
     "fluid_pp(2)%Re(1)": 1 / 0.0073,
     # Body Forces
-    "bf_y%enabled": "T",
-    "bf_y%k": 0.0,
-    "bf_y%w": 0.0,
-    "bf_y%p": 0.0,
-    "bf_y%g": -9.81,
+    "bf%y%enabled": "T",
+    "bf%y%k": 0.0,
+    "bf%y%w": 0.0,
+    "bf%y%p": 0.0,
+    "bf%y%g": -9.81,
     # Water Patch
     "patch_icpp(1)%geometry": 3,
     "patch_icpp(1)%hcid": 204,
