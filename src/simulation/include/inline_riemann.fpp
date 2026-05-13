@@ -104,8 +104,8 @@
         pcorr = 0._wp
 
         if (low_Mach == 1) then
-            pcorr = rho%L*rho%R*(s_L - vel%L(dir_idx(1)))*(s_R - vel%R(dir_idx(1)))*(vel%R(dir_idx(1)) - vel%L(dir_idx(1))) &
-                                 & /(rho%R*(s_R - vel%R(dir_idx(1))) - rho%L*(s_L - vel%L(dir_idx(1))))*(zcoef - 1._wp)
+            pcorr = rho%L*rho%R*(s%L - vel%L(dir_idx(1)))*(s%R - vel%R(dir_idx(1)))*(vel%R(dir_idx(1)) - vel%L(dir_idx(1))) &
+                                 & /(rho%R*(s%R - vel%R(dir_idx(1))) - rho%L*(s%L - vel%L(dir_idx(1))))*(zcoef - 1._wp)
         else if (low_Mach == 2) then
             vel_tmp%L = 5.e-1_wp*((vel%L(dir_idx(1)) + vel%R(dir_idx(1))) + zcoef*(vel%L(dir_idx(1)) - vel%R(dir_idx(1))))
             vel_tmp%R = 5.e-1_wp*((vel%L(dir_idx(1)) + vel%R(dir_idx(1))) + zcoef*(vel%R(dir_idx(1)) - vel%L(dir_idx(1))))
