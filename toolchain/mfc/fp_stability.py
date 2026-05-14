@@ -87,6 +87,8 @@ _CONTROL_FLOW_RE = re.compile(
     r"^\s*("
     r"end\s+(do|if|select|where|forall|subroutine|function|module|program|block)\b"
     r"|do\s+\w+\s*=\s*[\w,\s]+"  # naked do-loop header (no arithmetic)
+    r"|else(\s+if\s*\(.*\)\s*then)?\s*$"  # else / else if (...) then
+    r"|(recursive\s+|pure\s+|elemental\s+)*subroutine\s+\w+"  # subroutine declaration
     r"|\$:END_GPU\w+"  # fypp GPU macro closers
     r"|#:end\w*"  # fypp directive closers (#:endfor, #:enddef, etc.)
     r"|\s*!\s*$"  # comment-only lines
@@ -621,7 +623,12 @@ def _run_cancellation_check(case: dict, verrou_bin: str, sim_bin: str, work_dir:
         _run_simulation_verrou(verrou_bin, sim_bin, work_dir, run_dir, rounding_mode="nearest", extra_flags=flags)
     except MFCException:
         pass
-    return _parse_cancel_gen(gen_path)
+    raw = _parse_cancel_gen(gen_path)
+    filtered = [(f, ln) for f, ln in raw if _is_arithmetic_loc(f, ln, ln)]
+    skipped = len(raw) - len(filtered)
+    if skipped:
+        cons.print(f"  [dim]cancellation: filtered {skipped} control-flow boundary site(s)[/dim]")
+    return filtered
 
 
 def _run_mca_samples(
