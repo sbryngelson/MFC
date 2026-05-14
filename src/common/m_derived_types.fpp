@@ -98,20 +98,12 @@ module m_derived_types
         real(wp) :: R(3)
     end type riemann_states_vec3
 
-    !> Left and right Riemann states for 2-element fixed arrays
-    type riemann_states_arr2
-        real(wp) :: L(2), R(2)
-    end type riemann_states_arr2
-
-    !> Left and right Riemann states for 6-element fixed arrays
-    type riemann_states_arr6
-        real(wp) :: L(6), R(6)
-    end type riemann_states_arr6
-
-    !> Left and right Riemann states for 7-element fixed arrays
-    type riemann_states_arr7
-        real(wp) :: L(7), R(7)
-    end type riemann_states_arr7
+    !> Left and right Riemann states for fixed-size arrays
+    #:for n in [2, 6, 7]
+        type riemann_states_arr${n}$
+            real(wp) :: L(${n}$), R(${n}$)
+        end type riemann_states_arr${n}$
+    #:endfor
 
     !> Lightweight beg/end pair for equation index ranges (no BC payload).
     type idx_bounds_info
