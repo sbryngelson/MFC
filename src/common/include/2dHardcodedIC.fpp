@@ -296,10 +296,10 @@
                       & - patch_icpp(1)%x_centroid)**2.0 - (y%cc(j) - patch_icpp(1)%y_centroid)**2.0)))**1.4
             q_prim_vf(eqn_idx%mom%beg + 0)%sf(i, j, &
                       & 0) = patch_icpp(1)%vel(1) + (y%cc(j) - patch_icpp(1)%y_centroid)*(5.0/(2.0*pi))*exp(1.0*(1.0 - (x%cc(i) &
-                      & - patch_icpp(1) %x_centroid)**2.0 - (y%cc(j) - patch_icpp(1)%y_centroid)**2.0))
+                      & - patch_icpp(1)%x_centroid)**2.0 - (y%cc(j) - patch_icpp(1)%y_centroid)**2.0))
             q_prim_vf(eqn_idx%mom%beg + 1)%sf(i, j, &
                       & 0) = patch_icpp(1)%vel(2) - (x%cc(i) - patch_icpp(1)%x_centroid)*(5.0/(2.0*pi))*exp(1.0*(1.0 - (x%cc(i) &
-                      & - patch_icpp(1) %x_centroid)**2.0 - (y%cc(j) - patch_icpp(1)%y_centroid)**2.0))
+                      & - patch_icpp(1)%x_centroid)**2.0 - (y%cc(j) - patch_icpp(1)%y_centroid)**2.0))
         end if
     case (281)  ! Acoustic pulse
         ! This is patch is hard-coded for test suite optimization used in the 2D_acoustic_pulse case: This analytic patch uses
