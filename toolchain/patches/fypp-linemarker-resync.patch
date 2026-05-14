@@ -1,12 +1,6 @@
---- a/fypp.py
-+++ b/fypp.py
-@@ -1842,11 +1842,16 @@ class _Renderer:
-             if self._linenums:
-                 # Last line was folded, but no linenums were generated for
-                 # the continuation lines -> current line position is not
-                 # in sync with the one calculated from the last line number
-                 unsync = (
-                     len(foldedlines) and len(foldedlines[-1]) > 1
+--- a/fypp.py	2026-05-14 18:22:07.622131094 -0400
++++ b/fypp.py	2026-05-14 18:22:07.650131330 -0400
+@@ -1848,7 +1848,13 @@
                      and not self._contlinenums)
                  # Eval directive in source consists of more than one line
                  multiline = span[1] - span[0] > 1
@@ -21,5 +15,3 @@
                      # For inline eval directives span[0] == span[1]
                      # -> next line is span[0] + 1 and not span[1] as for
                      # line eval directives
-                     nextline = max(span[1], span[0] + 1)
-                     trailing += self._linenumdir(nextline, fname)
