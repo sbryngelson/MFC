@@ -21,11 +21,15 @@ module m_muscl
 
     private; public :: s_initialize_muscl_module, s_muscl, s_finalize_muscl_module
 
+    type, private :: muscl_bounds_t
+        type(int_bounds_info) :: x, y, z
+    end type muscl_bounds_t
+
     integer :: v_size
     $:GPU_DECLARE(create='[v_size]')
 
-    type(int_bounds_info) :: is1_muscl, is2_muscl, is3_muscl
-    $:GPU_DECLARE(create='[is1_muscl, is2_muscl, is3_muscl]')
+    type(muscl_bounds_t) :: is_muscl
+    $:GPU_DECLARE(create='[is_muscl]')
 
     !> @name The cell-average variables that will be MUSCL-reconstructed, unpacked into an array for performance
     !> @{
@@ -39,73 +43,74 @@ contains
     subroutine s_initialize_muscl_module()
 
         ! Initializing in x-direction
-        is1_muscl%beg = -buff_size; is1_muscl%end = m - is1_muscl%beg
+        is_muscl%x%beg = -buff_size; is_muscl%x%end = m - is_muscl%x%beg
         if (n == 0) then
-            is2_muscl%beg = 0
+            is_muscl%y%beg = 0
         else
-            is2_muscl%beg = -buff_size
+            is_muscl%y%beg = -buff_size
         end if
 
-        is2_muscl%end = n - is2_muscl%beg
+        is_muscl%y%end = n - is_muscl%y%beg
 
         if (p == 0) then
-            is3_muscl%beg = 0
+            is_muscl%z%beg = 0
         else
-            is3_muscl%beg = -buff_size
+            is_muscl%z%beg = -buff_size
         end if
 
-        is3_muscl%end = p - is3_muscl%beg
+        is_muscl%z%end = p - is_muscl%z%beg
 
-        @:ALLOCATE(v_rs_ws_muscl(is1_muscl%beg:is1_muscl%end, is2_muscl%beg:is2_muscl%end, is3_muscl%beg:is3_muscl%end, 1:sys_size))
+        @:ALLOCATE(v_rs_ws_muscl(is_muscl%x%beg:is_muscl%x%end, is_muscl%y%beg:is_muscl%y%end, is_muscl%z%beg:is_muscl%z%end, &
+                   & 1:sys_size))
 
         if (n == 0) return
 
         ! initializing in y-direction
-        is2_muscl%beg = -buff_size; is2_muscl%end = n - is2_muscl%beg
-        is1_muscl%beg = -buff_size; is1_muscl%end = m - is1_muscl%beg
+        is_muscl%y%beg = -buff_size; is_muscl%y%end = n - is_muscl%y%beg
+        is_muscl%x%beg = -buff_size; is_muscl%x%end = m - is_muscl%x%beg
 
         if (p == 0) then
-            is3_muscl%beg = 0
+            is_muscl%z%beg = 0
         else
-            is3_muscl%beg = -buff_size
+            is_muscl%z%beg = -buff_size
         end if
 
-        is3_muscl%end = p - is3_muscl%beg
+        is_muscl%z%end = p - is_muscl%z%beg
 
         if (p == 0) return
 
         ! initializing in z-direction
-        is2_muscl%beg = -buff_size; is2_muscl%end = n - is2_muscl%beg
-        is1_muscl%beg = -buff_size; is1_muscl%end = m - is1_muscl%beg
-        is3_muscl%beg = -buff_size; is3_muscl%end = p - is3_muscl%beg
+        is_muscl%y%beg = -buff_size; is_muscl%y%end = n - is_muscl%y%beg
+        is_muscl%x%beg = -buff_size; is_muscl%x%end = m - is_muscl%x%beg
+        is_muscl%z%beg = -buff_size; is_muscl%z%end = p - is_muscl%z%beg
 
     end subroutine s_initialize_muscl_module
 
     !> Perform MUSCL reconstruction of left and right cell-boundary values from cell-averaged variables
-    subroutine s_muscl(v_vf, vL_rs_vf_x, vR_rs_vf_x, muscl_dir, is1_muscl_d, &
+    subroutine s_muscl(v_vf, vL_rs_vf_x, vR_rs_vf_x, muscl_dir, is1_d, &
 
-        & is2_muscl_d, is3_muscl_d)
+        & is2_d, is3_d)
 
-        type(scalar_field), dimension(1:), intent(in) :: v_vf
+        type(scalar_field), dimension(1:), intent(in)                                          :: v_vf
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf_x, vR_rs_vf_x
-        integer, intent(in) :: muscl_dir
-        type(int_bounds_info), intent(in) :: is1_muscl_d, is2_muscl_d, is3_muscl_d
-        integer :: j, k, l, i
-        real(wp) :: slopeL, slopeR, slope
+        integer, intent(in)                                                                    :: muscl_dir
+        type(int_bounds_info), intent(in)                                                      :: is1_d, is2_d, is3_d
+        integer                                                                                :: j, k, l, i
+        real(wp)                                                                               :: slopeL, slopeR, slope
 
-        is1_muscl = is1_muscl_d
-        is2_muscl = is2_muscl_d
-        is3_muscl = is3_muscl_d
+        is_muscl%x = is1_d
+        is_muscl%y = is2_d
+        is_muscl%z = is3_d
 
-        $:GPU_UPDATE(device='[is1_muscl, is2_muscl, is3_muscl]')
+        $:GPU_UPDATE(device='[is_muscl]')
 
         if (muscl_order == 1) then
             if (muscl_dir == 1) then
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, ubound(v_vf, 1)
-                    do l = is3_muscl%beg, is3_muscl%end
-                        do k = is2_muscl%beg, is2_muscl%end
-                            do j = is1_muscl%beg, is1_muscl%end
+                    do l = is_muscl%z%beg, is_muscl%z%end
+                        do k = is_muscl%y%beg, is_muscl%y%end
+                            do j = is_muscl%x%beg, is_muscl%x%end
                                 vL_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
                                 vR_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
                             end do
@@ -116,9 +121,9 @@ contains
             else if (muscl_dir == 2) then
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, ubound(v_vf, 1)
-                    do l = is3_muscl%beg, is3_muscl%end
-                        do j = is1_muscl%beg, is1_muscl%end
-                            do k = is2_muscl%beg, is2_muscl%end
+                    do l = is_muscl%z%beg, is_muscl%z%end
+                        do j = is_muscl%x%beg, is_muscl%x%end
+                            do k = is_muscl%y%beg, is_muscl%y%end
                                 vL_rs_vf_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
                                 vR_rs_vf_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
                             end do
@@ -129,9 +134,9 @@ contains
             else if (muscl_dir == 3) then
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, ubound(v_vf, 1)
-                    do j = is1_muscl%beg, is1_muscl%end
-                        do k = is2_muscl%beg, is2_muscl%end
-                            do l = is3_muscl%beg, is3_muscl%end
+                    do j = is_muscl%x%beg, is_muscl%x%end
+                        do k = is_muscl%y%beg, is_muscl%y%end
+                            do l = is_muscl%z%beg, is_muscl%z%end
                                 vL_rs_vf_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
                                 vR_rs_vf_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
                             end do
@@ -162,9 +167,9 @@ contains
         if (muscl_order == 2) then
             ! MUSCL Reconstruction
             #:for MUSCL_DIR, XYZ, STENCIL_VAR, COORDS, X_BND, Y_BND, Z_BND in &
-                    [(1, 'x', 'j', '{STENCIL_IDX}, k, l', 'is1_muscl', 'is2_muscl', 'is3_muscl'), &
-                     (2, 'y', 'k', 'j, {STENCIL_IDX}, l', 'is2_muscl', 'is1_muscl', 'is3_muscl'), &
-                     (3, 'z', 'l', 'j, k, {STENCIL_IDX}', 'is3_muscl', 'is2_muscl', 'is1_muscl')]
+                    [(1, 'x', 'j', '{STENCIL_IDX}, k, l', 'is_muscl%x', 'is_muscl%y', 'is_muscl%z'), &
+                     (2, 'y', 'k', 'j, {STENCIL_IDX}, l', 'is_muscl%y', 'is_muscl%x', 'is_muscl%z'), &
+                     (3, 'z', 'l', 'j, k, {STENCIL_IDX}', 'is_muscl%z', 'is_muscl%y', 'is_muscl%x')]
                 #:set SV = STENCIL_VAR
                 #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
                 if (muscl_dir == ${MUSCL_DIR}$) then
@@ -223,7 +228,7 @@ contains
             call nvtxStartRange("WENO-INTCOMP")
             #:for MUSCL_DIR, XYZ in [(1, 'x'), (2, 'y'), (3, 'z')]
                 if (muscl_dir == ${MUSCL_DIR}$) then
-                    call s_thinc_compression(v_rs_ws_muscl, vL_rs_vf_x, vR_rs_vf_x, muscl_dir, is1_muscl, is2_muscl, is3_muscl)
+                    call s_thinc_compression(v_rs_ws_muscl, vL_rs_vf_x, vR_rs_vf_x, muscl_dir, is_muscl%x, is_muscl%y, is_muscl%z)
                 end if
             #:endfor
             call nvtxEndRange()
