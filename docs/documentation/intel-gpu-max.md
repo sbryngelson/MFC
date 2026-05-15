@@ -108,6 +108,40 @@ cd examples/my_case
 The install hashes are printed by `./mfc.sh build`; look for lines like
 `✓ Installed simulation`.
 
+## Chemistry/pyrometheus cases
+
+MFC's pyrometheus-generated thermochemistry (`m_thermochem.f90`) works with the
+Intel GPU build. Pyrometheus emits `!$omp declare target` for all thermochem
+routines when `directive_offload="mp"` is requested (automatically set when
+`--gpu mp` is active).
+
+Verified on ifx 2025.3.3: `m_thermochem.f90` and `m_chemistry.fpp` both compile
+at O3 + SPIR64 without ICE. The `1D_reactive_shocktube` example (H2/O2/Ar, 29
+reactions, 10 species) runs to completion. No Intel-specific source workarounds
+are needed for chemistry beyond the general levelset fix.
+
+To build and run a reactive chemistry case:
+```bash
+# Build (chemistry module generated automatically from cantera_file in case.py)
+./mfc.sh run examples/1D_reactive_shocktube/case.py \
+    --gpu mp --no-mpi -t pre_process simulation
+
+# Or bypass syscheck if no GPU render-group access:
+cd examples/1D_reactive_shocktube
+/path/to/build/install/<pre_hash>/bin/pre_process
+OMP_TARGET_OFFLOAD=DISABLED \
+    /path/to/build/install/<sim_hash>/bin/simulation
+```
+
+ifx warning during chemistry compilation:
+```
+warning #8694: A procedure called by a procedure with the DECLARE TARGET
+attribute must have the DECLARE TARGET attribute.  [GET_MIXTURE_VISCOSITY_MIXAVG]
+```
+This is a false positive from ifx's module-interface tracking; `m_thermochem.f90`
+does declare all routines as target. The warning is harmless and the code runs
+correctly.
+
 ## GPU device access
 
 The Intel GPU requires membership in the `render` group (GID 109) to access
