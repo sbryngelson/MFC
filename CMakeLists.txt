@@ -612,7 +612,14 @@ exit 0
                     endif()
                     set(_mkl_omp_mod_dir "${CMAKE_CURRENT_BINARY_DIR}/mkl_omp_mods")
                     set(_mkl_omp_obj "${_mkl_omp_mod_dir}/mkl_dfti_omp_offload.o")
+                    set(_mkl_omp_obj_host "${_mkl_omp_mod_dir}/mkl_dfti_omp_offload_host.o")
                     file(MAKE_DIRECTORY "${_mkl_omp_mod_dir}")
+                    # Find clang-offload-bundler (co-located with ifx) for SPIR-V stripping.
+                    cmake_path(GET CMAKE_Fortran_COMPILER PARENT_PATH _ifx_bin)
+                    find_program(CLANG_OFFLOAD_BUNDLER
+                        NAMES clang-offload-bundler
+                        HINTS "${_ifx_bin}/compiler" "${_ifx_bin}"
+                        REQUIRED)
                     add_custom_command(
                         OUTPUT  "${_mkl_omp_obj}"
                                 "${_mkl_omp_mod_dir}/mkl_dfti_omp_offload.mod"
@@ -625,12 +632,26 @@ exit 0
                         DEPENDS "${_mkl_omp_src}"
                         COMMENT "Compiling MKL OMP offload Fortran module (mkl_dfti_omp_offload)"
                     )
+                    # Strip the SPIR-V device bundle so the linked object has only host code.
+                    # The SPIR-V contains Import declarations for MKL SYCL DFT functions that
+                    # the OpenMP Level Zero plugin cannot resolve, causing zeModuleDynamicLink
+                    # failure. With host-only code, !$omp dispatch falls back to CPU for DFT.
+                    add_custom_command(
+                        OUTPUT  "${_mkl_omp_obj_host}"
+                        COMMAND "${CLANG_OFFLOAD_BUNDLER}"
+                                --unbundle --type=o
+                                --targets=host-x86_64-unknown-linux-gnu
+                                --input="${_mkl_omp_obj}"
+                                --output="${_mkl_omp_obj_host}"
+                        DEPENDS "${_mkl_omp_obj}"
+                        COMMENT "Stripping SPIR-V from MKL DFT object (host-only, fixes Level Zero link)"
+                    )
                     add_custom_target(mkl_omp_offload_mod_${a_target}
-                        DEPENDS "${_mkl_omp_obj}")
+                        DEPENDS "${_mkl_omp_obj_host}")
                     add_dependencies(${a_target} mkl_omp_offload_mod_${a_target})
                     target_include_directories(${a_target} PRIVATE
                         "$ENV{MKLROOT}/include" "${_mkl_omp_mod_dir}")
-                    target_link_libraries(${a_target} PRIVATE "${_mkl_omp_obj}")
+                    target_link_libraries(${a_target} PRIVATE "${_mkl_omp_obj_host}")
                     # Link MKL threading + core + SYCL DFT backend
                     target_link_options(${a_target} PRIVATE -qmkl=parallel)
                     find_library(MKL_SYCL_DFT mkl_sycl_dft HINTS "$ENV{MKLROOT}/lib" REQUIRED)
