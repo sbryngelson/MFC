@@ -622,8 +622,11 @@ exit 0
                     set(_mkl_omp_obj "${_mkl_omp_mod_dir}/mkl_dfti_omp_offload.o")
                     set(_mkl_omp_obj_host "${_mkl_omp_mod_dir}/mkl_dfti_omp_offload_host.o")
                     file(MAKE_DIRECTORY "${_mkl_omp_mod_dir}")
-                    # Find clang-offload-bundler (co-located with ifx) for SPIR-V stripping.
-                    cmake_path(GET CMAKE_Fortran_COMPILER PARENT_PATH _ifx_bin)
+                    # Find clang-offload-bundler (in ifx's bin/compiler/ subdir).
+                    # CMAKE_Fortran_COMPILER may be an MPI wrapper (mpiifx); resolve the
+                    # underlying ifx from PATH so the HINTS point to the right directory.
+                    find_program(_IFX_REAL ifx REQUIRED)
+                    cmake_path(GET _IFX_REAL PARENT_PATH _ifx_bin)
                     find_program(CLANG_OFFLOAD_BUNDLER
                         NAMES clang-offload-bundler
                         HINTS "${_ifx_bin}/compiler" "${_ifx_bin}"
