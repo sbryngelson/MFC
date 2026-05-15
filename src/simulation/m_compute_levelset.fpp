@@ -30,7 +30,12 @@ contains
         !  3D Patch Geometries
 
         if (p > 0) then
-            $:GPU_PARALLEL_LOOP(private='[i, patch_id, patch_geometry]', copy='[gps]', copyin='[patch_ib(1:num_ibs), Np]')
+            ! ifx SPIR64 bug: if-else dispatch into declare-target routines inside
+            ! a target teams loop triggers "Instruction does not dominate all uses!"
+            ! in llvm-link. The dispatch-wrapper pattern triggers an ifx ICE.
+            #:if MFC_COMPILER != INTEL_COMPILER_ID
+                $:GPU_PARALLEL_LOOP(private='[i, patch_id, patch_geometry]', copy='[gps]', copyin='[patch_ib(1:num_ibs), Np]')
+            #:endif
             do i = 1, num_gps
                 patch_id = gps(i)%ib_patch_id
                 patch_geometry = patch_ib(patch_id)%geometry
@@ -47,11 +52,15 @@ contains
                     call s_model_levelset(gps(i))
                 end if
             end do
-            $:END_GPU_PARALLEL_LOOP()
+            #:if MFC_COMPILER != INTEL_COMPILER_ID
+                $:END_GPU_PARALLEL_LOOP()
+            #:endif
 
             ! 2D Patch Geometries
         else if (n > 0) then
-            $:GPU_PARALLEL_LOOP(private='[i, patch_id, patch_geometry]', copy='[gps]', copyin='[Np, patch_ib(1:num_ibs)]')
+            #:if MFC_COMPILER != INTEL_COMPILER_ID
+                $:GPU_PARALLEL_LOOP(private='[i, patch_id, patch_geometry]', copy='[gps]', copyin='[Np, patch_ib(1:num_ibs)]')
+            #:endif
             do i = 1, num_gps
                 patch_id = gps(i)%ib_patch_id
                 patch_geometry = patch_ib(patch_id)%geometry
@@ -68,7 +77,9 @@ contains
                     call s_ellipse_levelset(gps(i))
                 end if
             end do
-            $:END_GPU_PARALLEL_LOOP()
+            #:if MFC_COMPILER != INTEL_COMPILER_ID
+                $:END_GPU_PARALLEL_LOOP()
+            #:endif
         end if
 
     end subroutine s_apply_levelset

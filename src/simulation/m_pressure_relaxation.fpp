@@ -51,8 +51,8 @@ contains
     !> The main pressure relaxation procedure
     subroutine s_pressure_relaxation_procedure(q_cons_vf)
 
-        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
-        integer                                                :: j, k, l
+        type(scalar_field), dimension(:), intent(inout) :: q_cons_vf
+        integer                                         :: j, k, l
 
         $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3)
         do l = 0, p
@@ -71,8 +71,8 @@ contains
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
-        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
-        integer, intent(in)                                    :: j, k, l
+        type(scalar_field), dimension(:), intent(inout) :: q_cons_vf
+        integer, intent(in)                             :: j, k, l
 
         ! Volume fraction correction
         if (mpp_lim) call s_correct_volume_fractions(q_cons_vf, j, k, l)
@@ -92,9 +92,9 @@ contains
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
-        type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
-        integer, intent(in)                                 :: j, k, l
-        integer                                             :: i
+        type(scalar_field), dimension(:), intent(in) :: q_cons_vf
+        integer, intent(in)                          :: j, k, l
+        integer                                      :: i
 
         s_needs_pressure_relaxation = .true.
         $:GPU_LOOP(parallelism='[seq]')
@@ -111,10 +111,10 @@ contains
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
-        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
-        integer, intent(in)                                    :: j, k, l
-        real(wp)                                               :: sum_alpha
-        integer                                                :: i
+        type(scalar_field), dimension(:), intent(inout) :: q_cons_vf
+        integer, intent(in)                             :: j, k, l
+        real(wp)                                        :: sum_alpha
+        integer                                         :: i
 
         sum_alpha = 0._wp
         $:GPU_LOOP(parallelism='[seq]')
@@ -141,9 +141,9 @@ contains
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
-        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
-        integer, intent(in)                                    :: j, k, l
-        real(wp)                                               :: pres_relax, f_pres, df_pres
+        type(scalar_field), dimension(:), intent(inout) :: q_cons_vf
+        integer, intent(in)                             :: j, k, l
+        real(wp)                                        :: pres_relax, f_pres, df_pres
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(3) :: pres_K_init, rho_K_s
         #:else
@@ -214,8 +214,8 @@ contains
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
-        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
-        integer, intent(in)                                    :: j, k, l
+        type(scalar_field), dimension(:), intent(inout) :: q_cons_vf
+        integer, intent(in)                             :: j, k, l
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(3) :: alpha_rho, alpha
         #:else

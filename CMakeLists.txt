@@ -241,8 +241,9 @@ elseif (CMAKE_Fortran_COMPILER_ID STREQUAL "Flang")
     if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelDebug")
         add_compile_options($<$<COMPILE_LANGUAGE:Fortran>:-O1> $<$<COMPILE_LANGUAGE:Fortran>:-g>)
     endif()
-elseif (CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
-    add_compile_options($<$<COMPILE_LANGUAGE:Fortran>:-free>)
+elseif (CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+    add_compile_options($<$<COMPILE_LANGUAGE:Fortran>:-free>
+                        $<$<COMPILE_LANGUAGE:Fortran>:-fpp>)
 
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_compile_options(-g -Og -traceback -debug -check all)
@@ -595,6 +596,47 @@ exit 0
                             HINTS "$ENV{OLCF_AFAR_ROOT}/lib" REQUIRED)
                         target_link_libraries(${a_target} PRIVATE ${HIPFFT_LIB})
                     endif()
+                elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+                    # Intel GPU: oneMKL DFTI with !$omp dispatch for GPU FFT.
+                    # Requires MKLROOT to be set (via oneAPI module or env).
+                    if (NOT DEFINED ENV{MKLROOT})
+                        message(FATAL_ERROR "MKLROOT is not set. Load oneAPI MKL module before building.")
+                    endif()
+                    # Compile mkl_dfti_omp_offload.f90 in isolation with minimal flags.
+                    # The file uses !$omp declare variant with need_device_addr (OpenMP 5.2)
+                    # which requires the global -free -fpp flags to be absent so the
+                    # compiler parses it in standard fixed/free detection mode only.
+                    set(_mkl_omp_src "$ENV{MKLROOT}/include/mkl_dfti_omp_offload.f90")
+                    if (NOT EXISTS "${_mkl_omp_src}")
+                        message(FATAL_ERROR "mkl_dfti_omp_offload.f90 not found in $ENV{MKLROOT}/include")
+                    endif()
+                    set(_mkl_omp_mod_dir "${CMAKE_CURRENT_BINARY_DIR}/mkl_omp_mods")
+                    set(_mkl_omp_obj "${_mkl_omp_mod_dir}/mkl_dfti_omp_offload.o")
+                    file(MAKE_DIRECTORY "${_mkl_omp_mod_dir}")
+                    add_custom_command(
+                        OUTPUT  "${_mkl_omp_obj}"
+                                "${_mkl_omp_mod_dir}/mkl_dfti_omp_offload.mod"
+                        COMMAND "${CMAKE_Fortran_COMPILER}"
+                                -fiopenmp -fopenmp-targets=spir64
+                                -c -I"$ENV{MKLROOT}/include"
+                                "${_mkl_omp_src}"
+                                -o "${_mkl_omp_obj}"
+                        WORKING_DIRECTORY "${_mkl_omp_mod_dir}"
+                        DEPENDS "${_mkl_omp_src}"
+                        COMMENT "Compiling MKL OMP offload Fortran module (mkl_dfti_omp_offload)"
+                    )
+                    add_custom_target(mkl_omp_offload_mod_${a_target}
+                        DEPENDS "${_mkl_omp_obj}")
+                    add_dependencies(${a_target} mkl_omp_offload_mod_${a_target})
+                    target_include_directories(${a_target} PRIVATE
+                        "$ENV{MKLROOT}/include" "${_mkl_omp_mod_dir}")
+                    target_link_libraries(${a_target} PRIVATE "${_mkl_omp_obj}")
+                    # Link MKL threading + core + SYCL DFT backend
+                    target_link_options(${a_target} PRIVATE -qmkl=parallel)
+                    find_library(MKL_SYCL_DFT mkl_sycl_dft HINTS "$ENV{MKLROOT}/lib" REQUIRED)
+                    find_library(SYCL_LIB sycl HINTS ENV LIBRARY_PATH REQUIRED)
+                    find_library(OPENCL_LIB OpenCL HINTS ENV LIBRARY_PATH REQUIRED)
+                    target_link_libraries(${a_target} PRIVATE ${MKL_SYCL_DFT} ${SYCL_LIB} ${OPENCL_LIB})
                 else()
                     find_package(hipfort COMPONENTS hipfft CONFIG REQUIRED)
                     target_link_libraries(${a_target} PRIVATE hipfort::hipfft)
@@ -636,9 +678,11 @@ exit 0
                     target_compile_options(${a_target} PRIVATE "-mp=gpu" "-Minfo=mp")
                     target_link_options(${a_target} PRIVATE "-mp=gpu")
                     set_target_properties(${a_target} PROPERTIES Fortran_FLAGS "-mp=gpu -gpu=ccall")
-                elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
-                    target_compile_options(${a_target} PRIVATE -fopenmp -fopenmp-targets=spir64)
-                    target_link_options(${a_target} PRIVATE -fopenmp -fopenmp-targets=spir64)
+                elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+                    # Intel GPU: OpenMP target offload to SPIR64 (Xe-HPC / Ponte Vecchio).
+                    # GPU FFT uses oneMKL DFTI via the OpenMP dispatch construct.
+                    target_compile_options(${a_target} PRIVATE -fiopenmp -fopenmp-targets=spir64)
+                    target_link_options(${a_target} PRIVATE -fiopenmp -fopenmp-targets=spir64)
                 elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
                     target_compile_options(${a_target} PRIVATE -fopenmp)
                     target_link_options(${a_target} PRIVATE -fopenmp)
