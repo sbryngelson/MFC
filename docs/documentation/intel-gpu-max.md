@@ -182,17 +182,23 @@ and run `./mfc.sh clean` first so CMake re-detects the compiler.
 
 ### Two routines with ifx SPIR64 codegen bugs
 
-**`s_apply_levelset` (`m_compute_levelset.fpp`)** — ifx SPIR64 bug in the
-target kernel:
+**`s_apply_levelset` (`m_compute_levelset.fpp`)** — ifx SPIR64 inliner ICE:
 
-An if-else chain calling multiple different `!$omp declare target (seq)`
-routines from inside a `!$omp target teams loop` triggers `"Instruction does
-not dominate all uses!"` in llvm-link. The natural fix (wrapping the dispatch
-in a single `declare-target seq` subroutine) triggers an ifx ICE (segfault).
-Worked around with Fypp `#:if MFC_COMPILER != INTEL_COMPILER_ID` guards that
-skip the GPU_PARALLEL_LOOP directives for Intel builds, so the loop runs
-serially on the host. The `GPU_ROUTINE` declarations on the helpers are kept
-so NVIDIA/AMD GPU builds are unaffected.
+The LLVM inliner (at O1+) pulls `!$omp declare target (seq)` geometry
+routines into the `target teams loop` kernel and generates LLVM IR that
+crashes the SPIR-V converter with a segfault in `llvm-spirv`. At O0 the
+crash does not occur (no inlining). Two fixes combined:
+
+1. **Split loops**: replaced the single if-else dispatch loop with one
+   `GPU_PARALLEL_LOOP` per geometry type so each kernel calls exactly one
+   declare-target routine. The original multi-callee dispatch also triggers
+   `"Instruction does not dominate all uses!"` in llvm-link.
+
+2. **Per-file `-fno-inline`**: in `CMakeLists.txt`, `set_source_files_properties`
+   adds `-fno-inline` to `m_compute_levelset.fpp.f90` for IntelLLVM+OpenMP
+   builds. This prevents the inliner from pulling declare-target routines into
+   the kernel body where they crash the SPIR-V backend. The routines remain
+   callable as proper device-side function calls via `!$omp declare target`.
 
 **`s_pressure_relaxation_procedure` (`m_pressure_relaxation.fpp`)** — SPIR-V
 InvalidArraySize in declare-target helpers:

@@ -826,6 +826,17 @@ if (MFC_SIMULATION)
             target_compile_options(simulation PRIVATE -Oipa0)
         endif()
     endif()
+    # ifx SPIR64 ICE: the LLVM inliner pulls !$omp declare target (seq) geometry
+    # routines into target teams loop kernels and generates SPIR-V IR that crashes
+    # llvm-spirv at O1+. -fno-inline keeps them as proper device-side calls.
+    # Each GPU loop calls exactly one geometry routine (split-loop pattern in
+    # m_compute_levelset.fpp), so device-call overhead is small. See PR intel-gpu.
+    if (CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM" AND MFC_OpenMP)
+        set_source_files_properties(
+            "${CMAKE_BINARY_DIR}/fypp/simulation/m_compute_levelset.fpp.f90"
+            PROPERTIES COMPILE_OPTIONS "-fno-inline"
+        )
+    endif()
 endif()
 
 if (MFC_POST_PROCESS)
