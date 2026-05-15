@@ -140,6 +140,8 @@ endif()
                             -DLAPACKE=OFF
                             -DBUILD_DEPRECATED=OFF
                             -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+                            "-DCMAKE_EXE_LINKER_FLAGS=-no-pie"
+                            "-DCMAKE_Fortran_COMPILER=${CMAKE_Fortran_COMPILER}"
                             "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}"
                             "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
          )
