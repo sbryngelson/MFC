@@ -42,47 +42,14 @@ contains
     !> Allocate and initialize MUSCL reconstruction working arrays
     subroutine s_initialize_muscl_module()
 
-        ! Initializing in x-direction
-        is_muscl%x%beg = -buff_size; is_muscl%x%end = m - is_muscl%x%beg
-        if (n == 0) then
-            is_muscl%y%beg = 0
-        else
-            is_muscl%y%beg = -buff_size
-        end if
-
+        is_muscl%x%beg = -buff_size; is_muscl%x%end = m + buff_size
+        is_muscl%y%beg = merge(0, -buff_size, n == 0)
         is_muscl%y%end = n - is_muscl%y%beg
-
-        if (p == 0) then
-            is_muscl%z%beg = 0
-        else
-            is_muscl%z%beg = -buff_size
-        end if
-
+        is_muscl%z%beg = merge(0, -buff_size, p == 0)
         is_muscl%z%end = p - is_muscl%z%beg
 
         @:ALLOCATE(v_rs_ws_muscl(is_muscl%x%beg:is_muscl%x%end, is_muscl%y%beg:is_muscl%y%end, is_muscl%z%beg:is_muscl%z%end, &
                    & 1:sys_size))
-
-        if (n == 0) return
-
-        ! initializing in y-direction
-        is_muscl%y%beg = -buff_size; is_muscl%y%end = n - is_muscl%y%beg
-        is_muscl%x%beg = -buff_size; is_muscl%x%end = m - is_muscl%x%beg
-
-        if (p == 0) then
-            is_muscl%z%beg = 0
-        else
-            is_muscl%z%beg = -buff_size
-        end if
-
-        is_muscl%z%end = p - is_muscl%z%beg
-
-        if (p == 0) return
-
-        ! initializing in z-direction
-        is_muscl%y%beg = -buff_size; is_muscl%y%end = n - is_muscl%y%beg
-        is_muscl%x%beg = -buff_size; is_muscl%x%end = m - is_muscl%x%beg
-        is_muscl%z%beg = -buff_size; is_muscl%z%end = p - is_muscl%z%beg
 
     end subroutine s_initialize_muscl_module
 
@@ -105,46 +72,25 @@ contains
         $:GPU_UPDATE(device='[is_muscl]')
 
         if (muscl_order == 1) then
-            if (muscl_dir == 1) then
-                $:GPU_PARALLEL_LOOP(collapse=4)
-                do i = 1, ubound(v_vf, 1)
-                    do l = is_muscl%z%beg, is_muscl%z%end
-                        do k = is_muscl%y%beg, is_muscl%y%end
-                            do j = is_muscl%x%beg, is_muscl%x%end
-                                vL_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
-                                vR_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
+            #:for MUSCL_DIR, IV, MV, OV, IB, MB, OB, IDX in &
+                    [(1, 'j', 'k', 'l', 'is_muscl%x', 'is_muscl%y', 'is_muscl%z', 'j, k, l'), &
+                     (2, 'k', 'j', 'l', 'is_muscl%y', 'is_muscl%x', 'is_muscl%z', 'k, j, l'), &
+                     (3, 'l', 'k', 'j', 'is_muscl%z', 'is_muscl%y', 'is_muscl%x', 'l, k, j')]
+                if (muscl_dir == ${MUSCL_DIR}$) then
+                    $:GPU_PARALLEL_LOOP(collapse=4)
+                    do i = 1, ubound(v_vf, 1)
+                        do ${OV}$ = ${OB}$%beg, ${OB}$%end
+                            do ${MV}$ = ${MB}$%beg, ${MB}$%end
+                                do ${IV}$ = ${IB}$%beg, ${IB}$%end
+                                    vL_rs_vf_x(${IDX}$, i) = v_vf(i)%sf(${IDX}$)
+                                    vR_rs_vf_x(${IDX}$, i) = v_vf(i)%sf(${IDX}$)
+                                end do
                             end do
                         end do
                     end do
-                end do
-                $:END_GPU_PARALLEL_LOOP()
-            else if (muscl_dir == 2) then
-                $:GPU_PARALLEL_LOOP(collapse=4)
-                do i = 1, ubound(v_vf, 1)
-                    do l = is_muscl%z%beg, is_muscl%z%end
-                        do j = is_muscl%x%beg, is_muscl%x%end
-                            do k = is_muscl%y%beg, is_muscl%y%end
-                                vL_rs_vf_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
-                                vR_rs_vf_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
-                            end do
-                        end do
-                    end do
-                end do
-                $:END_GPU_PARALLEL_LOOP()
-            else if (muscl_dir == 3) then
-                $:GPU_PARALLEL_LOOP(collapse=4)
-                do i = 1, ubound(v_vf, 1)
-                    do j = is_muscl%x%beg, is_muscl%x%end
-                        do k = is_muscl%y%beg, is_muscl%y%end
-                            do l = is_muscl%z%beg, is_muscl%z%end
-                                vL_rs_vf_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
-                                vR_rs_vf_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
-                            end do
-                        end do
-                    end do
-                end do
-                $:END_GPU_PARALLEL_LOOP()
-            end if
+                    $:END_GPU_PARALLEL_LOOP()
+                end if
+            #:endfor
         end if
 
         v_size = ubound(v_vf, 1)
@@ -226,11 +172,7 @@ contains
 
         if (int_comp > 0 .and. v_size >= eqn_idx%adv%end) then
             call nvtxStartRange("WENO-INTCOMP")
-            #:for MUSCL_DIR, XYZ in [(1, 'x'), (2, 'y'), (3, 'z')]
-                if (muscl_dir == ${MUSCL_DIR}$) then
-                    call s_thinc_compression(v_rs_ws_muscl, vL_rs_vf_x, vR_rs_vf_x, muscl_dir, is_muscl%x, is_muscl%y, is_muscl%z)
-                end if
-            #:endfor
+            call s_thinc_compression(v_rs_ws_muscl, vL_rs_vf_x, vR_rs_vf_x, muscl_dir, is_muscl%x, is_muscl%y, is_muscl%z)
             call nvtxEndRange()
         end if
 
