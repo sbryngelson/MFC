@@ -231,7 +231,15 @@
 
 #:def OMP_DECLARE(copyin=None, copyinReadOnly=None, create=None, link=None, extraOmpArgs=None)
     #:set copyin_val = OMP_TO_STR(copyin).strip('\n') + OMP_TO_STR(copyinReadOnly).strip('\n')
-    #:set create_val = GEN_CLAUSE('(', create)
+    #:if create is not None
+        #:set _re = re.compile(',(?![^(]*\\))')
+        #:set _elems = [x.strip() for x in re.sub(_re, ';', create).strip('[]').split(';')]
+        #:set _bases = list(dict.fromkeys([x.split('%')[0].strip() for x in _elems]))
+        #:set _create_omp = '[' + ', '.join(_bases) + ']'
+    #:else
+        #:set _create_omp = None
+    #:endif
+    #:set create_val = GEN_CLAUSE('(', _create_omp)
     #:set link_val = GEN_LINK_STR(link)
     #:set extraOmpArgs_val = GEN_EXTRA_ARGS_STR(extraOmpArgs)
     #:set clause_val = copyin_val.strip('\n') + &
