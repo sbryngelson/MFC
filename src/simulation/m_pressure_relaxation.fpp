@@ -147,7 +147,7 @@ contains
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(3) :: pres_K_init, rho_K_s
         #:else
-            real(wp), dimension(num_fluids) :: pres_K_init, rho_K_s
+            real(wp), dimension(num_fluids_max) :: pres_K_init, rho_K_s
         #:endif
         integer, parameter :: MAX_ITER = 50
         ! Pressure relaxation convergence tolerance
@@ -219,7 +219,7 @@ contains
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(3) :: alpha_rho, alpha
         #:else
-            real(wp), dimension(num_fluids) :: alpha_rho, alpha
+            real(wp), dimension(num_fluids_max) :: alpha_rho, alpha
         #:endif
         real(wp)               :: rho, dyn_pres, gamma, pi_inf, pres_relax, sum_alpha
         real(wp), dimension(2) :: Re

@@ -4408,8 +4408,8 @@ contains
             real(wp), dimension(3, 3), intent(in)  :: vel_grad_avg
             real(wp), dimension(3, 3), intent(out) :: tau_shear_out
         #:else
-            real(wp), dimension(num_dims, num_dims), intent(in)  :: vel_grad_avg
-            real(wp), dimension(num_dims, num_dims), intent(out) :: tau_shear_out
+            real(wp), dimension(:,:), intent(in)  :: vel_grad_avg
+            real(wp), dimension(:,:), intent(out) :: tau_shear_out
         #:endif
         real(wp), intent(in) :: Re_shear
         real(wp), intent(in) :: divergence_v
@@ -4441,7 +4441,7 @@ contains
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(3, 3), intent(out) :: tau_bulk_out
         #:else
-            real(wp), dimension(num_dims, num_dims), intent(out) :: tau_bulk_out
+            real(wp), dimension(:,:), intent(out) :: tau_bulk_out
         #:endif
 
         ! Local variables

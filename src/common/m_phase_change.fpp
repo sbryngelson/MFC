@@ -257,15 +257,15 @@ contains
         $:GPU_ROUTINE(function_name='s_infinite_pt_relaxation_k', parallelism='[seq]', cray_noinline=True)
 
         ! initializing variables
-        integer, intent(in)                                 :: j, k, l, MFL
-        real(wp), intent(out)                               :: pS
-        real(wp), dimension(1:), intent(out)                :: p_infpT
-        type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
-        real(wp), intent(in)                                :: rhoe
-        real(wp), intent(out)                               :: TS
-        real(wp)                                            :: gp, gpp, hp, pO, mCP, mQ  !< variables for the Newton Solver
-        real(wp)                                            :: p_infpT_sum
-        integer                                             :: i, ns                     !< generic loop iterators
+        integer, intent(in)                          :: j, k, l, MFL
+        real(wp), intent(out)                        :: pS
+        real(wp), dimension(:), intent(out)          :: p_infpT
+        type(scalar_field), dimension(:), intent(in) :: q_cons_vf
+        real(wp), intent(in)                         :: rhoe
+        real(wp), intent(out)                        :: TS
+        real(wp)                                     :: gp, gpp, hp, pO, mCP, mQ  !< variables for the Newton Solver
+        real(wp)                                     :: p_infpT_sum
+        integer                                      :: i, ns                     !< generic loop iterators
         ! auxiliary variables for the pT-equilibrium solver
         mCP = 0.0_wp; mQ = 0.0_wp; p_infpT_sum = 0._wp
         $:GPU_LOOP(parallelism='[seq]')
@@ -351,16 +351,16 @@ contains
 
         $:GPU_ROUTINE(function_name='s_infinite_ptg_relaxation_k', parallelism='[seq]', cray_noinline=True)
 
-        integer, intent(in)                                    :: j, k, l
-        real(wp), intent(inout)                                :: pS
-        real(wp), dimension(1:), intent(in)                    :: p_infpT
-        real(wp), intent(in)                                   :: rhoe
-        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
-        real(wp), intent(inout)                                :: TS
+        integer, intent(in)                             :: j, k, l
+        real(wp), intent(inout)                         :: pS
+        real(wp), dimension(1:), intent(in)             :: p_infpT
+        real(wp), intent(in)                            :: rhoe
+        type(scalar_field), dimension(:), intent(inout) :: q_cons_vf
+        real(wp), intent(inout)                         :: TS
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(3) :: p_infpTg  !< stiffness for the participating fluids for pTg-equilibrium
         #:else
-            real(wp), dimension(num_fluids) :: p_infpTg  !< stiffness for the participating fluids for pTg-equilibrium
+            real(wp), dimension(num_fluids_max) :: p_infpTg  !< stiffness for the participating fluids for pTg-equilibrium
         #:endif
         real(wp), dimension(2, 2) :: Jac, InvJac, TJac                  !< matrices for the Newton Solver
         real(wp), dimension(2)    :: R2D, DeltamP                       !< residual and correction array
@@ -525,10 +525,10 @@ contains
 
         !> @name variables for the correction of the reacting partial densities
         !> @{
-        real(wp), intent(out)                                  :: MCT
-        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
-        real(wp), intent(inout)                                :: rM
-        integer, intent(in)                                    :: j, k, l
+        real(wp), intent(out)                           :: MCT
+        type(scalar_field), dimension(:), intent(inout) :: q_cons_vf
+        real(wp), intent(inout)                         :: rM
+        integer, intent(in)                             :: j, k, l
         !> @}
         if (rM < 0.0_wp) then
             if ((q_cons_vf(lp + eqn_idx%cont%beg - 1)%sf(j, k, &

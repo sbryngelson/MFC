@@ -721,7 +721,7 @@ contains
 
         & nmom_IP, pb_in, mv_in, presb_IP, massv_IP)
         $:GPU_ROUTINE(parallelism='[seq]')
-        type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf  !< Primitive Variables
+        type(scalar_field), dimension(:), intent(in) :: q_prim_vf  !< Primitive Variables
         real(stp), optional, dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:,1:), intent(in) :: pb_in, mv_in
         type(ghost_point), intent(in) :: gp
         real(wp), intent(inout) :: pres_IP
@@ -730,7 +730,7 @@ contains
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(3), intent(inout) :: alpha_IP, alpha_rho_IP
         #:else
-            real(wp), dimension(num_fluids), intent(inout) :: alpha_IP, alpha_rho_IP
+            real(wp), dimension(:), intent(inout) :: alpha_IP, alpha_rho_IP
         #:endif
         real(wp), optional, dimension(:), intent(inout) :: r_IP, v_IP, pb_IP, mv_IP
         real(wp), optional, dimension(:), intent(inout) :: nmom_IP
