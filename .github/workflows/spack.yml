@@ -1,0 +1,60 @@
+name: Spack
+on:
+    push:
+    pull_request:
+    schedule:
+        - cron: '17 3 * * 0'
+
+jobs:
+    spack-install:
+        name: Spack install + smoke test
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v4
+
+          - name: Check out Spack
+            uses: actions/checkout@v4
+            with:
+                repository: spack/spack
+                path: spack
+
+          - name: Check out spack-packages (sbryngelson/add-mfc until upstream merges)
+            uses: actions/checkout@v4
+            with:
+                repository: sbryngelson/spack-packages
+                ref: add-mfc
+                path: spack-packages
+
+          - name: Cache Spack store
+            uses: actions/cache@v4
+            with:
+                path: |
+                    spack/opt
+                    spack/var/spack/cache
+                key: spack-mfc-${{ runner.os }}-${{ hashFiles('spack-packages/repos/spack_repo/builtin/packages/mfc/package.py', 'spack-packages/repos/spack_repo/builtin/packages/cantera/package.py', 'spack-packages/repos/spack_repo/builtin/packages/py_pyrometheus/package.py') }}
+                restore-keys: spack-mfc-${{ runner.os }}-
+
+          - name: Install mfc+chemistry~mpi
+            run: |
+                source spack/share/spack/setup-env.sh
+                spack repo add --scope=site spack-packages/repos/spack_repo/builtin
+                spack install --reuse mfc+chemistry~mpi
+
+          - name: Smoke test
+            run: |
+                source spack/share/spack/setup-env.sh
+                spack load mfc
+                prefix="$(spack location -i mfc)"
+                echo "MFC prefix: $prefix"
+                for t in pre_process simulation post_process; do
+                    test -x "$prefix/bin/$t" || { echo "missing binary: $t"; exit 1; }
+                    echo "found: $prefix/bin/$t"
+                done
+                test -x "$prefix/bin/mfc" || { echo "missing shim: mfc"; exit 1; }
+                echo "found shim: $prefix/bin/mfc"
+                # Validate a small example case file through MFC's toolchain
+                # (exercises Python venv-skip + PYTHONPATH wiring under MFC_PREBUILT_PREFIX).
+                cd "$prefix/share/mfc"
+                ./mfc.sh run --prebuilt-prefix="$prefix" \
+                             --no-mpi --dry-run \
+                             examples/1D_sodshocktube/case.py
