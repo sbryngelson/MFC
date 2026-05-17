@@ -26,6 +26,7 @@ jobs:
 
           - name: Smoke test
             run: |
+                source spack/share/spack/setup-env.sh
                 spack load mfc
                 prefix="$(spack location -i mfc)"
                 echo "MFC prefix: $prefix"
