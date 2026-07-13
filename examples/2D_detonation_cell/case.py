@@ -32,6 +32,8 @@ parser.add_argument(
     help="Add a small random velocity perturbation (perturb_flow) to seed transverse detonation cells.",
 )
 parser.add_argument("--no-seed", dest="seed", action="store_false")
+parser.add_argument("--riemann", default="hllc", choices=("hllc", "hll"), help="Riemann solver (hll is more dissipative / carbuncle-free).")
+parser.add_argument("--seedamp", type=float, default=40.0, help="Cell-seed transverse-velocity amplitude [m/s] (lower it in 3D, where seeding y and z together is stronger).")
 args = parser.parse_args()
 
 ctfile = "h2o2.yaml"
@@ -105,7 +107,7 @@ case = {
     "weno_eps": 1e-16,
     "mapped_weno": "T",
     "mp_weno": "T",
-    "riemann_solver": "hllc",
+    "riemann_solver": args.riemann,
     "wave_speeds": "direct",
     "avg_state": "arithmetic",
     # BCs: x extrapolation (open), y periodic (clean regular cells)
@@ -174,7 +176,7 @@ if is_3d:
 # white noise that advects into y-striations, not physical cells; a hot pocket
 # ahead of the front over-compresses on impact and NaNs.)
 kmode = 3  # transverse wavelengths across the channel (~1 cm cells for Ly = 3 cm)
-amp = 40.0  # perturbation amplitude [m/s], a few % of the piston velocity
+amp = args.seedamp  # perturbation amplitude [m/s], a few % of the piston velocity
 if args.seed:
     case["patch_icpp(2)%vel(2)"] = f"{amp}*sin(2*pi*{kmode}*y/{Ly})"
     if is_3d:
