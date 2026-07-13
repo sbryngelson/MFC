@@ -10,6 +10,7 @@ import cantera as ct
 parser = argparse.ArgumentParser(prog="2D_detonation_cell")
 parser.add_argument("--mfc", type=json.loads, default="{}", metavar="DICT", help="MFC toolchain state.")
 parser.add_argument("--scale", type=float, default=1.0, help="Grid multiplier (calibration knob).")
+parser.add_argument("--ndim", type=int, default=2, choices=(2, 3), help="Spatial dimensions (2 or 3).")
 parser.add_argument("--tend", type=float, default=200e-6, help="Physical end time [s].")
 parser.add_argument(
     "--overdrive",
@@ -55,11 +56,15 @@ if args.overdrive > 1.0:
 P_drive = driver.P
 print(f"driver init: T={driver.T:.1f} K  P={driver.P:.1f} Pa  rho={driver.density:.5f} kg/m^3", file=sys.stderr)
 
-# --- Domain: x = propagation, y = transverse (periodic). Nominal; refined by calibration. ---
+# --- Domain: x = propagation, y (and z in 3D) = transverse (periodic). ---
+is_3d = args.ndim == 3
 Ly = 0.03  # channel height [m] ~ a few cells (verify/refine)
 Lx = 4.0 * Ly  # run-up length
+Lz = Ly
 Ny = int(200 * args.scale)
 Nx = int(4 * Ny)
+Nz = Ny if is_3d else 0
+geom = 9 if is_3d else 3  # 3D box vs 2D rectangle
 dx = Lx / Nx
 
 # CJ speed ~1.6 km/s for this mixture; size dt from the fastest signal.
@@ -81,7 +86,7 @@ case = {
     "y_domain%end": Ly,
     "m": Nx,
     "n": Ny,
-    "p": 0,
+    "p": Nz,
     "dt": float(dt),
     "t_step_start": 0,
     "t_step_stop": NT,
@@ -119,7 +124,7 @@ case = {
     "prim_vars_wrt": "T",
     "chem_wrt_T": "T",
     # Patch 1: fresh reactants, whole domain
-    "patch_icpp(1)%geometry": 3,
+    "patch_icpp(1)%geometry": geom,
     "patch_icpp(1)%x_centroid": Lx / 2,
     "patch_icpp(1)%y_centroid": Ly / 2,
     "patch_icpp(1)%length_x": Lx,
@@ -129,8 +134,8 @@ case = {
     "patch_icpp(1)%pres": fresh.P,
     "patch_icpp(1)%alpha(1)": 1.0,
     "patch_icpp(1)%alpha_rho(1)": fresh.density,
-    # Patch 2: overdriven driver (hot products), left region, full height
-    "patch_icpp(2)%geometry": 3,
+    # Patch 2: overdriven driver (hot products), left region, full cross-section
+    "patch_icpp(2)%geometry": geom,
     "patch_icpp(2)%alter_patch(1)": "T",
     "patch_icpp(2)%x_centroid": x_driver / 2,
     "patch_icpp(2)%y_centroid": Ly / 2,
@@ -145,6 +150,23 @@ case = {
     "fluid_pp(1)%gamma": 1.0 / (1.4 - 1.0),
     "fluid_pp(1)%pi_inf": 0.0,
 }
+
+# 3D: add the periodic z direction and give both patches full z-extent.
+if is_3d:
+    case.update(
+        {
+            "z_domain%beg": 0.0,
+            "z_domain%end": Lz,
+            "bc_z%beg": -1,
+            "bc_z%end": -1,
+            "patch_icpp(1)%z_centroid": Lz / 2,
+            "patch_icpp(1)%length_z": Lz,
+            "patch_icpp(1)%vel(3)": 0.0,
+            "patch_icpp(2)%z_centroid": Lz / 2,
+            "patch_icpp(2)%length_z": Lz,
+            "patch_icpp(2)%vel(3)": 0.0,
+        }
+    )
 
 # Seed transverse cells with a small random velocity perturbation (built-in
 # perturb_flow adds a transverse-velocity kick ~ mag*|u| behind the front). A hot
