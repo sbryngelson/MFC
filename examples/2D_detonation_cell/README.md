@@ -21,9 +21,12 @@ couples to the shock. Two failure modes this avoids:
 - A driver too weak (post-shock T below ~1100 K) never ignites — the shock and
   flame decouple and the "detonation" decays to ~56% of the CJ speed.
 
-Transverse cells are seeded with a small random velocity perturbation
-(`perturb_flow`), not a hot pocket (a hot pocket ahead of the front
-over-compresses on impact and NaNs).
+Transverse cells are seeded with a **coherent** sinusoidal transverse-velocity
+perturbation on the driver (`patch_icpp(2)%vel(2) = amp*sin(2*pi*kmode*y/Ly)`),
+which imposes one clean cellular wavelength. A per-cell random perturbation
+(`perturb_flow`) instead injects grid-scale white noise that advects into
+y-striations rather than physical cells; a hot pocket ahead of the front
+over-compresses on impact and NaNs.
 
 ## CLI knobs
 

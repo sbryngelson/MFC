@@ -168,13 +168,17 @@ if is_3d:
         }
     )
 
-# Seed transverse cells with a small random velocity perturbation (built-in
-# perturb_flow adds a transverse-velocity kick ~ mag*|u| behind the front). A hot
-# pocket ahead of the front instead over-compresses on impact and NaNs.
+# Seed transverse cells with a COHERENT sinusoidal transverse-velocity
+# perturbation on the driver: this imposes one clean cellular wavelength. (A
+# per-cell random perturbation like perturb_flow instead injects grid-scale
+# white noise that advects into y-striations, not physical cells; a hot pocket
+# ahead of the front over-compresses on impact and NaNs.)
+kmode = 3  # transverse wavelengths across the channel (~1 cm cells for Ly = 3 cm)
+amp = 40.0  # perturbation amplitude [m/s], a few % of the piston velocity
 if args.seed:
-    case["perturb_flow"] = "T"
-    case["perturb_flow_fluid"] = 1
-    case["perturb_flow_mag"] = 0.05
+    case["patch_icpp(2)%vel(2)"] = f"{amp}*sin(2*pi*{kmode}*y/{Ly})"
+    if is_3d:
+        case["patch_icpp(2)%vel(3)"] = f"{amp}*sin(2*pi*{kmode}*z/{Lz})"
 
 # Species mass fractions per patch + per-species output
 for i in range(len(fresh.Y)):
