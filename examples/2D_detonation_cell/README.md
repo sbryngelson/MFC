@@ -20,8 +20,22 @@ shock-driven, not diffusion-driven.
 ## Running on 4x A100
 
 ```bash
-./mfc.sh build --gpu -j 8
-./mfc.sh run examples/2D_detonation_cell/case.py --gpu -g 0 1 2 3 -n 4
+./mfc.sh build -j 8 --gpu acc --case-optimization -t simulation
+./mfc.sh run examples/2D_detonation_cell/case.py -n 4 --gpu acc --case-optimization -- --scale 1.0
+```
+
+### Production run (calibrated for ~10 min on 4x A100)
+
+Calibration (`--scale 1.0 --tend 15e-6`, 800x200 grid, CFL factor 0.06):
+measured throughput ~3.1e7 cell-updates/s on 4x A100. Steps scale as
+`Nx*Ny*NT ~ scale^3` for fixed `--tend` (dt ~ 1/scale, NT ~ scale), so a 600s
+budget at `--tend 200e-6` (~13.3x the calibration `--tend`) solves to
+`scale^3 = 600 / (23 * 13.3) ~= 1.96` -> `scale ~= 1.25`, giving a
+1000x250 grid (`dx = 0.12 mm`, 5x finer than the `--scale 0.25` CPU smoke
+test's 0.6 mm) and ~74,500 steps, predicted at ~600s wall.
+
+```bash
+./mfc.sh run examples/2D_detonation_cell/case.py -n 4 --gpu acc --case-optimization -- --scale 1.25 --tend 200e-6
 ```
 
 ## Correctness checks

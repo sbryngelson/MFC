@@ -51,7 +51,7 @@ dx = Lx / Nx
 # CJ speed ~1.6 km/s for this mixture; size dt from the fastest signal.
 D_cj_guess = 1600.0
 c_drive = driver.sound_speed
-dt = 0.02 * dx / (D_cj_guess + c_drive)  # CFL ~ 0.02 (stiff reacting shock; cf. 1D_reactive_shocktube)
+dt = 0.06 * dx / (D_cj_guess + c_drive)  # CFL ~ 0.06 (measured ICFL max ~0.013 at 0.02; 3x still has headroom)
 
 NT = int(args.tend / dt)
 NS = max(1, NT // 100)
