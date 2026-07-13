@@ -3,6 +3,7 @@
 # Heavy Ar dilution -> regular cells. Reactions ON, diffusion OFF (shock-driven).
 import argparse
 import json
+import sys
 
 import cantera as ct
 
@@ -10,7 +11,12 @@ parser = argparse.ArgumentParser(prog="2D_detonation_cell")
 parser.add_argument("--mfc", type=json.loads, default="{}", metavar="DICT", help="MFC toolchain state.")
 parser.add_argument("--scale", type=float, default=1.0, help="Grid multiplier (calibration knob).")
 parser.add_argument("--tend", type=float, default=200e-6, help="Physical end time [s].")
-parser.add_argument("--overdrive", type=float, default=30.0, help="Driver/fresh pressure ratio.")
+parser.add_argument(
+    "--overdrive",
+    type=float,
+    default=2.5,
+    help="Isentropic compression of the UV-equilibrium driver (1 = plain; >1 = overdriven, thermo-consistent). ~2.5 sits near CJ pressure and launches a detonation.",
+)
 args = parser.parse_args()
 
 ctfile = "h2o2.yaml"
@@ -21,11 +27,19 @@ T0, P0 = 298.0, 6670.0  # low p lengthens the reaction zone (explicit-solver fri
 fresh = ct.Solution(ctfile)
 fresh.TPX = T0, P0, X
 
-# Detonation driver: constant-volume explosion products, overdriven in pressure.
+# Detonation driver: constant-volume explosion products -> a thermodynamically
+# self-consistent hot, high-pressure burned state (T, P, rho all from Cantera).
+# --overdrive (>1) isentropically compresses the products for extra drive, scaling
+# P and rho together so T stays in the thermo range. Forcing P = overdrive*P0 at
+# the fresh density would imply T ~ 9000 K (past the h2o2 NASA-polynomial limit)
+# and NaN on the first RHS eval.
 driver = ct.Solution(ctfile)
 driver.TPX = T0, P0, X
 driver.equilibrate("UV")
-P_drive = args.overdrive * P0
+if args.overdrive > 1.0:
+    driver.SP = driver.entropy_mass, args.overdrive * driver.P
+P_drive = driver.P
+print(f"driver init: T={driver.T:.1f} K  P={driver.P:.1f} Pa  rho={driver.density:.5f} kg/m^3", file=sys.stderr)
 
 # --- Domain: x = propagation, y = transverse (periodic). Nominal; refined by calibration. ---
 Ly = 0.03  # channel height [m] ~ a few cells (verify/refine)
@@ -37,12 +51,12 @@ dx = Lx / Nx
 # CJ speed ~1.6 km/s for this mixture; size dt from the fastest signal.
 D_cj_guess = 1600.0
 c_drive = driver.sound_speed
-dt = 0.2 * dx / (D_cj_guess + c_drive)  # CFL ~ 0.2
+dt = 0.02 * dx / (D_cj_guess + c_drive)  # CFL ~ 0.02 (stiff reacting shock; cf. 1D_reactive_shocktube)
 
 NT = int(args.tend / dt)
 NS = max(1, NT // 100)
 
-x_driver = 0.15 * Lx  # driver occupies the left 15%
+x_driver = 0.25 * Lx  # driver occupies the left 25% (sustains the shock so it locks into a detonation)
 
 case = {
     "run_time_info": "T",
