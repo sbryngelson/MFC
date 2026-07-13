@@ -14,9 +14,23 @@ parser.add_argument("--tend", type=float, default=200e-6, help="Physical end tim
 parser.add_argument(
     "--overdrive",
     type=float,
-    default=2.5,
-    help="Isentropic compression of the UV-equilibrium driver (1 = plain; >1 = overdriven, thermo-consistent). ~2.5 sits near CJ pressure and launches a detonation.",
+    default=1.5,
+    help="Isentropic compression of the UV-equilibrium driver (1 = plain; >1 = overdriven, thermo-consistent). Kept mild so the driver/fresh contact stays stable.",
 )
+parser.add_argument(
+    "--drivervel",
+    type=float,
+    default=1200.0,
+    help="Driver forward (piston) velocity [m/s]; a velocity-driven shock heats fresh gas above the ~1100 K H2/O2 crossover so it ignites and couples into a CJ detonation.",
+)
+parser.add_argument(
+    "--seed",
+    dest="seed",
+    default=True,
+    action="store_true",
+    help="Add a small random velocity perturbation (perturb_flow) to seed transverse detonation cells.",
+)
+parser.add_argument("--no-seed", dest="seed", action="store_false")
 args = parser.parse_args()
 
 ctfile = "h2o2.yaml"
@@ -77,7 +91,7 @@ case = {
     # Algorithm
     "model_eqns": "5eq",
     "num_fluids": 1,
-    "num_patches": 3,
+    "num_patches": 2,
     "mpp_lim": "F",
     "mixture_err": "F",
     "weno_avg": "F",
@@ -122,33 +136,29 @@ case = {
     "patch_icpp(2)%y_centroid": Ly / 2,
     "patch_icpp(2)%length_x": x_driver,
     "patch_icpp(2)%length_y": Ly,
-    "patch_icpp(2)%vel(1)": 0.0,
+    "patch_icpp(2)%vel(1)": args.drivervel,
     "patch_icpp(2)%vel(2)": 0.0,
     "patch_icpp(2)%pres": P_drive,
     "patch_icpp(2)%alpha(1)": 1.0,
     "patch_icpp(2)%alpha_rho(1)": driver.density,
-    # Patch 3: off-center hot pocket just ahead of driver -> seeds transverse cells
-    "patch_icpp(3)%geometry": 2,
-    "patch_icpp(3)%alter_patch(1)": "T",
-    "patch_icpp(3)%x_centroid": x_driver * 1.2,
-    "patch_icpp(3)%y_centroid": 0.35 * Ly,
-    "patch_icpp(3)%radius": 0.04 * Ly,
-    "patch_icpp(3)%vel(1)": 0.0,
-    "patch_icpp(3)%vel(2)": 0.0,
-    "patch_icpp(3)%pres": P_drive,
-    "patch_icpp(3)%alpha(1)": 1.0,
-    "patch_icpp(3)%alpha_rho(1)": driver.density,
     # Fluid EOS (ideal-gas closure is bypassed by chemistry, but gamma must be set)
     "fluid_pp(1)%gamma": 1.0 / (1.4 - 1.0),
     "fluid_pp(1)%pi_inf": 0.0,
 }
+
+# Seed transverse cells with a small random velocity perturbation (built-in
+# perturb_flow adds a transverse-velocity kick ~ mag*|u| behind the front). A hot
+# pocket ahead of the front instead over-compresses on impact and NaNs.
+if args.seed:
+    case["perturb_flow"] = "T"
+    case["perturb_flow_fluid"] = 1
+    case["perturb_flow_mag"] = 0.05
 
 # Species mass fractions per patch + per-species output
 for i in range(len(fresh.Y)):
     case[f"chem_wrt_Y({i + 1})"] = "T"
     case[f"patch_icpp(1)%Y({i + 1})"] = float(fresh.Y[i])
     case[f"patch_icpp(2)%Y({i + 1})"] = float(driver.Y[i])
-    case[f"patch_icpp(3)%Y({i + 1})"] = float(driver.Y[i])
 
 if __name__ == "__main__":
     print(json.dumps(case))

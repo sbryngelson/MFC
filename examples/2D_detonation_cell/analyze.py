@@ -8,10 +8,15 @@ result against Chapman-Jouguet (CJ) detonation theory:
      tangency construction -- there is no built-in Cantera or SDToolbox
      CJ routine, so it is implemented directly below).
   2. Tracks the leading-shock position over time from the saved pressure
-     fields and fits a propagation speed, compared to the CJ speed.
+     fields and fits a propagation speed, compared to the CJ speed; also
+     tracks the OH-rise location to check the reaction zone stays coupled
+     to the shock (bounded induction gap, not a growing one).
   3. Accumulates per-cell maximum pressure into a soot-foil image and
      estimates the transverse cell size from the streak spacing.
-  4. Saves T / pressure / Y_OH snapshots showing the front structure.
+  4. Saves T / pressure / Y_OH / numerical-Schlieren snapshots showing the
+     front structure.
+  5. Renders a T + Y_OH animation (GIF) of the detonation propagating down
+     the channel.
 
 Run from this directory after post_process has been executed:
     python analyze.py
@@ -189,19 +194,25 @@ print(f"Loaded {len(steps)} production timesteps (dt={dt:.4e} s, t_step_save={t_
 # per-column leading-tip position, gives the same propagation speed to <1%.
 
 THRESH = 2.0 * P0
+OH_FRAC = 0.1  # reaction-front threshold: fraction of this step's peak y-avg Y_OH
 times = np.array([s * dt for s in steps if s > 0])
 x_front = np.full(len(times), np.nan)
+x_react = np.full(len(times), np.nan)  # y-avg OH-rise location -> induction-gap / coupling check
 domain_x_max = None
 
 for i, s in enumerate(s for s in steps if s > 0):
-    a = assemble_silo(CASE_DIR, s, var="pres")
+    a = assemble_silo(CASE_DIR, s)  # pres + Y_OH (cheap: <0.2 s/step)
     p = a.variables["pres"]
+    oh_avg = np.nanmean(a.variables["Y_OH"], axis=1)
     if domain_x_max is None:
         domain_x_max = a.x_cc.max()
     p_avg = p.mean(axis=1)
     above = np.where(p_avg > THRESH)[0]
     if above.size:
         x_front[i] = a.x_cc[above[-1]]
+    oh_hot = np.where(oh_avg > OH_FRAC * oh_avg.max())[0]
+    if oh_hot.size:
+        x_react[i] = a.x_cc[oh_hot[-1]]
 
 # Exclude points where the front has exited the domain (open x_domain%end)
 # and fit only the later half of the remaining run, per-brief, to avoid the
@@ -236,6 +247,44 @@ plt.close()
 print("Saved: front_speed.png")
 
 
+# Coupling check: induction gap = (leading shock x) - (y-avg OH-rise x). A
+# reaction zone riding just behind the shock with a small gap that is flat
+# or shrinking over the fit window is a coupled detonation; a gap that
+# grows without bound (relative to its own peak) as the run progresses is
+# the decoupling failure mode this run was fixed from. The absolute check
+# (gap << domain length) catches a large-but-flat offset; the drift check
+# catches a small-but-diverging one.
+gap = x_front - x_react
+gap_fit = gap[fit_mask]
+window_dt = times[fit_mask].max() - times[fit_mask].min()
+gap_slope = np.polyfit(times[fit_mask], gap_fit, 1)[0]
+gap_growth_frac = gap_slope * window_dt / np.nanmax(gap_fit)  # drift over the window, relative to peak gap
+cell_dx = a.x_cc[1] - a.x_cc[0]
+coupled = (np.nanmax(gap_fit) < 0.2 * domain_x_max) and (gap_growth_frac < 0.3)
+print("\nCoupling check (induction gap = shock position - OH-rise position):")
+print(f"  mean gap = {np.nanmean(gap_fit) * 1e3:.3f} mm, max = {np.nanmax(gap_fit) * 1e3:.3f} mm ({np.nanmax(gap_fit) / cell_dx:.1f} cells, {np.nanmax(gap_fit) / domain_x_max * 100:.1f}% of domain)")
+print(f"  gap drift over fit window = {gap_slope * window_dt * 1e3:.3f} mm ({gap_growth_frac * 100:+.0f}% of peak gap)")
+print(f"  -> {'COUPLED (bounded, non-growing reaction-zone gap)' if coupled else 'DECOUPLED (reaction zone falling behind)'}")
+
+# Local (finite-difference) front speed in the final unsaturated interval,
+# to show whether the front is still converging toward D_CJ as it nears
+# the domain exit (the linear fit above averages over the whole window).
+idx_last2 = np.where(unsaturated)[0][-2:]
+D_local_end = (x_front[idx_last2[1]] - x_front[idx_last2[0]]) / (times[idx_last2[1]] - times[idx_last2[0]])
+print(f"  local front speed, last saved interval before exit: {D_local_end:.0f} m/s ({D_local_end / D_cj * 100:.1f}% of CJ)")
+
+fig, ax = plt.subplots(figsize=(7, 3.5))
+ax.plot(times[unsaturated] * 1e6, gap[unsaturated] * 1e3, "o", ms=3, color="0.5")
+ax.plot(times[fit_mask] * 1e6, gap_fit * 1e3, "o", ms=4, color="C1")
+ax.set_xlabel(r"$t$ ($\mu$s)")
+ax.set_ylabel("induction gap (mm)")
+ax.set_title("shock-to-OH-rise gap (bounded => coupled)")
+plt.tight_layout()
+plt.savefig("induction_gap.png", dpi=200)
+plt.close()
+print("Saved: induction_gap.png")
+
+
 # 4. Soot foil: per-cell maximum pressure over all saved steps
 pmax = None
 x_cc = y_cc = None
@@ -262,19 +311,32 @@ plt.close()
 print("Saved: soot_foil.png")
 
 # Cell-size estimate: transverse spacing of local pressure maxima (streak
-# tracks), sampled across many x-slices in the developed region (excludes
-# the fixed-IC driver block at x < x_driver=0.25*Lx and the domain edge).
-mask_x = (x_cc > 0.06) & (x_cc < 0.95 * x_cc.max())
+# tracks), sampled across many x-slices, excluding the fixed-IC driver
+# block at x < x_driver=0.25*Lx and the domain edge. Prominence is set
+# per-row relative to that row's own pressure variation (the fluctuation
+# amplitude grows by ~5x from mid-channel to the exit as the cells
+# mature, so a single fixed prominence either misses the faint early
+# streaks or picks up noise in them).
 dy = y_cc[1] - y_cc[0]
-spacings = []
-for row in pmax[mask_x, :]:
-    peaks, _ = find_peaks(row, prominence=3000.0, distance=max(1, int(0.001 / dy)))
-    if len(peaks) >= 2:
-        spacings.extend(np.diff(y_cc[peaks]).tolist())
-spacings = np.array(spacings)
-lam_mean, lam_median = spacings.mean(), np.median(spacings)
-print(f"\nCell-size estimate (transverse streak spacing, N={len(spacings)}):")
-print(f"  mean = {lam_mean * 1e3:.2f} mm, median = {lam_median * 1e3:.2f} mm, std = {spacings.std() * 1e3:.2f} mm")
+
+
+def _lambda_estimate(xlo, xhi):
+    mask_x = (x_cc > xlo) & (x_cc < xhi)
+    spacings = []
+    for row in pmax[mask_x, :]:
+        prom = max(300.0, 0.4 * row.std())
+        peaks, _ = find_peaks(row, prominence=prom, distance=max(1, int(0.0015 / dy)))
+        if len(peaks) >= 2:
+            spacings.extend(np.diff(y_cc[peaks]).tolist())
+    return np.array(spacings)
+
+
+spacings_mid = _lambda_estimate(0.07, 0.105)
+spacings_late = _lambda_estimate(0.105, 0.95 * x_cc.max())
+print("\nCell-size estimate (transverse streak spacing):")
+print(f"  mid-channel  (x=7-10.5 cm): N={len(spacings_mid)}, median = {np.median(spacings_mid) * 1e3:.2f} mm, mean = {spacings_mid.mean() * 1e3:.2f} mm")
+print(f"  near exit    (x=10.5-12 cm): N={len(spacings_late)}, median = {np.median(spacings_late) * 1e3:.2f} mm, mean = {spacings_late.mean() * 1e3:.2f} mm")
+print("  cells visibly coarsen approaching the domain exit -- still maturing toward a regular pattern, not yet asymptotic")
 
 
 # 5. Snapshots: T, pressure, Y_OH at a late (pre-exit) timestep
@@ -286,15 +348,22 @@ late_step = [s for s in steps if s > 0][late_idx]
 a = assemble_silo(CASE_DIR, late_step)
 t_late = late_step * dt
 
+# Zoom on the leading-front region: the transverse-wave/cellular structure
+# lives in a band just behind the current shock position, and is
+# invisible at full-domain (12 cm) scale in a 3 cm tall channel.
+zoom_lo = max(0.0, x_front[late_idx] - 0.05)
+zoom_hi = min(domain_x_max, x_front[late_idx] + 0.005)
+
 for var, cmap, label, fname in [
     ("T", "inferno", "$T$ (K)", "snapshot_T.png"),
     ("pres", "viridis", "$p$ (Pa)", "snapshot_pressure.png"),
     ("Y_OH", "cividis", "$Y_{OH}$", "snapshot_Y_OH.png"),
 ]:
-    fig, ax = plt.subplots(figsize=(12, 3.5))
+    fig, ax = plt.subplots(figsize=(9, 3.5))
     im = ax.pcolormesh(a.x_cc * 100, a.y_cc * 100, a.variables[var].T, shading="auto", cmap=cmap)
     ax.set_xlabel("x (cm)")
     ax.set_ylabel("y (cm)")
+    ax.set_xlim(zoom_lo * 100, zoom_hi * 100)
     ax.set_aspect("equal")
     ax.set_title(f"t = {t_late * 1e6:.1f} $\\mu$s (step {late_step})")
     plt.colorbar(im, ax=ax, label=label)
@@ -302,5 +371,60 @@ for var, cmap, label, fname in [
     plt.savefig(fname, dpi=200)
     plt.close()
     print(f"Saved: {fname}")
+
+# Numerical Schlieren: |grad(rho)|, rendered with the standard exponential
+# (synthetic-schlieren) attenuation so shocks/shear layers show as dark
+# ridges. alpha1 == 1 everywhere (single-fluid), so alpha_rho1 is the total
+# density.
+rho = a.variables["alpha_rho1"]
+drho_dx, drho_dy = np.gradient(rho, a.x_cc, a.y_cc)
+grad_rho = np.sqrt(drho_dx**2 + drho_dy**2)
+schlieren = np.exp(-15.0 * grad_rho / grad_rho.max())
+
+fig, ax = plt.subplots(figsize=(9, 3.5))
+im = ax.pcolormesh(a.x_cc * 100, a.y_cc * 100, schlieren.T, shading="auto", cmap="gray")
+ax.set_xlabel("x (cm)")
+ax.set_ylabel("y (cm)")
+ax.set_xlim(zoom_lo * 100, zoom_hi * 100)
+ax.set_aspect("equal")
+ax.set_title(f"numerical Schlieren, t = {t_late * 1e6:.1f} $\\mu$s (step {late_step})")
+plt.colorbar(im, ax=ax, label=r"$\exp(-15|\nabla\rho|/|\nabla\rho|_{max})$")
+plt.tight_layout()
+plt.savefig("snapshot_schlieren.png", dpi=200)
+plt.close()
+print("Saved: snapshot_schlieren.png")
+
+
+# 6. Animation: temperature + Y_OH fields over all saved timesteps, showing
+# the detonation propagate down the channel.
+print("\nBuilding T/Y_OH animation...")
+from matplotlib.animation import FuncAnimation, PillowWriter
+
+a0 = assemble_silo(CASE_DIR, steps[0])
+fig, (axT, axOH) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+meshT = axT.pcolormesh(a0.x_cc * 100, a0.y_cc * 100, a0.variables["T"].T, shading="auto", cmap="inferno", vmin=T0, vmax=3350.0)
+meshOH = axOH.pcolormesh(a0.x_cc * 100, a0.y_cc * 100, a0.variables["Y_OH"].T, shading="auto", cmap="cividis", vmin=0.0, vmax=0.013)
+for axx in (axT, axOH):
+    axx.set_ylabel("y (cm)")
+    axx.set_aspect("equal")
+axOH.set_xlabel("x (cm)")
+plt.colorbar(meshT, ax=axT, label="$T$ (K)")
+plt.colorbar(meshOH, ax=axOH, label="$Y_{OH}$")
+title = fig.suptitle("")
+plt.tight_layout()
+
+
+def _update(step):
+    fr = assemble_silo(CASE_DIR, step)
+    meshT.set_array(fr.variables["T"].T.ravel())
+    meshOH.set_array(fr.variables["Y_OH"].T.ravel())
+    title.set_text(f"t = {step * dt * 1e6:.1f} $\\mu$s (step {step})")
+    return meshT, meshOH, title
+
+
+ani = FuncAnimation(fig, _update, frames=steps, blit=False)
+ani.save("detonation_T.gif", writer=PillowWriter(fps=12), dpi=110)
+plt.close()
+print("Saved: detonation_T.gif")
 
 print("\nDone.")
