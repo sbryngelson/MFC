@@ -13,12 +13,14 @@ import cantera as ct
 parser = argparse.ArgumentParser(prog="2D_methane_detonation")
 parser.add_argument("--mfc", type=json.loads, default="{}", metavar="DICT", help="MFC toolchain state.")
 parser.add_argument("--scale", type=float, default=1.0, help="Grid multiplier.")
+parser.add_argument("--ndim", type=int, default=2, choices=(2, 3), help="Spatial dimensions.")
 parser.add_argument("--ar", type=float, default=3.0, help="Ar dilution per O2.")
 parser.add_argument("--drivervel", type=float, default=1500.0, help="Piston speed [m/s].")
 parser.add_argument("--overdrive", type=float, default=2.0, help="Driver over-compression.")
 parser.add_argument("--seedamp", type=float, default=40.0, help="Transverse cell-seed amplitude [m/s].")
 parser.add_argument("--tend", type=float, default=8.0e-5, help="Physical end time [s].")
 args = parser.parse_args()
+is_3d = args.ndim == 3
 
 ctfile = "gri30.yaml"
 X = f"CH4:1,O2:2,AR:{args.ar}"  # stoichiometric CH4 + 2 O2
@@ -34,11 +36,19 @@ if args.overdrive > 1.0:
 print(f"CH4 driver: T={driver.T:.0f} K P={driver.P:.3e} rho={driver.density:.4f} nsp={fresh.n_species}", file=sys.stderr)
 
 Ly = 0.04
+Lz = Ly
 Lx = 4.0 * Ly
-Ny = int(120 * args.scale)
-Nx = int(4 * Ny)
+if is_3d:
+    Ny = int(40 * args.scale)
+    Nx = int(4 * Ny)
+    Nz = Ny
+else:
+    Ny = int(120 * args.scale)
+    Nx = int(4 * Ny)
+    Nz = 0
 dx = Lx / Nx
 x_driver = 0.25 * Lx
+geom = 9 if is_3d else 3
 
 D_cj = 1800.0
 dt = 0.035 * dx / (D_cj + driver.sound_speed)
@@ -53,7 +63,7 @@ case = {
     "y_domain%end": Ly,
     "m": Nx,
     "n": Ny,
-    "p": 0,
+    "p": Nz,
     "dt": float(dt),
     "t_step_start": 0,
     "t_step_stop": NT,
@@ -88,7 +98,7 @@ case = {
     "prim_vars_wrt": "T",
     "chem_wrt_T": "T",
     # Patch 1: fresh premix, whole domain
-    "patch_icpp(1)%geometry": 3,
+    "patch_icpp(1)%geometry": geom,
     "patch_icpp(1)%x_centroid": Lx / 2,
     "patch_icpp(1)%y_centroid": Ly / 2,
     "patch_icpp(1)%length_x": Lx,
@@ -99,7 +109,7 @@ case = {
     "patch_icpp(1)%alpha(1)": 1.0,
     "patch_icpp(1)%alpha_rho(1)": fresh.density,
     # Patch 2: overdriven driver, left, piston pushing right
-    "patch_icpp(2)%geometry": 3,
+    "patch_icpp(2)%geometry": geom,
     "patch_icpp(2)%alter_patch(1)": "T",
     "patch_icpp(2)%x_centroid": x_driver / 2,
     "patch_icpp(2)%y_centroid": Ly / 2,
@@ -113,6 +123,23 @@ case = {
     "fluid_pp(1)%gamma": 1.0 / (1.3 - 1.0),
     "fluid_pp(1)%pi_inf": 0.0,
 }
+
+if is_3d:
+    case.update(
+        {
+            "z_domain%beg": 0.0,
+            "z_domain%end": Lz,
+            "bc_z%beg": -1,
+            "bc_z%end": -1,
+            "patch_icpp(1)%z_centroid": Lz / 2,
+            "patch_icpp(1)%length_z": Lz,
+            "patch_icpp(1)%vel(3)": 0.0,
+            "patch_icpp(2)%z_centroid": Lz / 2,
+            "patch_icpp(2)%length_z": Lz,
+            "patch_icpp(2)%vel(3)": 0.0,
+        }
+    )
+    case["patch_icpp(2)%vel(3)"] = f"{args.seedamp}*sin(2*pi*3*z/{Lz})"
 
 for i in range(fresh.n_species):
     case[f"patch_icpp(1)%Y({i + 1})"] = float(fresh.Y[i])
