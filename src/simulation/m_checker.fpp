@@ -37,6 +37,9 @@ contains
 
         call s_check_inputs_time_stepping
 
+        @:PROHIBIT(chemistry .and. chem_params%reaction_substeps < 0, &
+                   & "chem_params%reaction_substeps must be >= 0 (0 = reaction source in the flow RHS; > 0 = operator-split sub-stepping)")
+
         @:PROHIBIT(ib_state_wrt .and. .not. ib, "ib_state_wrt requires ib to be enabled")
         @:PROHIBIT(many_ib_patch_parallelism .and. .not. ib, "many_ib_patch_parallelism requires ib to be enabled")
 

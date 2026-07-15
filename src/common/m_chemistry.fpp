@@ -148,6 +148,81 @@ contains
 
     end subroutine s_compute_chemistry_reaction_flux
 
+    !> Operator-split, sub-stepped integration of the reaction source. Called after the flow update: each cell's constant-(rho, e)
+    !! reactor is advanced over dtime with chem_params%reaction_substeps forward-Euler sub-steps, updating the species partial
+    !! densities and temperature in place. Mixture density, momentum, and total energy are unchanged (reactions convert chemical to
+    !! thermal energy at fixed internal energy). Stabilizes stiff mechanisms where a single explicit flow-timestep reaction source
+    !! would overshoot and diverge.
+    subroutine s_chemistry_reaction_substep(q_cons_vf, q_T_sf, dtime, bounds)
+
+        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
+        type(scalar_field), intent(inout)                      :: q_T_sf
+        real(wp), intent(in)                                   :: dtime
+        type(int_bounds_info), dimension(1:3), intent(in)      :: bounds
+        integer                                                :: x, y, z, eqn, s, nsub
+        real(wp)                                               :: rho, energy, T, T_new, dt_sub, Ysum
+
+        #:if not MFC_CASE_OPTIMIZATION and USING_AMD
+            real(wp), dimension(10) :: Ys
+            real(wp), dimension(10) :: omega
+        #:else
+            real(wp), dimension(num_species) :: Ys
+            real(wp), dimension(num_species) :: omega
+        #:endif
+
+        nsub = chem_params%reaction_substeps
+        dt_sub = dtime/real(nsub, wp)
+
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[Ys, omega, eqn, s, rho, energy, T, T_new, Ysum]', copyin='[bounds, dt_sub, nsub]')
+        do z = bounds(3)%beg, bounds(3)%end
+            do y = bounds(2)%beg, bounds(2)%end
+                do x = bounds(1)%beg, bounds(1)%end
+                    rho = q_cons_vf(eqn_idx%cont%beg)%sf(x, y, z)
+
+                    $:GPU_LOOP(parallelism='[seq]')
+                    do eqn = eqn_idx%species%beg, eqn_idx%species%end
+                        Ys(eqn - eqn_idx%species%beg + 1) = q_cons_vf(eqn)%sf(x, y, z)/rho
+                    end do
+
+                    ! internal energy per mass, held fixed through the reactor sub-steps
+                    energy = q_cons_vf(eqn_idx%E)%sf(x, y, z)/rho
+                    $:GPU_LOOP(parallelism='[seq]')
+                    do eqn = eqn_idx%mom%beg, eqn_idx%mom%end
+                        energy = energy - 0.5_wp*(q_cons_vf(eqn)%sf(x, y, z)/rho)**2._wp
+                    end do
+
+                    T = q_T_sf%sf(x, y, z)
+
+                    do s = 1, nsub
+                        call get_net_production_rates(rho, T, Ys, omega)
+                        Ysum = 0._wp
+                        $:GPU_LOOP(parallelism='[seq]')
+                        do eqn = 1, num_species
+                            Ys(eqn) = Ys(eqn) + dt_sub*molecular_weights(eqn)*omega(eqn)/rho
+                            if (Ys(eqn) < 0._wp) Ys(eqn) = 0._wp
+                            Ysum = Ysum + Ys(eqn)
+                        end do
+                        $:GPU_LOOP(parallelism='[seq]')
+                        do eqn = 1, num_species
+                            Ys(eqn) = Ys(eqn)/Ysum
+                        end do
+                        T_new = T
+                        call get_temperature(energy, T, Ys, .true., T_new)
+                        T = T_new
+                    end do
+
+                    $:GPU_LOOP(parallelism='[seq]')
+                    do eqn = eqn_idx%species%beg, eqn_idx%species%end
+                        q_cons_vf(eqn)%sf(x, y, z) = rho*Ys(eqn - eqn_idx%species%beg + 1)
+                    end do
+                    q_T_sf%sf(x, y, z) = T
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_chemistry_reaction_substep
+
     !> Compute species mass diffusion fluxes at cell interfaces using mixture-averaged diffusivities.
     subroutine s_compute_chemistry_diffusion_flux(idir, q_prim_qp, flux_src_vf, irx, iry, irz, q_T_sf)
 

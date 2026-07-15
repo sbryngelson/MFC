@@ -1089,7 +1089,7 @@ def _load():
     # chem_params
     for a in ["diffusion", "reactions"]:
         _r(f"chem_params%{a}", LOG, {"chemistry"})
-    for a in ["gamma_method", "transport_model"]:
+    for a in ["gamma_method", "transport_model", "reaction_substeps"]:
         _r(f"chem_params%{a}", INT, {"chemistry"})
 
     # Per-fluid output arrays
