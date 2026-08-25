@@ -158,12 +158,31 @@ Each piece lands independently and keeps goldens neutral except where a change i
 | # | piece | notes |
 |---|---|---|
 | 0 | sound speed | #1762, landed |
-| 1 | reconcile the two mixture implementations | `s_accumulate_mixture_properties` and `s_convert_species_to_mixture_variables_kernel` disagree today. The second special-cases `num_fluids == 1 .and. bubbles_euler` to `gamma = gammas(1)`, `pi_inf = pi_infs(1)` (unweighted), and applies `mpp_lim` clipping and renormalisation to `alpha_K` in place before accumulating; the first does neither, always computing `sum(alpha_i*gammas_i)`. Everything downstream dispatches through one of these, so they must become one first. The narrow scope of the disagreement — single-fluid bubble cases, plus the `mpp_lim` path — bounds the golden impact. |
+| 1 | single home for the mixture accumulation | `s_accumulate_mixture_properties` (in `m_riemann_state.fpp`) and the `else` branch of `s_convert_species_to_mixture_variables_kernel` (in `m_variables_conversion.fpp`) contain the *same* four-line accumulation loop. Move the former into `m_variables_conversion.fpp` and have the kernel call it. Behaviour-neutral and golden-neutral. See the note below on why these two routines are **not** merged. |
 | 2 | energy and enthalpy operators | Moves the energy expression out of six solver files. Largest refactor; no new EOS. |
 | 3 | pressure inversion operator | Four copies collapse to one; #1709's known-wrong site is corrected here. |
 | 4 | `eos_model(i)` and per-fluid dispatch | Plumbing into the centralised operators, stiffened gas as the only backend. Behaviour-neutral by construction. Drops `gamma`/`pi_inf` from the operator signatures. |
 | 5 | JWL backend | Sound speed, energy, pressure. Cannot start before 4. |
 | 6 | relaxation isentrope | Separate track. `rho(p)` and `drho/dp` per phase; JWL has neither in closed form, so this needs a nested sub-iteration or a reformulated relaxation. |
+
+### Why the two mixture routines are not merged
+
+They look like duplicates and are not. `s_accumulate_mixture_properties` is a *parameterised
+subset* accumulator: callers pass `nf` as either `num_fluids` or `num_fluids - 1` (excluding
+the gas phase in the bubbles path), and pass either `alpha_L` or the limited `alpha_lim_L`.
+`s_convert_species_to_mixture_variables_kernel` always runs over `num_fluids`, clips and
+renormalises `alpha_K` in place under `mpp_lim`, special-cases
+`num_fluids == 1 .and. bubbles_euler`, and optionally emits `Re_K` and `G_K`.
+
+Merging them would require `nf`, a clipping flag, and optional `Re_K`/`G_K` outputs on a
+`[seq]` device routine — reintroducing the optional-dummy pattern that #1714's review flagged
+and that was removed for backend portability. Only the shared accumulation loop is extracted;
+the differing wrappers stay.
+
+The extracted routine keeps the name `s_accumulate_mixture_properties` and lives in
+`m_variables_conversion.fpp` until piece 4 relocates it to `m_eos.fpp` alongside the
+operators. It is the single place where per-fluid EOS dispatch enters the stiffened-gas
+mixture path.
 
 Two cross-cutting items land **before** piece 2, because pieces 2 through 5 all touch hot
 device code and a repeat of the #1714 regression would otherwise be invisible until someone
@@ -180,7 +199,7 @@ benchmarked on the right hardware:
 
 | piece | goldens | additional |
 |---|---|---|
-| 1 | **expected to move** — it resolves a real disagreement | must state which path changed and why |
+| 1 | neutral — pure extraction, identical arithmetic | full suite must be bit-identical; no golden regeneration is acceptable here |
 | 2 | neutral | kernel-resource check |
 | 3 | neutral except #1709's corrected site | |
 | 4 | neutral by construction | see both traps below |
