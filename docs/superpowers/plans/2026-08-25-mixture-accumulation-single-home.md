@@ -18,7 +18,11 @@
 - No derived-type dummy arguments on routines carrying `$:GPU_ROUTINE(parallelism='[seq]')`. Measured: collapses amdflang register allocation, ~20% on gfx90a. See spec, "Constraints".
 - Line length ≤ 132 characters.
 - `./mfc.sh precheck` must pass before every commit.
-- This change must be **bit-identical**. Any golden difference is a defect in this plan's execution, never something to regenerate away.
+- This change must **pass the goldens at their existing tolerances**, with none regenerated: this is a
+  pure extraction, so a case moving past tolerance means the arithmetic was altered in transit. Note
+  the goldens are tolerance-compared, not bit-compared — bit-identity is expected here but is not the
+  requirement, and the extracted loop gains a `$:GPU_LOOP(parallelism='[seq]')` directive the kernel's
+  copy did not carry.
 
 ---
 
