@@ -162,6 +162,7 @@ Each piece lands independently and keeps goldens neutral except where a change i
 | 2a | energy operator: Riemann solvers + CBC | Hot path and the densest duplication. Unblocks per-fluid dispatch in the flux. |
 | 2b | energy operator: IGR | `m_igr.fpp` carries its own EOS algebra (8 sites); a separate solver family whose usage has not yet been characterised. |
 | 2c | energy operator: diagnostics | `m_data_output` in all three targets, `post_process/m_derived_variables`, `m_sim_helpers`. Cold path, low risk. |
+| 2e | energy operator: the conversion routines | `m_variables_conversion.fpp` itself, 17 sites including `s_convert_primitive_to_flux_variables`. Separated because operator and callers would then share a file, and the flux routine has its own chemistry branch. |
 | 2d | energy operator: pre_process initial conditions | `m_assign_variables`, `m_check_patches`. Different lifecycle - runs once, no GPU - and a second EOS getting the ICs wrong is silent. |
 | 3 | pressure inversion operator | Four copies collapse to one; #1709's known-wrong site is corrected here. |
 | 4 | `eos_model(i)` and per-fluid dispatch | Plumbing into the centralised operators, stiffened gas as the only backend. Behaviour-neutral by construction. Drops `gamma`/`pi_inf` from the operator signatures. |

@@ -22,6 +22,27 @@
 
 ---
 
+## Scope: what this piece does and does not cover
+
+**In scope:** the fourteen stiffened-gas energy sites in the five Riemann solvers, plus one dead
+assignment in CBC.
+
+**Deliberately out of scope, with reasons:**
+
+- **Enthalpy.** The spec pairs energy with enthalpy. After #1762 removed `H` from the sound-speed
+  interface, the only surviving uses are `H = (E + p)/rho` at sites that need it for the Roe average
+  and the magnetosonic speed. That is one division, not an equation of state, and centralising it
+  would buy nothing. The enthalpy half of piece 2 is therefore closed as "nothing to do", not
+  deferred.
+- **`m_variables_conversion.fpp` (17 sites, including `s_convert_primitive_to_flux_variables:1042`).**
+  These are the conversion routines themselves, which sit in the same module as the operator and are
+  on the hot path. They belong in their own piece - call it **2e** - because converting them is a
+  different review: the operator and its callers would then live in one file, and the flux-variable
+  routine has its own chemistry branch to keep clear of. Assigning them to 2a would double this
+  piece's size and mix two kinds of change. **This gap was missed in the spec's first re-cut and must
+  be added there.**
+- **IGR, hypoelastic, Lagrangian bubbles, diagnostics, pre-process ICs.** Pieces 2b, 2c and 2d.
+
 ### Task 1: Add the energy operator and delete one dead assignment
 
 **Files:**
@@ -162,9 +183,9 @@ Expected: success. All five solvers already `use m_variables_conversion`.
 Extract the AMDGPU code object and compare against the pre-change binary:
 
 ```bash
-llvm-objcopy --dump-section=.llvm.offloading=off.bin build/install/*/bin/simulation /dev/null
+/opt/rocm-7.2.0/llvm/bin/llvm-objcopy --dump-section=.llvm.offloading=off.bin build/install/*/bin/simulation /dev/null
 python3 -c "d=open('off.bin','rb').read(); i=d.find(b'\x7fELF'); open('dev.elf','wb').write(d[i:])"
-llvm-readelf --notes dev.elf | grep -A30 riemann_solver_hllc
+/opt/rocm-7.2.0/llvm/bin/llvm-readelf --notes dev.elf | grep -A30 riemann_solver_hllc
 ```
 Compare `.private_segment_fixed_size`, `.vgpr_count` and `.agpr_count` for the HLLC kernels against the same dump taken before Task 2. Expected: unchanged. `s_compute_energy` takes only scalars, so no aggregate is materialised — but this is exactly the check that caught #1714, and "expected" is what that PR assumed.
 
@@ -286,7 +307,7 @@ Present to your human partner: whether it is reachable, whether it appears delib
 - [ ] `./mfc.sh precheck -j 8` — expect 7/7
 - [ ] `./mfc.sh test --gpu mp` — expect 0 failed, 0 goldens regenerated (Tasks 1–3)
 - [ ] HLLC kernel scratch / VGPR / AGPR unchanged versus the pre-change binary
-- [ ] `5eq_rk3_weno3_hllc` benchmark, three runs before and three after, same node and case; expect the difference inside run-to-run spread (which has been 3–7% on this hardware, so quote the spread alongside the means rather than the delta alone)
+- [ ] `5eq_rk3_weno3_hllc` benchmark, three runs before and three after, same node and case; expect the difference inside run-to-run spread (which has been 1–7% on this hardware, so quote the spread alongside the means rather than the delta alone)
 - [ ] `git diff --stat` — expect a net reduction in `src/simulation/`
 
 ## Notes for the executor
