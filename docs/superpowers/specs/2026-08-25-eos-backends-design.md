@@ -159,11 +159,37 @@ Each piece lands independently and keeps goldens neutral except where a change i
 |---|---|---|
 | 0 | sound speed | #1762, landed |
 | 1 | single home for the mixture accumulation | `s_accumulate_mixture_properties` (in `m_riemann_state.fpp`) and the `else` branch of `s_convert_species_to_mixture_variables_kernel` (in `m_variables_conversion.fpp`) contain the *same* four-line accumulation loop. Move the former into `m_variables_conversion.fpp` and have the kernel call it. Behaviour-neutral and golden-neutral. See the note below on why these two routines are **not** merged. |
-| 2 | energy and enthalpy operators | Moves the energy expression out of six solver files. Largest refactor; no new EOS. |
+| 2a | energy operator: Riemann solvers + CBC | Hot path and the densest duplication. Unblocks per-fluid dispatch in the flux. |
+| 2b | energy operator: IGR | `m_igr.fpp` carries its own EOS algebra (8 sites); a separate solver family whose usage has not yet been characterised. |
+| 2c | energy operator: diagnostics | `m_data_output` in all three targets, `post_process/m_derived_variables`, `m_sim_helpers`. Cold path, low risk. |
+| 2d | energy operator: pre_process initial conditions | `m_assign_variables`, `m_check_patches`. Different lifecycle - runs once, no GPU - and a second EOS getting the ICs wrong is silent. |
 | 3 | pressure inversion operator | Four copies collapse to one; #1709's known-wrong site is corrected here. |
 | 4 | `eos_model(i)` and per-fluid dispatch | Plumbing into the centralised operators, stiffened gas as the only backend. Behaviour-neutral by construction. Drops `gamma`/`pi_inf` from the operator signatures. |
 | 5 | JWL backend | Sound speed, energy, pressure. Cannot start before 4. |
 | 6 | relaxation isentrope | Separate track. `rho(p)` and `drho/dp` per phase; JWL has neither in closed form, so this needs a nested sub-iteration or a reformulated relaxation. |
+
+### Survey: the actual size of the energy piece
+
+A grep for assignments mixing `gamma` and `pi_inf` finds roughly 69 lines of stiffened-gas algebra
+across 18 files, spanning all three executables - not the six solver files this document originally
+assumed. By file: `m_variables_conversion` 17, `m_riemann_solver_hllc` 9, `m_igr` 8,
+`m_riemann_solver_hypo_hlld` 7, `hll` and `hlld` 4 each, `post_process/m_derived_variables` 3, and
+one or two each in `m_sim_helpers`, `lf`, `m_ibm`, `m_hypoelastic`, `m_cbc`, `m_bubbles_EL`,
+`m_pressure_relaxation`, `pre_process/m_assign_variables`, `pre_process/m_check_patches`,
+`post_process/m_start_up` and `post_process/m_data_output`.
+
+The families that a first, narrower search missed entirely - IGR, hypoelastic, Lagrangian bubbles,
+pre-process initial conditions, and post-process derived variables - are why piece 2 is split into
+2a through 2d above. Any survey of this kind should start from `pi_inf`/`ps_inf` occurrences rather
+than from a guessed expression shape.
+
+Two variants to expect while doing the work. The MHD sites add `pres_mag`; the IBM sites use
+`dyn_pres` and one wraps the result in `(1 - alpha)`. Neither is a defect.
+
+One dead assignment turned up in the survey and should simply be deleted: `m_cbc.fpp:657` computes
+`E` on the non-chemistry path, but `E` is read only inside the `if (chemistry)` branch of the flux
+update. Its omission of `qv` is therefore harmless - the value is never used. The non-chemistry
+energy flux carries `qv` correctly through `dqv_dt`.
 
 ### Why the two mixture routines are not merged
 
