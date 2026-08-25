@@ -162,6 +162,7 @@ Each piece lands independently and keeps goldens neutral except where a change i
 | 2a | energy operator: Riemann solvers + CBC | Hot path and the densest duplication. Unblocks per-fluid dispatch in the flux. |
 | 2b | energy operator: IGR | `m_igr.fpp` carries its own EOS algebra (8 sites); a separate solver family whose usage has not yet been characterised. |
 | 2c | energy operator: diagnostics | `m_data_output` in all three targets, `post_process/m_derived_variables`, `m_sim_helpers`. Cold path, low risk. |
+| 2f | the remaining subsystems | `m_ibm.fpp` (energy from an image point, one variant scaled by `(1 - alpha_IP(1))`) and `m_bubbles_EL.fpp:841` (energy). Neither is a solver, a diagnostic or pre-process, so both fell through the first two cuts. |
 | 2e | energy operator: the conversion routines | `m_variables_conversion.fpp` itself, 17 sites including `s_convert_primitive_to_flux_variables`. Separated because operator and callers would then share a file, and the flux routine has its own chemistry branch. |
 | 2d | energy operator: pre_process initial conditions | `m_assign_variables`, `m_check_patches`. Different lifecycle - runs once, no GPU - and a second EOS getting the ICs wrong is silent. |
 | 3 | pressure inversion operator | Four copies collapse to one; #1709's known-wrong site is corrected here. |
@@ -221,6 +222,53 @@ benchmarked on the right hardware:
   named kernels from the AMDGPU code object and fail on regression past a threshold. It needs
   a GPU to compile, not to run; it takes seconds; and it is deterministic and
   board-independent.
+
+## Audit findings folded in
+
+**A fifth expression family exists.** The four families listed above - sound speed, energy, pressure
+inversion, enthalpy - are not exhaustive. `m_hypoelastic.fpp:629-630` computes a **bulk modulus**:
+
+```fortran
+blkmod1_K = ((gammas(1) + 1._wp)*pres_K + pi_infs(1))/gammas(1) + (4._wp/3._wp)*Gs_hypo(1)
+```
+
+That is the `alt_soundspeed` expression plus a shear term. It is EOS-dependent and needs a backend
+branch, but belongs to neither the energy nor the pressure piece. It gets its own piece when someone
+scopes it; it is recorded here so it is not discovered a third time.
+
+`m_bubbles_EL.fpp:376` is a **pressure inversion**, not an energy site, and belongs to piece 3.
+
+**Why the enumeration kept missing things.** Both re-cuts surveyed by file and then assigned by
+subsystem name, so anything not obviously a solver, a diagnostic or pre-process fell through - IBM,
+hypoelastic and Lagrangian bubbles were missed twice. Any future re-cut must assign every file the
+survey returns, including single-site files, and classify each site by *expression family* rather
+than by the subsystem its file belongs to.
+
+**Open decision: convert once or twice.** As ordered, pieces 2a-2f route roughly 69 sites through
+operators that still take `gamma` and `pi_inf`, and piece 4 then removes those arguments and edits
+every one of those sites again - two rounds of edit, review and golden risk on the hottest code in
+the solver, to reach a signature already decided on.
+
+The alternative is to settle the operators' final signature first, which turns on whether the
+mixture coefficients are derived inside the operator from `adv` or passed in, and convert once. That
+question is not free: deriving them inside is not equivalent today, because
+`s_convert_species_to_mixture_variables_kernel` special-cases `num_fluids == 1 .and. bubbles_euler`
+and clips `alpha_K` in place under `mpp_lim`. Those are bounded problems, and paying them once is
+probably cheaper than editing 69 hot-path lines twice. **Not yet decided.**
+
+**Method corrections for every piece's verification:**
+
+- Measure speed before correctness. The kernel dump takes seconds, the benchmark about twelve
+  minutes and the suite over an hour - and these refactors preserve the arithmetic by construction,
+  so the cheap check is also the one most likely to fail.
+- Compare kernel resources by *resource profile*, not by kernel name. Names embed post-fypp line
+  numbers, so an unrelated edit shifts them; a naive name-keyed diff of a neutral change produced
+  forty spurious differences.
+- Dump the baseline from a binary just built on the base commit. A stale install directory silently
+  produced a baseline one commit older than intended.
+- `./mfc.sh test -% 50` runs a uniform random sample and is a reasonable local gate; CI is the
+  exhaustive one. Say in the commit when a sample rather than the full suite was run.
+- The suite does exercise MHD: 37 cases match MHD or HLLD.
 
 ## Verification
 
