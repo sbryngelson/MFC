@@ -270,6 +270,89 @@ probably cheaper than editing 69 hot-path lines twice. **Not yet decided.**
   exhaustive one. Say in the commit when a sample rather than the full suite was run.
 - The suite does exercise MHD: 37 cases match MHD or HLLD.
 
+## Full inventory of equation-of-state usage
+
+Surveyed by *parameter array* rather than by expression shape or subsystem. Two earlier attempts
+missed files because they searched for a guessed expression, then assigned by subsystem name; this
+list starts from `gammas`, `pi_infs`, `qvs`, `gs_min`, `ps_inf`, `cvs`, `qvps` and assigns every file
+that consumes one.
+
+### By expression family
+
+| # | family | where | status |
+|---|---|---|---|
+| 1 | sound speed | `m_variables_conversion`, 26 solver/diagnostic sites | centralised (#1762) |
+| 2 | mixture coefficients | five Riemann solvers; **`m_viscous.fpp:145`** | solvers done; `m_viscous` keeps its own copy |
+| 3 | energy | five Riemann solvers; `m_cbc`; `m_ibm`; `m_bubbles_EL`; conversion routines; pre/post | solvers done; rest open |
+| 4 | pressure inversion | `m_pressure_relaxation`, `m_data_output` x2, `m_bubbles_EL:376` | open (piece 3) |
+| 5 | enthalpy | solvers (as `(E+p)/rho`); `m_phase_change` `hk` | closed for solvers; phase change open |
+| 6 | bulk modulus | `m_hypoelastic:629-630`, `m_rhs:1075-1077` | open, unassigned |
+| 7 | temperature inversion | `m_reactive_burn:56`, `m_phase_change` | open, unassigned |
+| 8 | entropy | `m_phase_change` `sk` | open, unassigned |
+| 9 | caloric relations | `m_phase_change` `ek`, `rhok`, `hk` (via `cvs`) | open, unassigned |
+| 10 | mixture coefficients + sound speed, Tait naming | `m_acoustic_src:232-252`; also `m_qbmm`, `m_bubbles_EE`, `pre_process/m_assign_variables` | **not** a second EOS: `B_tait` is `sum(alpha*pi_infs)` and `small_gamma` is `sum(alpha*gammas)` converted to Gamma at line 251. Seventh open-coded copy of the mixture rule, plus an open-coded sound speed |
+
+### By file, for the consumers no piece covered
+
+| file | refs | note |
+|---|---|---|
+| `m_phase_change.fpp` | ~104 | the largest EOS consumer in the codebase; `gs_min` 35, `cvs` 32, `ps_inf` 24, `qvs` 10, `qvps` 3 |
+| `m_viscous.fpp` | 32 | accumulates mixture coefficients itself, from `alpha_visc` |
+| `m_igr.fpp` | 20 | piece 2b |
+| `m_rhs.fpp` | 6 | bulk modulus with a shear term |
+| `m_acoustic_src.fpp` | 6 | mixture rule + sound speed, under Tait naming |
+| `m_reactive_burn.fpp` | 3 | temperature inversion |
+
+`cvs` and `qvps` are consumed almost exclusively by `m_phase_change`. No operator built so far touches
+them.
+
+## Edge cases that need a decision, hardest first
+
+**1. JWL may be thermodynamically incompatible with phase change.** `m_phase_change` needs entropy,
+temperature and per-phase enthalpy - a thermodynamically complete equation of state. Stiffened gas
+has closed forms for all of them via `cvs`, `gs_min`, `ps_inf`, `qvs`, `qvps`. JWL as normally
+written is a *mechanical* EOS, `p(rho, e)`, with no temperature or entropy unless a caloric
+extension is supplied. This is a physics limit, not an implementation gap, and it bounds what
+"support EOS backends generally" can mean.
+
+Prefer a validated opt-out to a hard prohibition, so unusual pairings stay reachable deliberately
+rather than by accident. The default should still be that an unvalidated pairing is refused rather
+than silently producing a wrong answer.
+
+**2. The Tait-named code is stiffened gas, and converts mechanically.** `m_acoustic_src` builds
+`B_tait = sum(alpha*pi_infs)` and `small_gamma = sum(alpha*gammas)`, then at line 251 converts to
+`Gamma = 1/gamma + 1` and computes a sound speed. It is the mixture rule and the sound speed
+open-coded under different names, both already covered by existing operators - a straightforward
+conversion, not a design problem.
+
+The `n_tait`/`B_tait` uses in `m_qbmm`, `m_bubbles_EE` and `pre_process/m_assign_variables` are
+different: they are Tait-form *isentrope* relations for bubble dynamics, e.g.
+`((1 + B)/(p + B))**(1/n)`. That is the same closed-form isentrope the pressure relaxation needs and
+the thing JWL lacks, so they belong with edge case 3 rather than with the mechanical conversions.
+
+**3. The relaxation isentrope.** `s_equilibrate_pressure` needs `rho(p)` and `drho/dp` per phase in
+closed form. JWL's isentrope is not analytically invertible. Needs a nested iteration or a
+reformulated relaxation. Numerical-methods work, tracked as piece 6.
+
+**4. `m_viscous` accumulates from `alpha_visc`, not `adv`.** Whether it can use the shared rule
+depends on whether `alpha_visc` carries the same meaning; under `bubbles_euler` the advection slot
+aliases the void fraction, so this needs checking rather than assuming.
+
+**5. `adv` is model-dependent.** Under `bubbles_euler` with `num_fluids == 1` the sole advection slot
+aliases `alf`. Any operator taking `adv` must go through `s_compute_mixture_coefficients`, which
+knows this. This is settled for the solvers and must not be re-derived elsewhere.
+
+**6. Mixed backends within a cell.** Restricted to `model_eqns = 3`, where `adv` is genuinely a
+composition. Unchanged from the approach section.
+
+## Correction to scope claims
+
+The work landed so far centralises the equation of state **for the Riemann solvers**. That is real,
+but it is not the whole equation of state: `m_phase_change` alone is a comparable body of EOS
+algebra, and families 6 through 10 above are untouched. Any claim that a second EOS can be added "in
+one place" is premature until at least families 2 through 4 are complete and 1, 2 and 4 in the edge
+case list are decided.
+
 ## Verification
 
 | piece | goldens | additional |
