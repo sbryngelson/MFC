@@ -315,9 +315,13 @@ written is a *mechanical* EOS, `p(rho, e)`, with no temperature or entropy unles
 extension is supplied. This is a physics limit, not an implementation gap, and it bounds what
 "support EOS backends generally" can mean.
 
-Prefer a validated opt-out to a hard prohibition, so unusual pairings stay reachable deliberately
-rather than by accident. The default should still be that an unvalidated pairing is refused rather
-than silently producing a wrong answer.
+**Decided: JWL with phase change is impermissible.** `case_validator.py` prohibits the combination.
+This cannot be implemented until `eos_model` exists (piece 4), since there is no parameter to
+prohibit against yet; it lands with that piece.
+
+The prohibition is the default, not the ceiling. If a caloric extension to JWL is supplied later,
+the constraint becomes a validated opt-out rather than a wall - the requirement is that an
+unvalidated pairing is refused rather than silently producing a wrong answer.
 
 **2. The Tait-named code is stiffened gas, and converts mechanically.** `m_acoustic_src` builds
 `B_tait = sum(alpha*pi_infs)` and `small_gamma = sum(alpha*gammas)`, then at line 251 converts to
@@ -325,8 +329,12 @@ than silently producing a wrong answer.
 open-coded under different names, both already covered by existing operators - a straightforward
 conversion, not a design problem.
 
-The `n_tait`/`B_tait` uses in `m_qbmm`, `m_bubbles_EE` and `pre_process/m_assign_variables` are
-different: they are Tait-form *isentrope* relations for bubble dynamics, e.g.
+`pre_process/m_assign_variables` also carries a Tait isentrope, in `s_perturb_primitive`. A
+case-sensitive grep of `src/` finds no caller, but that is not evidence of death: Fortran is
+case-insensitive, and hardcoded initial conditions reach code by mechanisms a name search does not
+follow. Leave it alone until the dispatch path is actually understood.
+
+The `n_tait`/`B_tait` uses in `m_qbmm` and `m_bubbles_EE` are different: they are Tait-form *isentrope* relations for bubble dynamics, e.g.
 `((1 + B)/(p + B))**(1/n)`. That is the same closed-form isentrope the pressure relaxation needs and
 the thing JWL lacks, so they belong with edge case 3 rather than with the mechanical conversions.
 
