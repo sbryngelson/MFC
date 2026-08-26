@@ -54,7 +54,13 @@ def read(binary: str) -> dict:
 
 
 def _strip(name: str) -> str:
-    """Kernel names embed post-fypp line numbers; unrelated edits shift them."""
+    """Normalise a kernel name to something stable across builds.
+
+    Names carry a per-module hash (`__omp_offloading_<hex>_<hex>__`) that changes whenever the
+    source file changes, and a post-fypp line number that shifts under unrelated edits. Leaving
+    either in means the kernels you just modified fail to match and are silently skipped.
+    """
+    name = name.split("__QM")[-1]
     return re.sub(r"_l\d+(_\d+)?$", "", name)
 
 
@@ -73,6 +79,8 @@ def compare(baseline: dict, current: dict) -> list:
         return counts
 
     was, now = profile(baseline), profile(current)
+    if sum(len(v) for v in was.values()) != sum(len(v) for v in now.values()):
+        print("WARNING: kernel count changed; amdflang regenerates the whole device image, so " "untouched kernels may shift too (see #1759)")
     regressions = []
     for name, olds in was.items():
         news = now.get(name)
