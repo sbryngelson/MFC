@@ -36,6 +36,15 @@ covered in `docs/documentation/contributing.md`.
 - `@:ACC_SETUP_VFs(...)`/`@:ACC_SETUP_SFs(...)` GPU pointer setup compiles only under
   Cray. Around MPI: `GPU_UPDATE(host=...)` before send, `GPU_UPDATE(device=...)` after
   receive.
+- NEVER give a `$:GPU_ROUTINE(parallelism='[seq]')` routine a derived-type dummy argument.
+  Measured on gfx90a: one `type(...)` in place of the equivalent scalars cost 134→394 VGPR,
+  2→138 AGPR, 28 B→4880 B scratch and ~20% wall-clock. The aggregate is address-taken, so
+  register promotion collapses across the whole enclosing loop, not just the call; `value`
+  does not help. Scalars and arrays are fine. Treat procedure pointers the same way.
+- That class of regression is invisible to CPU builds, goldens and CI. Catch it by diffing
+  `.private_segment_fixed_size`/`.vgpr_count`/`.agpr_count` from `llvm-readelf --notes` on
+  the AMDGPU ELF inside `.llvm.offloading`. Key on the resource values, not kernel names —
+  names embed post-fypp line numbers and shift under unrelated edits.
 
 ## Parameters
 
