@@ -2,8 +2,9 @@
 !!@file
 !!@brief Contains module m_amr
 
-#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR); this unit's kernels name no
-#! module allocatable that can be unallocated at launch.
+#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). Audited 2026-09-05: the only
+#! bare module allocatables this unit's kernels name are amr_cg and amr_cons_br (allocated before first use); every
+#! conditionally allocated one carries GPU_DECLARE (exempt), and no kernel names an allocatable component. Keep it that way.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 
