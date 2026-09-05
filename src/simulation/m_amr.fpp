@@ -2,6 +2,9 @@
 !!@file
 !!@brief Contains module m_amr
 
+#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR); this unit's kernels name no
+#! module allocatable that can be unallocated at launch.
+#:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 
 !> @brief Block-structured AMR: up to amr_max_blocks refined blocks (2:1 or 4:1 per amr_ref_ratio), optionally nested to
