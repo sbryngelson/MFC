@@ -28,7 +28,10 @@
             #:elif MFC_COMPILER == CCE_COMPILER_ID
                 #:set default_val = 'defaultmap(tofrom:aggregate) defaultmap(present:allocatable) defaultmap(present:pointer) '
             #:elif MFC_COMPILER == AMD_COMPILER_ID
-                #:set default_val = ''
+                #! present:allocatable, as on CCE: without it amdflang maps every allocatable array of derived type a kernel
+                #! touches (e.g. amr_cg(i)%sf) on EVERY launch, walking and re-attaching each component -- ~0.3 ms per launch
+                #! for a 10-component array, linear in the component count (amr-bench/ubench, 2026-09-05).
+                #:set default_val = 'defaultmap(present:allocatable) '
             #:else
                 #:set default_val = 'defaultmap(tofrom:aggregate) defaultmap(tofrom:allocatable) defaultmap(tofrom:pointer) '
             #:endif
