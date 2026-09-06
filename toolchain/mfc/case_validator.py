@@ -1782,6 +1782,10 @@ class CaseValidator:
         amr_bat_pad = self.get("amr_bat_pad")
         self.prohibit(amr_bat_pad is not None and amr_bat_pad > 0 and self.get("amr_batched_advance", "F") != "T", "amr_bat_pad > 0 requires amr_batched_advance = T")
         self.prohibit(amr_bat_pad is not None and (amr_bat_pad < 0 or amr_bat_pad > 1), "amr_bat_pad must satisfy 0 <= amr_bat_pad <= 1")
+        # PHYSICS_DOCS: amr_lb_block_cost (per-block load-balance cost, in mean-block weights) requires amr = T and is >= 0
+        amr_lb_block_cost = self.get("amr_lb_block_cost")
+        self.prohibit(amr_lb_block_cost is not None and not amr, "amr_lb_block_cost requires amr = T")
+        self.prohibit(amr_lb_block_cost is not None and amr_lb_block_cost < 0, "amr_lb_block_cost must be >= 0")
         amr_max_level = self.get("amr_max_level")
         amr_ref_ratio = self.get("amr_ref_ratio")
 

@@ -711,6 +711,7 @@ def _load():
     _r("amr_max_level", INT)
     _r("amr_cluster_eff", REAL)
     _r("amr_bat_pad", REAL)
+    _r("amr_lb_block_cost", REAL)
     _r("amr_blocking_factor", INT)
     _r("amr_ref_ratio", INT)
     _r("l0_ntile", INT)
@@ -1462,6 +1463,7 @@ _nv(
     "amr_device_pack",
     "amr_batched_gather",
     "amr_bat_pad",
+    "amr_lb_block_cost",
     "amr_batched_advance",
     "amr_max_blocks",
     "amr_max_grid_size",

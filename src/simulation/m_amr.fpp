@@ -3585,6 +3585,12 @@ contains
             if (p_glb > 0) wt(k) = wt(k)*real(amr_ref_ratio, wp)**amr_block_level(k)
             key(k) = f_morton(amr_region_lo_all(1, k), amr_region_lo_all(2, k), amr_region_lo_all(3, k))
         end do
+        ! amr_lb_block_cost > 0: charge every block a fixed cost of that many mean-block weights on top of its cells, so each
+        ! level's cut balances block COUNT as well as cells (ledger 86: with cells balanced to 1.5%, a rank's rhs step follows
+        ! its block count, r = +0.8, and the 25- vs 31-block ranks differ by 0.22 s/step that the fast ranks then wait).
+        if (amr_lb_block_cost > 0._wp .and. amr_num_blocks > 0) then
+            wt(1:amr_num_blocks) = wt(1:amr_num_blocks) + amr_lb_block_cost*sum(wt(1:amr_num_blocks))/real(amr_num_blocks, wp)
+        end if
 
         ! PER-LEVEL DISTRIBUTION: balance EVERY level independently, each block on its OWN weight. Tower co-location is gone - a
         ! level-1 block and its descendants are assigned separately, so a deep tower no longer pins its whole subtree (weight
