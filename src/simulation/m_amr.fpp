@@ -5833,6 +5833,15 @@ contains
                 if (n_glb > 0) then; allocate (cyb(lbound(amr_gycb, 1):ubound(amr_gycb, 1))); cyb = amr_gycb; end if
                 if (p_glb > 0) then; allocate (czb(lbound(amr_gzcb, 1):ubound(amr_gzcb, 1))); czb = amr_gzcb; end if
             end if
+            ! runtime invariant, not a validation layer: every Frontier lane (CCE and AMD, CPU and GPU) corrupts the heap on
+            ! the pinned-cap-above-rank-extent deck while gfortran under valgrind/ASan and amdflang here stay clean, and this
+            ! extension is the site that fits its arrays with zero slack (x_cb's last element is written; the parent-coordinate
+            ! read cxb(cl-1:cl) is unguarded for a child at its parent's edge). Abort with the numbers instead of corrupting.
+            call s_amr_check_ghost_bounds(1, amr_slots(amr_cur)%m, ubound(x_cb, 1), lbound(cxb, 1), ubound(cxb, 1), rr)
+            if (n_glb > 0) call s_amr_check_ghost_bounds(2, amr_slots(amr_cur)%n, ubound(y_cb, 1), lbound(cyb, 1), ubound(cyb, &
+                & 1), rr)
+            if (p_glb > 0) call s_amr_check_ghost_bounds(3, amr_slots(amr_cur)%p, ubound(z_cb, 1), lbound(czb, 1), ubound(czb, &
+                & 1), rr)
             do jg = amr_slots(amr_cur)%m + 1, amr_slots(amr_cur)%m + buff_size
                 cl = amr_isect_lo(1) + floor(real(jg, wp)/real(rr, wp))
                 k = modulo(jg, rr)
@@ -5959,6 +5968,25 @@ contains
         if (igr) call s_amr_igr_swap_sigma()
 
     end subroutine s_amr_swap_to_fine
+
+    !> Ghost-extension bounds for one dimension of the current fine block: the loops in s_amr_swap_to_fine write the coordinate
+    !! arrays up to ext + buff_size and read the parent boundaries cxb(cl - 1:cl) with cl = amr_isect_lo(d) + floor(jg/rr) over jg =
+    !! -1 - buff_size .. ext + buff_size. ! lint: runtime-check
+    impure subroutine s_amr_check_ghost_bounds(d, ext, xub, clo, chi, rr)
+
+        integer, intent(in) :: d, ext, xub, clo, chi, rr
+        integer             :: cl_lo, cl_hi
+
+        cl_lo = amr_isect_lo(d) + floor(real(-1 - buff_size, wp)/real(rr, wp)) - 1
+        cl_hi = amr_isect_lo(d) + (ext + buff_size)/rr
+        if (ext + buff_size > xub .or. cl_lo < clo .or. cl_hi > chi) then
+            print '(A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0)', ' [amr] ghost extension out of bounds: block ', amr_cur, &
+                & ' level ', amr_block_level(amr_cur), ' dim ', d, ' ext ', ext, ' writes to ', ext + buff_size, ' of ', xub, &
+                & '; reads parent ', cl_lo, ':', cl_hi, ' of ', clo, ':', chi
+            call s_mpi_abort('AMR fine swap: the ghost coordinate extension would run past its arrays (numbers above).')
+        end if
+
+    end subroutine s_amr_check_ghost_bounds
 
     !> Restore the global grid state saved by s_amr_swap_to_fine.
     impure subroutine s_amr_restore_coarse()
