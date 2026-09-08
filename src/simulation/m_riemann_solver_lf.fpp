@@ -12,7 +12,7 @@ module m_riemann_solver_lf
     use m_global_parameters
     use m_variables_conversion
     use m_constants, only: riemann_solver_hll, riemann_solver_hllc, riemann_solver_lax_friedrichs
-    use m_thermochem, only: gas_constant, get_mixture_molecular_weight, get_mixture_specific_heat_cv_mass, &
+    use m_thermochem, only: num_species_max, gas_constant, get_mixture_molecular_weight, get_mixture_specific_heat_cv_mass, &
         & get_mixture_energy_mass, get_species_specific_heats_r, get_mixture_specific_heat_cp_mass, molecular_weights
     use m_riemann_state
 
@@ -44,11 +44,11 @@ contains
             real(wp), dimension(10)   :: Cp_iL, Cp_iR, Xs_L, Xs_R, Gamma_iL, Gamma_iR
             real(wp), dimension(3, 3) :: vel_grad_L, vel_grad_R  !< Averaged velocity gradient tensor `d(vel_i)/d(coord_j)`.
         #:else
-            real(wp), dimension(num_fluids)  :: alpha_rho_L, alpha_rho_R
-            real(wp), dimension(num_vels)    :: vel_L, vel_R
-            real(wp), dimension(num_fluids)  :: alpha_L, alpha_R
-            real(wp), dimension(num_species) :: Ys_L, Ys_R
-            real(wp), dimension(num_species) :: Cp_iL, Cp_iR, Xs_L, Xs_R, Gamma_iL, Gamma_iR
+            real(wp), dimension(num_fluids)      :: alpha_rho_L, alpha_rho_R
+            real(wp), dimension(num_vels)        :: vel_L, vel_R
+            real(wp), dimension(num_fluids)      :: alpha_L, alpha_R
+            real(wp), dimension(num_species_max) :: Ys_L, Ys_R
+            real(wp), dimension(num_species_max) :: Cp_iL, Cp_iR, Xs_L, Xs_R, Gamma_iL, Gamma_iR
             !> Averaged velocity gradient tensor `d(vel_i)/d(coord_j)`.
             real(wp), dimension(num_dims, num_dims) :: vel_grad_L, vel_grad_R
         #:endif

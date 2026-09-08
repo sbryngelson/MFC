@@ -21,7 +21,7 @@ module m_ibm
     use m_model
     use m_patch_geometries
     use m_collisions
-    use m_thermochem, only: num_species, gas_constant, get_mixture_molecular_weight, get_mixture_energy_mass
+    use m_thermochem, only: num_species_max, num_species, gas_constant, get_mixture_molecular_weight, get_mixture_energy_mass
 
     implicit none
 
@@ -164,12 +164,12 @@ contains
             real(wp), dimension(12) :: presb_IP, massv_IP
             real(wp), dimension(10) :: Ys_IP
         #:else
-            real(wp), dimension(num_fluids)  :: Gs
-            real(wp), dimension(num_fluids)  :: alpha_rho_IP, alpha_IP
-            real(wp), dimension(nb)          :: r_IP, v_IP, pb_IP, mv_IP
-            real(wp), dimension(nb*nmom)     :: nmom_IP
-            real(wp), dimension(nb*nnode)    :: presb_IP, massv_IP
-            real(wp), dimension(num_species) :: Ys_IP
+            real(wp), dimension(num_fluids)      :: Gs
+            real(wp), dimension(num_fluids)      :: alpha_rho_IP, alpha_IP
+            real(wp), dimension(nb)              :: r_IP, v_IP, pb_IP, mv_IP
+            real(wp), dimension(nb*nmom)         :: nmom_IP
+            real(wp), dimension(nb*nnode)        :: presb_IP, massv_IP
+            real(wp), dimension(num_species_max) :: Ys_IP
         #:endif
         real(wp) :: T_IP, mw_IP, e_IP  !< Image-point temperature, mixture MW, and mass-specific internal energy (chemistry)
         real(wp) :: v_blow_eff         !< Effective surface blowing speed (after any pressure-coupled burn-rate scaling)

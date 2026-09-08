@@ -238,7 +238,7 @@ contains
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(10) :: Yi_avg, Phi_avg, h_avg_2
         #:else
-            real(wp), dimension(num_species) :: Yi_avg, Phi_avg, h_avg_2
+            real(wp), dimension(num_species_max) :: Yi_avg, Phi_avg, h_avg_2
         #:endif
         real(wp) :: Cp_avg, Cv_avg, T_avg, eps
 

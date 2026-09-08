@@ -13,9 +13,9 @@ module m_cbc
     use m_variables_conversion
     use m_compute_cbc
     use m_constants, only: riemann_solver_hll, model_eqns_gamma_law, recon_type_weno, recon_type_muscl
-    use m_thermochem, only: get_mixture_energy_mass, get_mixture_specific_heat_cv_mass, get_mixture_specific_heat_cp_mass, &
-        & gas_constant, get_mixture_molecular_weight, get_species_enthalpies_rt, molecular_weights, get_species_specific_heats_r, &
-        & get_mole_fractions
+    use m_thermochem, only: num_species_max, get_mixture_energy_mass, get_mixture_specific_heat_cv_mass, &
+        & get_mixture_specific_heat_cp_mass, gas_constant, get_mixture_molecular_weight, get_species_enthalpies_rt, &
+        & molecular_weights, get_species_specific_heats_r, get_mole_fractions
 
     implicit none
 
@@ -488,13 +488,13 @@ contains
             real(wp), dimension(3)  :: dalpha_rho_dt
             real(wp), dimension(10) :: Ys, h_k, dYs_dt, dYs_ds, Xs, Gamma_i, Cp_i
         #:else
-            real(wp), dimension(num_fluids)  :: alpha_rho, dalpha_rho_ds, mf
-            real(wp), dimension(num_vels)    :: vel, dvel_ds
-            real(wp), dimension(num_fluids)  :: adv_local, dadv_ds
-            real(wp), dimension(num_fluids)  :: dadv_dt
-            real(wp), dimension(num_dims)    :: dvel_dt
-            real(wp), dimension(num_fluids)  :: dalpha_rho_dt
-            real(wp), dimension(num_species) :: Ys, h_k, dYs_dt, dYs_ds, Xs, Gamma_i, Cp_i
+            real(wp), dimension(num_fluids)      :: alpha_rho, dalpha_rho_ds, mf
+            real(wp), dimension(num_vels)        :: vel, dvel_ds
+            real(wp), dimension(num_fluids)      :: adv_local, dadv_ds
+            real(wp), dimension(num_fluids)      :: dadv_dt
+            real(wp), dimension(num_dims)        :: dvel_dt
+            real(wp), dimension(num_fluids)      :: dalpha_rho_dt
+            real(wp), dimension(num_species_max) :: Ys, h_k, dYs_dt, dYs_ds, Xs, Gamma_i, Cp_i
         #:endif
         real(wp), dimension(2) :: Re_cbc
         real(wp), dimension(3) :: lambda

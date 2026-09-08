@@ -14,7 +14,7 @@ module m_riemann_solver_hll
     use m_constants, only: riemann_solver_hll, riemann_solver_hllc, riemann_solver_lax_friedrichs, avg_state_roe, &
         & avg_state_arithmetic, wave_speeds_direct, wave_speeds_pressure
     use m_chemistry
-    use m_thermochem, only: gas_constant, get_mixture_molecular_weight, get_mixture_specific_heat_cv_mass, &
+    use m_thermochem, only: num_species_max, gas_constant, get_mixture_molecular_weight, get_mixture_specific_heat_cv_mass, &
         & get_mixture_energy_mass, get_species_specific_heats_r, get_species_enthalpies_rt, get_mixture_specific_heat_cp_mass, &
         & molecular_weights
     use m_riemann_state
@@ -47,11 +47,11 @@ contains
             real(wp), dimension(10) :: Ys_L, Ys_R, R_species, h_iL, h_iR
             real(wp), dimension(10) :: Cp_iL, Cp_iR, Xs_L, Xs_R, Gamma_iL, Gamma_iR
         #:else
-            real(wp), dimension(num_fluids)  :: alpha_rho_L, alpha_rho_R
-            real(wp), dimension(num_vels)    :: vel_L, vel_R
-            real(wp), dimension(num_fluids)  :: alpha_L, alpha_R
-            real(wp), dimension(num_species) :: Ys_L, Ys_R, R_species, h_iL, h_iR
-            real(wp), dimension(num_species) :: Cp_iL, Cp_iR, Xs_L, Xs_R, Gamma_iL, Gamma_iR
+            real(wp), dimension(num_fluids)      :: alpha_rho_L, alpha_rho_R
+            real(wp), dimension(num_vels)        :: vel_L, vel_R
+            real(wp), dimension(num_fluids)      :: alpha_L, alpha_R
+            real(wp), dimension(num_species_max) :: Ys_L, Ys_R, R_species, h_iL, h_iR
+            real(wp), dimension(num_species_max) :: Cp_iL, Cp_iR, Xs_L, Xs_R, Gamma_iL, Gamma_iR
         #:endif
         real(wp) :: rho_L, rho_R
         real(wp) :: pres_L, pres_R

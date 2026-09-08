@@ -1152,7 +1152,7 @@ contains
         integer                         :: i, j, k, l, s, d  !< Generic loop iterator
         real(wp)                        :: nondim_time       !< Non-dimensional time
         real(wp)                        :: tmp               !< Temporary variable to store quantity for mpi_allreduce
-        real(wp)                        :: rhoYks(1:num_species)
+        real(wp)                        :: rhoYks(1:num_species_max)
 
         T = dflt_T_guess
 

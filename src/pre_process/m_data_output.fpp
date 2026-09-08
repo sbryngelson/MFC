@@ -20,7 +20,7 @@ module m_data_output
     use m_boundary_common
     use m_boundary_conditions
     use m_boundary_io
-    use m_thermochem, only: species_names
+    use m_thermochem, only: num_species_max, species_names
     use m_helper
     use m_constants, only: model_eqns_5eq, precision_single
 
@@ -70,7 +70,7 @@ contains
         real(wp)                                                    :: gamma, lit_gamma, pi_inf, qv
         real(wp)                                                    :: rho
         real(wp)                                                    :: pres, T
-        real(wp)                                                    :: rhoYks(1:num_species)
+        real(wp)                                                    :: rhoYks(1:num_species_max)
         real(wp)                                                    :: pres_mag
         type(scalar_field), intent(inout), optional                 :: q_T_sf
 

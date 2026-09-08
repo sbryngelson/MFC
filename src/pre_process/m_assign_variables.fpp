@@ -12,7 +12,7 @@ module m_assign_variables
     use m_global_parameters
     use m_variables_conversion
     use m_helper_basic
-    use m_thermochem, only: num_species, gas_constant, get_mixture_molecular_weight
+    use m_thermochem, only: num_species_max, num_species, gas_constant, get_mixture_molecular_weight
     use m_constants, only: model_eqns_gamma_law, model_eqns_6eq
 
     implicit none
@@ -88,7 +88,7 @@ contains
         integer, dimension(0:m,0:n,0:p), intent(inout) :: patch_id_fp
 #endif
 
-        real(wp) :: Ys(1:num_species)
+        real(wp) :: Ys(1:num_species_max)
         integer  :: smooth_patch_id
         integer  :: i
 
@@ -230,7 +230,7 @@ contains
         real(wp)                       :: orig_qv
         real(wp)                       :: muR, muV
         real(wp)                       :: R3bar
-        real(wp)                       :: Ys(1:num_species)
+        real(wp)                       :: Ys(1:num_species_max)
         real(stp), dimension(sys_size) :: orig_prim_vf  !< Vector to hold original values of cell for smoothing purposes
         integer                        :: i
         integer                        :: smooth_patch_id

@@ -9,7 +9,7 @@ module m_derived_types
 
     use m_constants
     use m_precision_select
-    use m_thermochem, only: num_species
+    use m_thermochem, only: num_species_max, num_species
 
     implicit none
 
@@ -306,7 +306,7 @@ module m_derived_types
         real(wp) :: m0  !< Bubble velocity
         integer :: hcid  !< Hardcoded initial condition ID
         real(wp) :: cf_val  !< Color function value
-        real(wp) :: Y(1:num_species)  !< Species mass fractions
+        real(wp) :: Y(1:num_species_max)  !< Species mass fractions
 
         ! STL/OBJ model patch: index into the shared stl_models(:) table
         integer :: model_id  !< index into stl_models(:) for STL/OBJ geometry patches

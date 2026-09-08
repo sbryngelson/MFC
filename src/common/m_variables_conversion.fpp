@@ -15,8 +15,8 @@ module m_variables_conversion
     use m_helper
     use m_constants, only: riemann_solver_hll, riemann_solver_hlld, model_eqns_gamma_law, model_eqns_5eq, model_eqns_6eq, &
         & avg_state_roe
-    use m_thermochem, only: num_species, get_temperature, get_pressure, gas_constant, get_mixture_molecular_weight, &
-        & get_mixture_energy_mass
+    use m_thermochem, only: num_species_max, num_species, get_temperature, get_pressure, gas_constant, &
+        & get_mixture_molecular_weight, get_mixture_energy_mass
 
     implicit none
 
@@ -83,7 +83,7 @@ contains
 
         ! Chemistry
         real(wp), dimension(1:num_species), intent(in) :: rhoYks
-        real(wp), dimension(1:num_species)             :: Y_rs
+        real(wp), dimension(1:num_species_max)         :: Y_rs
         real(wp)                                       :: e_int
         real(wp)                                       :: e_Per_Kg, Pdyn_Per_Kg
         real(wp)                                       :: T_guess
@@ -418,7 +418,7 @@ contains
         #:else
             real(wp), dimension(num_fluids) :: alpha_K, alpha_rho_K
             real(wp), dimension(nb)         :: nRtmp
-            real(wp)                        :: rhoYks(1:num_species)
+            real(wp)                        :: rhoYks(1:num_species_max)
         #:endif
         real(wp), dimension(2) :: Re_K
         real(wp)               :: rho_K, gamma_K, pi_inf_K, qv_K, dyn_pres_K
@@ -707,25 +707,25 @@ contains
 
         ! Density, specific heat ratio function, liquid stiffness function and dynamic pressure, as defined in the incompressible
         ! flow sense, respectively
-        real(wp)                         :: rho
-        real(wp)                         :: gamma
-        real(wp)                         :: pi_inf
-        real(wp)                         :: qv
-        real(wp)                         :: dyn_pres
-        real(wp)                         :: nbub, R3tmp
-        real(wp), dimension(nb)          :: Rtmp
-        real(wp)                         :: G
-        real(wp), dimension(2)           :: Re_K
-        integer                          :: i, j, k, l  !< Generic loop iterators
-        real(wp), dimension(num_species) :: Ys
-        real(wp)                         :: e_mix, mix_mol_weight, T
-        real(wp)                         :: pres_mag
-        real(wp)                         :: Ga          !< Lorentz factor (gamma in relativity)
-        real(wp)                         :: h           !< relativistic enthalpy
-        real(wp)                         :: v2          !< Square of the velocity magnitude
-        real(wp)                         :: B2          !< Square of the magnetic field magnitude
-        real(wp)                         :: vdotB       !< Dot product of the velocity and magnetic field vectors
-        real(wp)                         :: B(3)        !< Magnetic field components
+        real(wp)                             :: rho
+        real(wp)                             :: gamma
+        real(wp)                             :: pi_inf
+        real(wp)                             :: qv
+        real(wp)                             :: dyn_pres
+        real(wp)                             :: nbub, R3tmp
+        real(wp), dimension(nb)              :: Rtmp
+        real(wp)                             :: G
+        real(wp), dimension(2)               :: Re_K
+        integer                              :: i, j, k, l  !< Generic loop iterators
+        real(wp), dimension(num_species_max) :: Ys
+        real(wp)                             :: e_mix, mix_mol_weight, T
+        real(wp)                             :: pres_mag
+        real(wp)                             :: Ga          !< Lorentz factor (gamma in relativity)
+        real(wp)                             :: h           !< relativistic enthalpy
+        real(wp)                             :: v2          !< Square of the velocity magnitude
+        real(wp)                             :: B2          !< Square of the magnetic field magnitude
+        real(wp)                             :: vdotB       !< Dot product of the velocity and magnetic field vectors
+        real(wp)                             :: B(3)        !< Magnetic field components
 
         pres_mag = 0._wp
 
@@ -953,10 +953,10 @@ contains
             real(wp), dimension(3)  :: vel_K
             real(wp), dimension(10) :: Y_K
         #:else
-            real(wp), dimension(num_fluids)  :: alpha_rho_K
-            real(wp), dimension(num_fluids)  :: alpha_K
-            real(wp), dimension(num_vels)    :: vel_K
-            real(wp), dimension(num_species) :: Y_K
+            real(wp), dimension(num_fluids)      :: alpha_rho_K
+            real(wp), dimension(num_fluids)      :: alpha_K
+            real(wp), dimension(num_vels)        :: vel_K
+            real(wp), dimension(num_species_max) :: Y_K
         #:endif
         real(wp)               :: rho_K
         real(wp)               :: vel_K_sum

@@ -9,7 +9,7 @@
 !> @brief Multi-species chemistry interface for thermodynamic properties, reaction rates, and transport coefficients
 module m_chemistry
 
-    use m_thermochem, only: num_species, molecular_weights, get_temperature, get_net_production_rates, &
+    use m_thermochem, only: num_species_max, num_species, molecular_weights, get_temperature, get_net_production_rates, &
         & get_creation_destruction_rates, get_mole_fractions, get_species_binary_mass_diffusivities, &
         & get_species_mass_diffusivities_mixavg, gas_constant, get_mixture_molecular_weight, get_mixture_energy_mass, &
         & get_mixture_thermal_conductivity_mixavg, get_species_enthalpies_rt, get_mixture_viscosity_mixavg, &
@@ -53,7 +53,7 @@ contains
         type(int_bounds_info), dimension(1:3), intent(in)   :: bounds
         integer                                             :: x, y, z, eqn
         real(wp)                                            :: energy, T_in
-        real(wp), dimension(num_species)                    :: Ys
+        real(wp), dimension(num_species_max)                :: Ys
 
         do z = bounds(3)%beg, bounds(3)%end
             do y = bounds(2)%beg, bounds(2)%end
@@ -85,7 +85,7 @@ contains
         type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
         type(int_bounds_info), dimension(1:3), intent(in)   :: bounds
         integer                                             :: x, y, z, i
-        real(wp), dimension(num_species)                    :: Ys
+        real(wp), dimension(num_species_max)                :: Ys
         real(wp)                                            :: mix_mol_weight
 
         do z = bounds(3)%beg, bounds(3)%end
@@ -119,8 +119,8 @@ contains
             real(wp), dimension(10) :: Ys
             real(wp), dimension(10) :: omega
         #:else
-            real(wp), dimension(num_species) :: Ys
-            real(wp), dimension(num_species) :: omega
+            real(wp), dimension(num_species_max) :: Ys
+            real(wp), dimension(num_species_max) :: omega
         #:endif
 
         $:GPU_PARALLEL_LOOP(collapse=3, private='[Ys, omega, eqn, T, rho, omega_m]', copyin='[bounds]')
@@ -177,7 +177,7 @@ contains
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(10) :: Ys, cdot, ddot, y0, prod0, Lloss, alp
         #:else
-            real(wp), dimension(num_species) :: Ys, cdot, ddot, y0, prod0, Lloss, alp
+            real(wp), dimension(num_species_max) :: Ys, cdot, ddot, y0, prod0, Lloss, alp
         #:endif
 
         if (chem_params%adap_substeps) then
@@ -332,10 +332,10 @@ contains
             real(wp), dimension(10) :: mass_diffusivities_mixavg_Cell, dXk_dxi, h_l, h_r, h_k
             real(wp), dimension(10) :: Mass_Diffu_Flux, dYk_dxi
         #:else
-            real(wp), dimension(num_species) :: Xs_L, Xs_R, Xs_cell, Ys_L, Ys_R, Ys_cell
-            real(wp), dimension(num_species) :: mass_diffusivities_mixavg1, mass_diffusivities_mixavg2
-            real(wp), dimension(num_species) :: mass_diffusivities_mixavg_Cell, dXk_dxi, h_l, h_r, h_k
-            real(wp), dimension(num_species) :: Mass_Diffu_Flux, dYk_dxi
+            real(wp), dimension(num_species_max) :: Xs_L, Xs_R, Xs_cell, Ys_L, Ys_R, Ys_cell
+            real(wp), dimension(num_species_max) :: mass_diffusivities_mixavg1, mass_diffusivities_mixavg2
+            real(wp), dimension(num_species_max) :: mass_diffusivities_mixavg_Cell, dXk_dxi, h_l, h_r, h_k
+            real(wp), dimension(num_species_max) :: Mass_Diffu_Flux, dYk_dxi
         #:endif
 
         real(wp)              :: Mass_Diffu_Energy

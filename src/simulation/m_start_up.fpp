@@ -517,7 +517,7 @@ contains
         real(wp), dimension(2)                                 :: Re
         real(wp)                                               :: pres, T
         integer                                                :: i, j, k, l, c
-        real(wp), dimension(num_species)                       :: rhoYks
+        real(wp), dimension(num_species_max)                   :: rhoYks
         real(wp)                                               :: pres_mag
 
         pres_mag = 0._wp

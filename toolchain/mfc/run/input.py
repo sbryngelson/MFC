@@ -96,7 +96,18 @@ class MFCInputFile(Case):
         # Write the generated Fortran code to the m_thermochem.f90 file with the chosen precision
         sol = self.get_cantera_solution()
 
-        thermochem_code = pyro.FortranCodeGenerator().generate("m_thermochem", sol, pyro.CodeGenerationOptions(scalar_type=real_type, directive_offload=directive_str))
+        # Case-optimized builds keep the fully specialized module. Generic builds
+        # use the runtime-selectable form so the mechanism is not baked into the
+        # module's interface, which is what lets a mechanism change avoid a rebuild.
+        thermochem_code = pyro.FortranCodeGenerator().generate(
+            "m_thermochem",
+            sol,
+            pyro.CodeGenerationOptions(
+                scalar_type=real_type,
+                directive_offload=directive_str,
+                runtime_mechanism=not ARG("case_optimization"),
+            ),
+        )
 
         common.file_write(os.path.join(modules_dir, "m_thermochem.f90"), thermochem_code, True)
 
