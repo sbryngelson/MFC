@@ -904,11 +904,9 @@ contains
                             ! hypoelastic run faults inside the pure-fluid kernel. Two call sites are what
                             ! give two line numbers. Do not merge them back into one.
                             #:if HYPO
-                                $:GPU_PARALLEL_LOOP(collapse=3, private=_hllc_priv, copyin='[is1, is2, is3]', &
-                                                    & firstprivate='[Re_size_loc1, Re_size_loc2]')
+                                $:GPU_PARALLEL_LOOP(collapse=3, private=_hllc_priv, firstprivate='[Re_size_loc1, Re_size_loc2]')
                             #:else
-                                $:GPU_PARALLEL_LOOP(collapse=3, private=_hllc_priv, copyin='[is1, is2, is3]', &
-                                                    & firstprivate='[Re_size_loc1, Re_size_loc2]')
+                                $:GPU_PARALLEL_LOOP(collapse=3, private=_hllc_priv, firstprivate='[Re_size_loc1, Re_size_loc2]')
                             #:endif
                             do l = ${Z_BND}$%beg, ${Z_BND}$%end
                                 do k = ${Y_BND}$%beg, ${Y_BND}$%end
