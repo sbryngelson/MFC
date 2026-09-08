@@ -928,12 +928,19 @@ contains
 
         type(scalar_field), dimension(1:), intent(in) :: v_vf
         integer                                       :: i, j, k, l, n_vars
+        integer                                       :: jb, je, kb, ke, lb, le
 
+        ! loop bounds as scalars: read from idwbuff(1:3) inside the kernel, the three int_bounds_info objects are mapped per
+        ! launch (ledger 92: 3 x 320 B of the pack launch's ~8 copies); scalars travel as kernel arguments
+
+        jb = idwbuff(1)%beg; je = idwbuff(1)%end
+        kb = idwbuff(2)%beg; ke = idwbuff(2)%end
+        lb = idwbuff(3)%beg; le = idwbuff(3)%end
         $:GPU_PARALLEL_LOOP(collapse=4)
         do i = 1, v_size
-            do l = idwbuff(3)%beg, idwbuff(3)%end
-                do k = idwbuff(2)%beg, idwbuff(2)%end
-                    do j = idwbuff(1)%beg, idwbuff(1)%end
+            do l = lb, le
+                do k = kb, ke
+                    do j = jb, je
                         v_rs_weno(j, k, l, i) = v_vf(i)%sf(j, k, l)
                     end do
                 end do
