@@ -27,7 +27,7 @@ def _fc(name: str, default: int) -> int:
 
 
 NF = _fc("num_fluids_max", 10)  # fluid_pp
-NPR = _fc("num_probes_max", 10)  # probe, acoustic
+NPR = _fc("num_probes_max", 64)  # probe, acoustic
 NB = _fc("num_bc_patches_max", 10)  # patch_bc
 NUM_PATCHES_MAX = _fc("num_patches_max", 10)  # patch_icpp (Fortran array bound)
 NIB = _fc("num_ib_patches_max_namelist", 54000)  # patch_ib namelist array bound
@@ -677,6 +677,7 @@ def _load():
     # Output
     _r("precision", INT, {"output"})
     _r("format", INT, {"output"})
+    _r("ib_force_stride", INT, {"output", "ib"})
     for n in ["parallel_io", "file_per_process", "run_time_info", "prim_vars_wrt", "cons_vars_wrt", "fft_wrt", "ib_state_wrt"]:
         _r(n, LOG, {"output"})
     for n in [
@@ -995,6 +996,13 @@ def _load():
     for j in range(1, 4):
         _ib_attrs[f"vel({j})"] = (A_REAL, _ib_tags)
         _ib_attrs[f"angular_vel({j})"] = (A_REAL, _ib_tags)
+    # prescribed hinged flapping kinematics (kin_model = 1), runtime-parameterized so no rebuild per case
+    _ib_attrs["kin_model"] = (INT, _ib_tags)
+    for j in range(1, 4):
+        _ib_attrs[f"kin_hinge({j})"] = (REAL, _ib_tags)
+        _ib_attrs[f"kin_offset({j})"] = (REAL, _ib_tags)
+    for a in ["kin_phi0", "kin_theta0", "kin_theta_mean", "kin_freq", "kin_phase", "kin_t0", "kin_ramp", "kin_pitch_rate", "kin_smooth"]:
+        _ib_attrs[a] = (REAL, _ib_tags)
     REGISTRY.register_family(
         IndexedFamily(
             base_name="patch_ib",
@@ -1343,6 +1351,7 @@ _nv(
     "prim_vars_wrt",
     "fd_order",
     "ib_state_wrt",
+    "ib_force_stride",
     "avg_state",
     "alt_soundspeed",
     "mixture_err",
