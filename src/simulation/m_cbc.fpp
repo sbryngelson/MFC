@@ -19,7 +19,7 @@ module m_cbc
 
     implicit none
 
-    private; public :: s_initialize_cbc_module, s_cbc, s_finalize_cbc_module
+    private; public :: s_initialize_cbc_module, s_cbc, s_update_inflow_ramp, s_finalize_cbc_module
 
     ! The cell-average primitive variables. They are obtained by reshaping (RS) q_prim_vf in the coordinate direction normal to the
     ! domain boundary along which the CBC is applied.
@@ -76,9 +76,12 @@ module m_cbc
 
     real(wp), allocatable, dimension(:)   :: pres_in, pres_out, Del_in, Del_out
     real(wp), allocatable, dimension(:,:) :: vel_in, vel_out
+    !> The inflow velocity a ramped boundary is heading for; vel_in is this times the ramp factor
+    real(wp), allocatable, dimension(:,:) :: vel_in_final
     real(wp), allocatable, dimension(:,:) :: alpha_rho_in, alpha_in
     $:GPU_DECLARE(create='[pres_in, pres_out, Del_in, Del_out]')
     $:GPU_DECLARE(create='[vel_in, vel_out]')
+    $:GPU_DECLARE(create='[vel_in_final]')
     $:GPU_DECLARE(create='[alpha_rho_in, alpha_in]')
 
 contains
@@ -294,6 +297,7 @@ contains
         @:ALLOCATE(pres_in(1:num_dims), pres_out(1:num_dims))
         @:ALLOCATE(Del_in(1:num_dims), Del_out(1:num_dims))
         @:ALLOCATE(vel_in(1:num_dims, 1:num_dims), vel_out(1:num_dims, 1:num_dims))
+        @:ALLOCATE(vel_in_final(1:num_dims, 1:num_dims))
         @:ALLOCATE(alpha_rho_in(1:num_fluids, 1:num_dims), alpha_in(1:num_fluids, 1:num_dims))
 
         ! Assign and update GRCBC inputs
@@ -319,9 +323,41 @@ contains
                 end do
             end if
         #:endfor
-        $:GPU_UPDATE(device='[vel_in, vel_out, pres_in, pres_out, Del_in, Del_out, alpha_rho_in, alpha_in]')
+        vel_in_final = vel_in
+        $:GPU_UPDATE(device='[vel_in, vel_out, vel_in_final, pres_in, pres_out, Del_in, Del_out, alpha_rho_in, alpha_in]')
 
     end subroutine s_initialize_cbc_module
+
+    !> Scale a ramped GRCBC inflow velocity to the current time.
+    !!
+    !! A jet or a wind tunnel that starts from rest cannot be represented by a constant inflow: the start-up is
+    !! the event of interest. The inflow velocity is scaled by
+    !!     f(t) = frac0 + (1 - frac0) (1 + tanh(6 (t - t0)/tau - 3))/2
+    !! which leaves frac0 of the final velocity at t0 and is within half a percent of it after tau. Boundaries
+    !! with `vel_in_ramp = 0` are untouched, so this costs nothing when unused.
+    impure subroutine s_update_inflow_ramp(t)
+
+        real(wp), intent(in) :: t
+        real(wp)             :: f, tau
+        logical              :: any_ramp
+
+        any_ramp = .false.
+        #:for CBC_DIR, XYZ in [(1, 'x'), (2, 'y'), (3, 'z')]
+            if (${CBC_DIR}$ <= num_dims) then
+                tau = bc_${XYZ}$%vel_in_ramp
+                if (tau > 0._wp) then
+                    f = bc_${XYZ}$%vel_in_frac0 + (1._wp - bc_${XYZ}$%vel_in_frac0)*0.5_wp*(1._wp + tanh(6._wp*(t &
+                                                   & - bc_${XYZ}$%vel_in_t0)/tau - 3._wp))
+                    vel_in(${CBC_DIR}$,:) = f*vel_in_final(${CBC_DIR}$,:)
+                    any_ramp = .true.
+                end if
+            end if
+        #:endfor
+        if (any_ramp) then
+            $:GPU_UPDATE(device='[vel_in]')
+        end if
+
+    end subroutine s_update_inflow_ramp
 
     !> Compute CBC coefficients
     subroutine s_compute_cbc_coefficients(cbc_dir_in, cbc_loc_in)
@@ -1384,7 +1420,7 @@ contains
         @:DEALLOCATE(ds)
 
         ! Deallocating GRCBC inputs
-        @:DEALLOCATE(vel_in, vel_out, pres_in, pres_out, Del_in, Del_out, alpha_rho_in, alpha_in)
+        @:DEALLOCATE(vel_in, vel_out, vel_in_final, pres_in, pres_out, Del_in, Del_out, alpha_rho_in, alpha_in)
 
         ! Deallocating CBC Coefficients in x-direction
         if (all((/bc_x%beg, bc_x%end/) <= -5) .and. all((/bc_x%beg, &

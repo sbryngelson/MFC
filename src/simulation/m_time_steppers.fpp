@@ -532,6 +532,7 @@ contains
             end if
 
             $:GPU_UPDATE(device='[mytime]')
+            if (bc_x%grcbc_in .or. bc_y%grcbc_in .or. bc_z%grcbc_in) call s_update_inflow_ramp(mytime)
             if (bodyForces) call s_apply_bodyforces(q_cons_ts(1)%vf, q_prim_vf, rhs_vf, rk_coef(s, 3)*dt/rk_coef(s, 4))
 
             if (synthetic_turbulence) call s_apply_synthetic_turbulence_force(q_cons_ts(1)%vf, q_prim_vf, rhs_vf, rk_coef(s, &
