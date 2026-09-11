@@ -21,6 +21,12 @@ module m_boundary_primitives
     logical :: dirichlet_from_buffers = .false.
     $:GPU_DECLARE(create='[dirichlet_from_buffers]')
 
+    !> Velocity scaling applied to a Dirichlet boundary that is ramping up, one per direction. Unity unless `bc_[x,y,z]%vel_in_ramp`
+    !! is set, so an unramped case is untouched. The ambient part of such a boundary is at rest, so scaling the whole face is the
+    !! same as scaling only the jet.
+    real(wp), dimension(3) :: bc_vel_ramp = 1._wp
+    $:GPU_DECLARE(create='[bc_vel_ramp]')
+
 contains
 
     !> Fill ghost cells by copying the nearest boundary cell value along the specified direction.
@@ -893,6 +899,11 @@ contains
                 do i = 1, sys_size
                     do j = 1, buff_size
                         q_prim_vf(i)%sf(-j, k, l) = bc_buffers(1, 1)%sf(i, k, l)
+                    end do
+                end do
+                do i = eqn_idx%mom%beg, eqn_idx%mom%end
+                    do j = 1, buff_size
+                        q_prim_vf(i)%sf(-j, k, l) = bc_vel_ramp(1)*q_prim_vf(i)%sf(-j, k, l)
                     end do
                 end do
                 if (chemistry .and. present(q_T_sf)) then
