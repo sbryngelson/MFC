@@ -508,6 +508,7 @@ contains
 
         ! Immersed Boundaries (sim-specific extras)
         ib_neighborhood_radius = 0
+        ib_force_surface = .false.
         collision_model = 0
         collision_temporal_resolution = 0
         coefficient_of_restitution = dflt_real

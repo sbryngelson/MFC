@@ -48,6 +48,20 @@ module m_ibm
     real(wp), allocatable :: send_ft(:,:), recv_ft(:,:)
     real(wp), allocatable :: recv_forces_snap(:,:), recv_torques_snap(:,:)
 
+#:def IB_SURFACE_FACE(di, dj, dk, dir, dA, sgn)
+    ! One body face that touches fluid: the pressure traction is -p n dA and the viscous traction is tau.n dA,
+    ! both sampled in the adjacent fluid cell. ${sgn}$ carries the sign of the outward normal along ${dir}$.
+    if (ib_markers%sf(i + ${di}$, j + ${dj}$, k + ${dk}$) == 0) then
+        local_force_contribution(${dir}$) = local_force_contribution(${dir}$) &
+            & - ${sgn}$*q_prim_vf(eqn_idx%E)%sf(i + ${di}$, j + ${dj}$, k + ${dk}$)*${dA}$
+        if (viscous) then
+            call s_compute_viscous_stress_tensor(viscous_stress, q_prim_vf, dynamic_viscosity, &
+                                                 i + ${di}$, j + ${dj}$, k + ${dk}$)
+            local_force_contribution(1:3) = local_force_contribution(1:3) + ${sgn}$*viscous_stress(${dir}$, 1:3)*${dA}$
+        end if
+    end if
+#:enddef
+
 contains
 
     !> Allocates memory for the variables in the IBM module
@@ -1071,6 +1085,7 @@ contains
         real(wp), dimension(1:3,1:3) :: viscous_stress
         real(wp), dimension(1:3)     :: local_force_contribution, radial_vector, local_torque_contribution
         real(wp)                     :: cell_volume, dynamic_viscosity
+        real(wp)                     :: force_weight, da_x, da_y, da_z
 
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(3) :: dynamic_viscosities
@@ -1095,7 +1110,8 @@ contains
 
         $:GPU_PARALLEL_LOOP(private='[i, j, k, l, xp, yp, zp, ib_idx, ib_idx_temp, encoded_ib_idx, fluid_idx, radial_vector, &
                             & local_force_contribution, cell_volume, local_torque_contribution, dynamic_viscosity, &
-                            & viscous_stress]', copy='[forces, torques]', copyin='[dynamic_viscosities]', collapse=3)
+                            & viscous_stress, force_weight, da_x, da_y, da_z]', copy='[forces, torques]', &
+                            & copyin='[dynamic_viscosities]', collapse=3)
         do i = 0, m
             do j = 0, n
                 do k = 0, p
@@ -1114,6 +1130,29 @@ contains
                                 & wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
 
                             local_force_contribution(:) = 0._wp
+
+                            if (ib_force_surface) then
+                                ! Accumulate the traction over the body faces that touch fluid, which is the
+                                ! surface integral that the volume integral below is meant to equal. The
+                                ! equivalence needs the body to have an interior: for a plate a few cells thick
+                                ! every cell's stencil reaches fluid on both sides, the ghost-cell-filled
+                                ! interior pressure enters the sum, and the telescoping never happens.
+                                da_x = dy(j); da_y = dx(i); da_z = dx(i)*dy(j)
+                                if (num_dims == 3) then
+                                    da_x = da_x*dz(k); da_y = da_y*dz(k)
+                                else
+                                    da_z = 0._wp
+                                end if
+                                @:IB_SURFACE_FACE(-1, 0, 0, 1, da_x, -1._wp)
+                                @:IB_SURFACE_FACE(+1, 0, 0, 1, da_x, +1._wp)
+                                @:IB_SURFACE_FACE(0, -1, 0, 2, da_y, -1._wp)
+                                @:IB_SURFACE_FACE(0, +1, 0, 2, da_y, +1._wp)
+                                if (num_dims == 3) then
+                                    @:IB_SURFACE_FACE(0, 0, -1, 3, da_z, -1._wp)
+                                    @:IB_SURFACE_FACE(0, 0, +1, 3, da_z, +1._wp)
+                                end if
+                                force_weight = 1._wp
+                            else
 
                             ! compute the pressure force component, which is the negative pressure gradient
                             do l = -fd_number, fd_number
@@ -1155,16 +1194,19 @@ contains
                                 end do
                             end if
 
+                                cell_volume = dx(i)*dy(j)
+                                if (num_dims == 3) cell_volume = cell_volume*dz(k)
+                                force_weight = cell_volume
+                            end if
+
                             call s_cross_product(radial_vector, local_force_contribution, local_torque_contribution)
 
                             ! Update the force and torque values atomically to prevent race conditions
-                            cell_volume = dx(i)*dy(j)
-                            if (num_dims == 3) cell_volume = cell_volume*dz(k)
                             do l = 1, num_dims
                                 $:GPU_ATOMIC(atomic='update')
-                                forces(ib_idx, l) = forces(ib_idx, l) + (local_force_contribution(l)*cell_volume)
+                                forces(ib_idx, l) = forces(ib_idx, l) + (local_force_contribution(l)*force_weight)
                                 $:GPU_ATOMIC(atomic='update')
-                                torques(ib_idx, l) = torques(ib_idx, l) + local_torque_contribution(l)*cell_volume
+                                torques(ib_idx, l) = torques(ib_idx, l) + local_torque_contribution(l)*force_weight
                             end do
                         end if  ! ib_idx > 0
                     end if
