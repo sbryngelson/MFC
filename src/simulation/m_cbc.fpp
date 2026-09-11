@@ -12,6 +12,7 @@ module m_cbc
     use m_global_parameters
     use m_variables_conversion
     use m_compute_cbc
+    use m_boundary_primitives, only: bc_vel_ramp
     use m_constants, only: riemann_solver_hll, model_eqns_gamma_law, recon_type_weno, recon_type_muscl
     use m_thermochem, only: get_mixture_energy_mass, get_mixture_specific_heat_cv_mass, get_mixture_specific_heat_cp_mass, &
         & gas_constant, get_mixture_molecular_weight, get_species_enthalpies_rt, molecular_weights, get_species_specific_heats_r, &
@@ -349,12 +350,13 @@ contains
                     f = bc_${XYZ}$%vel_in_frac0 + (1._wp - bc_${XYZ}$%vel_in_frac0)*0.5_wp*(1._wp + tanh(6._wp*(t &
                                                    & - bc_${XYZ}$%vel_in_t0)/tau - 3._wp))
                     vel_in(${CBC_DIR}$,:) = f*vel_in_final(${CBC_DIR}$,:)
+                    bc_vel_ramp(${CBC_DIR}$) = f
                     any_ramp = .true.
                 end if
             end if
         #:endfor
         if (any_ramp) then
-            $:GPU_UPDATE(device='[vel_in]')
+            $:GPU_UPDATE(device='[vel_in, bc_vel_ramp]')
         end if
 
     end subroutine s_update_inflow_ramp
