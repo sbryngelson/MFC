@@ -11,6 +11,7 @@ module m_time_steppers
     use m_derived_types
     use m_global_parameters
     use m_rhs
+    use m_cbc, only: s_update_inflow_ramp
     use m_chemistry
     use m_reactive_burn, only: s_reactive_burn_substep
     use m_pressure_relaxation
