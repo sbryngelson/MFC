@@ -685,7 +685,6 @@ def _load():
     _r("collision_time", REAL, {"ib"})
     _r("ib_coefficient_of_friction", REAL, {"ib"})
     _r("many_ib_patch_parallelism", LOG, {"ib"})
-    _r("ib_force_surface", LOG, {"ib"})
 
     # Probes
     _r("num_probes", INT, {"probes"})
@@ -1458,7 +1457,6 @@ _nv(
     "collision_time",
     "ib_coefficient_of_friction",
     "ib_neighborhood_radius",
-    "ib_force_surface",
     "many_ib_patch_parallelism",
     "tau_star",
     "cont_damage_s",
