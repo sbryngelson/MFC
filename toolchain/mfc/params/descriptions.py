@@ -386,7 +386,7 @@ PATTERNS = [
     (r"patch_ib\((\d+)\)%kin_theta_mean", "Mean pitch angle (rad) for IB patch {0} kinematics"),
     (r"patch_ib\((\d+)\)%kin_freq", "Flapping frequency for IB patch {0} kinematics"),
     (r"patch_ib\((\d+)\)%kin_phase", "Pitch phase lead (rad) relative to roll for IB patch {0} kinematics"),
-    (r"patch_ib\((\d+)\)%kin_t0", "Flapping onset time for IB patch {0} kinematics"),
+    (r"patch_ib\((\d+)\)%kin_t0", "Onset time for IB patch {0} kinematics"),
     (r"patch_ib\((\d+)\)%kin_ramp", "Duration of the raised-cosine amplitude ramp after onset for IB patch {0}"),
     (r"patch_ib\((\d+)\)%kin_pitch_rate", "Nominal pitch rate (rad per unit time) of the smoothed pitch ramp for IB patch {0} (kin_model = 2)"),
     (r"patch_ib\((\d+)\)%kin_smooth", "Smoothing parameter a of the Eldredge log-cosh pitch ramp for IB patch {0} (kin_model = 2)"),
