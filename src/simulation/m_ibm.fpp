@@ -1131,6 +1131,19 @@ contains
 
                             local_force_contribution(:) = 0._wp
 
+                            ! The local dynamic viscosity is needed by both branches. It used to be computed
+                            ! inside the volume-integral branch only, so the surface-flux branch passed an
+                            ! uninitialised private to s_compute_viscous_stress_tensor: on the Re 40 cylinder that
+                            ! produced a spurious transverse force of 4.7 percent of the drag where the volume
+                            ! integral gives 1e-4, on a flow that is exactly symmetric.
+                            if (viscous) then
+                                dynamic_viscosity = 0._wp
+                                do fluid_idx = 1, num_fluids
+                                    dynamic_viscosity = dynamic_viscosity + (q_prim_vf(fluid_idx + eqn_idx%adv%beg - 1)%sf(i, j, &
+                                        & k)*dynamic_viscosities(fluid_idx))
+                                end do
+                            end if
+
                             if (ib_force_surface) then
                                 ! Accumulate the traction over the body faces that touch fluid, which is the
                                 ! surface integral that the volume integral below is meant to equal. The
@@ -1168,14 +1181,6 @@ contains
 
                             ! get the viscous stress and add its contribution if that is considered
                             if (viscous) then
-                                ! compute the volume-weighted local dynamic viscosity
-                                dynamic_viscosity = 0._wp
-                                do fluid_idx = 1, num_fluids
-                                    ! local dynamic viscosity is the dynamic viscosity of the fluid times alpha of the fluid
-                                    dynamic_viscosity = dynamic_viscosity + (q_prim_vf(fluid_idx + eqn_idx%adv%beg - 1)%sf(i, j, &
-                                        & k)*dynamic_viscosities(fluid_idx))
-                                end do
-
                                 do l = -fd_number, fd_number
                                     call s_compute_viscous_stress_tensor(viscous_stress, q_prim_vf, dynamic_viscosity, i + l, j, k)
                                     local_force_contribution(1:3) = local_force_contribution(1:3) + fd_coeff_x(l, &
