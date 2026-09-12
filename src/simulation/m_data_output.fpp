@@ -1111,8 +1111,9 @@ contains
     !! Rows are accumulated in a rank-local buffer and flushed to D/ib<id>_forces.dat in batches, because opening
     !! a file per body per step is a metadata operation per step on a parallel filesystem and does not scale --
     !! a particle bed of a thousand bodies would issue a hundred million of them over a long run. Each buffered
-    !! row carries its own global body id, so a body changing owner mid-run needs no special handling: the old
-    !! owner's pending rows still reach the right file. `ib_force_stride` subsamples very long runs.
+    !! row carries its own global body id, so a record always reaches the right file. Ownership changes are
+    !! handled by flushing before the handoff, so a rank that stops owning a body cannot hold stale records and
+    !! append them after the new owner's newer ones. `ib_force_stride` subsamples very long runs.
     impure subroutine s_write_ib_force_files(t_step)
 
         integer, intent(in) :: t_step
@@ -1131,7 +1132,7 @@ contains
             if (num_procs > 1) ib_idx = local_ib_patch_ids(i)
             if (ib_force_buf_n == ib_force_buf_len) call s_flush_ib_force_files()
             ib_force_buf_n = ib_force_buf_n + 1
-            ib_force_buf(1, ib_force_buf_n) = real(max(patch_ib(ib_idx)%gbl_patch_id, ib_idx), wp)
+            ib_force_buf(1, ib_force_buf_n) = real(patch_ib(ib_idx)%gbl_patch_id, wp)
             ib_force_buf(2, ib_force_buf_n) = real(t_step, wp)
             ib_force_buf(3, ib_force_buf_n) = mytime
             ib_force_buf(4:6,ib_force_buf_n) = patch_ib(ib_idx)%force(1:3)
@@ -1670,9 +1671,8 @@ contains
                                    & vel(1), vel(2), pres, tau_e(1), tau_e(2), tau_e(3)
                         #:endif
                     else
-                        #:if not MFC_CASE_OPTIMIZATION or num_dims > 1
-                            write (i + 30, '(6X,F12.6,F24.8,F24.8,F24.8,F24.8)') nondim_time, rho, vel(1), vel(2), pres
-                        #:endif
+                        write (i + 30, '(6X,F12.6,F24.8,F24.8,F24.8)') nondim_time, rho, vel(1), pres
+                        print *, 'time =', nondim_time, 'rho =', rho, 'pres =', pres
                     end if
                 else
                     #:if not MFC_CASE_OPTIMIZATION or num_dims > 2
