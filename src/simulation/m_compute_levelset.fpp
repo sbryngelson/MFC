@@ -30,8 +30,12 @@ contains
         !  3D Patch Geometries
 
         if (p > 0) then
-            $:GPU_PARALLEL_LOOP(private='[i, patch_id, patch_geometry]', copy='[gps]', &
-                                & copyin='[patch_ib(1:num_ibs), ib_airfoil, ib_airfoil_grids]')
+            ! patch_ib is device-resident; a copyin of patch_ib(1:num_ibs) here was a no-op on ranks tracking a
+            ! patch and a zero-length section map of a present array on ranks tracking none. Under CCE OpenMP
+            ! offload that zero-length map, issued every stage for thousands of steps, left patch_ib's device
+            ! entry unusable on those ranks, and the first kernel to dereference patch_ib after such a rank
+            ! gained a patch at an ownership handoff faulted at address nil (V20, VERIFICATION.md).
+            $:GPU_PARALLEL_LOOP(private='[i, patch_id, patch_geometry]', copy='[gps]', copyin='[ib_airfoil, ib_airfoil_grids]')
             do i = 1, num_gps
                 patch_id = gps(i)%ib_patch_id
                 patch_geometry = patch_ib(patch_id)%geometry
@@ -52,8 +56,12 @@ contains
 
             ! 2D Patch Geometries
         else if (n > 0) then
-            $:GPU_PARALLEL_LOOP(private='[i, patch_id, patch_geometry]', copy='[gps]', &
-                                & copyin='[patch_ib(1:num_ibs), ib_airfoil, ib_airfoil_grids]')
+            ! patch_ib is device-resident; a copyin of patch_ib(1:num_ibs) here was a no-op on ranks tracking a
+            ! patch and a zero-length section map of a present array on ranks tracking none. Under CCE OpenMP
+            ! offload that zero-length map, issued every stage for thousands of steps, left patch_ib's device
+            ! entry unusable on those ranks, and the first kernel to dereference patch_ib after such a rank
+            ! gained a patch at an ownership handoff faulted at address nil (V20, VERIFICATION.md).
+            $:GPU_PARALLEL_LOOP(private='[i, patch_id, patch_geometry]', copy='[gps]', copyin='[ib_airfoil, ib_airfoil_grids]')
             do i = 1, num_gps
                 patch_id = gps(i)%ib_patch_id
                 patch_geometry = patch_ib(patch_id)%geometry
@@ -641,6 +649,10 @@ contains
             xyz_local(3) = z_cc(k) - center(3)
         end if
         xyz_local = matmul(inverse_rotation, xyz_local)
+        ! the marker test subtracts centroid_offset after rotating (s_apply_ib_patches); the levelset must measure
+        ! distance to the same body, otherwise a moving STL whose centroid was moved to its centre of mass places
+        ! every image point 2*offset away from where it belongs
+        xyz_local = xyz_local - patch_ib(patch_id)%centroid_offset
 
         ! 3D models
         if (p > 0) then

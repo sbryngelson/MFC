@@ -956,7 +956,9 @@ contains
 
         integer, intent(in) :: time_step
 
-        $:GPU_UPDATE(host='[patch_ib(1:num_ibs)]')
+        if (num_ibs > 0) then
+            $:GPU_UPDATE(host='[patch_ib(1:num_ibs)]')
+        end if
 
         if (parallel_io) then
             call s_write_parallel_ib_data(time_step)
@@ -1125,7 +1127,9 @@ contains
         if (num_procs == 1) n_write = num_ibs
         if (n_write == 0) return  ! ranks holding no body have nothing to record
 
-        $:GPU_UPDATE(host='[patch_ib(1:num_ibs)]')
+        if (num_ibs > 0) then
+            $:GPU_UPDATE(host='[patch_ib(1:num_ibs)]')
+        end if
 
         do i = 1, n_write
             ib_idx = i
@@ -1135,8 +1139,8 @@ contains
             ib_force_buf(1, ib_force_buf_n) = real(patch_ib(ib_idx)%gbl_patch_id, wp)
             ib_force_buf(2, ib_force_buf_n) = real(t_step, wp)
             ib_force_buf(3, ib_force_buf_n) = mytime
-            ib_force_buf(4:6,ib_force_buf_n) = patch_ib(ib_idx)%force(1:3)
-            ib_force_buf(7:9,ib_force_buf_n) = patch_ib(ib_idx)%torque(1:3)
+            ib_force_buf(4:6,ib_force_buf_n) = ib_force_host(1:3,ib_idx)  ! the relayed totals, host-side (m_ibm)
+            ib_force_buf(7:9,ib_force_buf_n) = ib_torque_host(1:3,ib_idx)
             ib_force_buf(10:12,ib_force_buf_n) = patch_ib(ib_idx)%vel(1:3)
             ib_force_buf(13:15,ib_force_buf_n) = patch_ib(ib_idx)%angular_vel(1:3)
             ib_force_buf(16:18,ib_force_buf_n) = patch_ib(ib_idx)%angles(1:3)
@@ -1186,7 +1190,9 @@ contains
 
         integer, intent(in) :: time_step
 
-        $:GPU_UPDATE(host='[patch_ib(1:num_ibs)]')
+        if (num_ibs > 0) then
+            $:GPU_UPDATE(host='[patch_ib(1:num_ibs)]')
+        end if
 
         if (parallel_io) then
             call s_write_parallel_ib_state(time_step)

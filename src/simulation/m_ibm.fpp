@@ -43,10 +43,18 @@ module m_ibm
 #endif
     logical :: moving_immersed_boundary_flag
 
-    ! IB MPI buffers
+    ! IB force-relay buffers. Host only: the relay is MPI plus O(num_ibs) arithmetic and never belonged on the
+    ! device. It used to run there, with a section update of the received ids and forces before each absorb
+    ! kernel; on Frontier (CCE OpenMP offload) that update was not visible to the kernel on a rank whose device
+    ! copy had never been written -- a rank that had just gained the patch at an ownership handoff -- and the
+    ! stale id faulted the lookup. Measured, not inferred: VERIFICATION.md, "The gain-side fault".
     integer, allocatable  :: send_ids(:), recv_ids(:)
     real(wp), allocatable :: send_ft(:,:), recv_ft(:,:)
     real(wp), allocatable :: recv_forces_snap(:,:), recv_torques_snap(:,:)
+    ! the relayed totals, kept on the host for the force-history writer so that what is written never depends on
+    ! a device-to-host refresh of patch_ib landing in time (VERIFICATION.md, "zero forces after the handoff")
+    real(wp), allocatable, public :: ib_force_host(:,:), ib_torque_host(:,:)
+    integer                       :: ib_relay_warned = 0
 
 contains
 
@@ -70,9 +78,10 @@ contains
     !> Initializes the values of various IBM variables, such as ghost points and image points.
     impure subroutine s_ibm_setup()
 
-        integer         :: i, j, k
-        real(wp)        :: t_init  !< initial time for prescribed kinematics
+        integer         :: i, j, k, gid  !< gid: global patch id, for collectives every rank must join
+        real(wp)        :: t_init        !< initial time for prescribed kinematics
         integer(kind=8) :: max_num_gps
+        real(wp)        :: max_num_gps_rank
 
         call nvtxStartRange("SETUP-IBM-MODULE")
 
@@ -98,12 +107,16 @@ contains
         $:END_GPU_PARALLEL_LOOP()
         $:GPU_UPDATE(host='[patch_ib(1:num_ibs)]')
 
-        ! allocate some arrays for MPI communication, if required by this simulation
+        allocate (ib_force_host(3, size(patch_ib)), ib_torque_host(3, size(patch_ib)))
+        ib_force_host = 0._wp; ib_torque_host = 0._wp
+
+        ! allocate the force-relay buffers, if required by this simulation (host only)
 #ifdef MFC_MPI
         if (num_procs > 1) then
-            @:ALLOCATE(send_ids(size(patch_ib)), send_ft(6, size(patch_ib)))
-            @:ALLOCATE(recv_forces_snap(size(patch_ib), 3), recv_torques_snap(size(patch_ib), 3), recv_ids(size(patch_ib)), &
-                       & recv_ft(6, size(patch_ib)))
+            allocate (send_ids(size(patch_ib)), send_ft(6, size(patch_ib)))
+            allocate (recv_forces_snap(size(patch_ib), 3), recv_torques_snap(size(patch_ib), 3), recv_ids(size(patch_ib)), &
+                      & recv_ft(6, size(patch_ib)))
+            send_ids = 0; send_ft = 0._wp; recv_ids = 0; recv_ft = 0._wp
         end if
 #endif
 
@@ -114,16 +127,33 @@ contains
         $:GPU_UPDATE(device='[ib_markers%sf]')
         call s_apply_ib_patches(ib_markers)
         $:GPU_UPDATE(host='[ib_markers%sf]')
+        ! Offsets are computed after IB markers are generated. s_compute_centroid_offset reduces the centre of mass
+        ! over MPI_COMM_WORLD, so EVERY rank must call it for EVERY global patch that needs one, in the same order --
+        ! including ranks whose neighbourhood does not hold the patch (num_ibs excludes it there). Looping over
+        ! num_ibs, as this once did, deadlocked the first moving STL run: the wing's ranks sat in the allreduce
+        ! while the far-field ranks, with num_ibs = 0, never entered it. Geometries that return before any
+        ! collective (cuboid, sphere and the rest) are unaffected either way.
+        do gid = 1, num_gbl_ibs
+            call s_get_neighborhood_idx(gid, i)
+            call s_compute_centroid_offset_global(gid, i)
+        end do
         do i = 1, num_ibs
-            if (patch_ib(i)%moving_ibm /= 0) call s_compute_centroid_offset(i)  ! offsets are computed after IB markers are generated
             $:GPU_UPDATE(device='[patch_ib(i)]')
         end do
 
         ! find the number of ghost points and set them to be the maximum total across ranks
         call s_find_num_ghost_points(num_gps)
         if (moving_immersed_boundary_flag) then
+            ! The array is allocated identically on every rank, so it must hold the largest count ANY rank will
+            ! reach as the body moves -- not a multiple of the global total, which on many ranks can be smaller
+            ! than one rank's share once a thin body sweeps through it. Size it to twice the initial global total
+            ! as before, but never below eight times the largest initial per-rank count, and check on every
+            ! regeneration (s_update_mib) that the budget still holds instead of writing past it.
             call s_mpi_allreduce_integer_sum(int(num_gps, 8), max_num_gps)
-            max_num_gps = min(max_num_gps*2_8, int(m + 1, 8)*int(n + 1, 8)*int(p + 1, 8))
+            max_num_gps_rank = real(num_gps, wp)
+            call s_mpi_allreduce_max(real(num_gps, wp), max_num_gps_rank)
+            max_num_gps = max(max_num_gps*2_8, 8_8*int(max_num_gps_rank, 8))
+            max_num_gps = min(max_num_gps, int(m + 1, 8)*int(n + 1, 8)*int(p + 1, 8))
         else
             max_num_gps = int(num_gps, 8)
         end if
@@ -966,6 +996,13 @@ contains
         call nvtxStartRange("COMPUTE-GHOST-POINTS")
         ! recalculate the ghost point locations and coefficients
         call s_find_num_ghost_points(num_gps)
+        if (int(num_gps, 8) > size(ghost_points, kind=8)) then
+            ! Writing past the array is a device-side memory fault with no diagnostic (V20 died at exactly the
+            ! instant a 4-cell-thick panel crossed zero pitch at peak rate). Abort with the numbers instead.
+            print '(A,I0,A,I0,A,I0)', 'ghost points on rank ', proc_rank, ' grew to ', num_gps, ' but the array holds ', &
+                & size(ghost_points)
+            call s_mpi_abort('moving immersed boundary: ghost-point count exceeded the allocation')
+        end if
         call s_find_ghost_points(ghost_points)
         call nvtxEndRange
 
@@ -1034,8 +1071,12 @@ contains
             thetad = damp*patch_ib(i)%kin_theta0*sin(arg_th) + amp*patch_ib(i)%kin_theta0*omega*cos(arg_th)
         end if
 
-        ! centroid relative to the hinge: Rx(phi) Ry(theta) offset
-        r = patch_ib(i)%kin_offset
+        ! centroid relative to the hinge: Rx(phi) Ry(theta) offset. kin_offset is the hinge-to-reference-point
+        ! vector in body coordinates, where the reference point is the centroid the case file names. For geometries
+        ! whose working centroid has been moved to the measured centre of mass (4, 5, 11, 12), centroid_offset holds
+        ! reference-point minus CoM in body coordinates, so the CoM sits at kin_offset - centroid_offset from the hinge.
+        ! Subtracting it here puts the CoM -- which is what the voxeliser rotates about -- where the kinematics intend.
+        r = patch_ib(i)%kin_offset - patch_ib(i)%centroid_offset
         c(1) = cos(theta)*r(1) + sin(theta)*r(3)
         c(2) = r(2)
         c(3) = -sin(theta)*r(1) + cos(theta)*r(3)
@@ -1093,111 +1134,123 @@ contains
             end do
         end if
 
-        $:GPU_PARALLEL_LOOP(private='[i, j, k, l, xp, yp, zp, ib_idx, ib_idx_temp, encoded_ib_idx, fluid_idx, radial_vector, &
-                            & local_force_contribution, cell_volume, local_torque_contribution, dynamic_viscosity, &
-                            & viscous_stress]', copy='[forces, torques]', copyin='[dynamic_viscosities]', collapse=3)
-        do i = 0, m
-            do j = 0, n
-                do k = 0, p
-                    encoded_ib_idx = ib_markers%sf(i, j, k)
-                    if (encoded_ib_idx /= 0) then
-                        call s_decode_patch_periodicity(encoded_ib_idx, ib_idx_temp, xp, yp, zp)
-                        call s_get_neighborhood_idx(ib_idx_temp, ib_idx)  ! global patch ID -> local index
-                        if (ib_idx > 0) then
-                            ! get the vector pointing to the grid cell from the IB centroid
-                            radial_vector(1) = x_cc(i) - (patch_ib(ib_idx)%x_centroid + real(xp, &
-                                          & wp)*(glb_bounds(1)%end - glb_bounds(1)%beg))
-                            radial_vector(2) = y_cc(j) - (patch_ib(ib_idx)%y_centroid + real(yp, &
-                                          & wp)*(glb_bounds(2)%end - glb_bounds(2)%beg))
-                            radial_vector(3) = 0._wp
-                            if (num_dims == 3) radial_vector(3) = z_cc(k) - (patch_ib(ib_idx)%z_centroid + real(zp, &
-                                & wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
+        ! A rank tracking no patch has zero-size forces and torques. Mapping those into a kernel faulted (address
+        ! nil) on exactly the ranks whose neighbourhood count had just dropped to zero, on Frontier with CCE OpenMP
+        ! offload; there is nothing to compute for them, so no kernel here is launched with num_ibs = 0. The relay
+        ! call is kept: its ring exchange needs every rank.
+        if (num_ibs > 0) then
+            $:GPU_PARALLEL_LOOP(private='[i, j, k, l, xp, yp, zp, ib_idx, ib_idx_temp, encoded_ib_idx, fluid_idx, radial_vector, &
+                                & local_force_contribution, cell_volume, local_torque_contribution, dynamic_viscosity, &
+                                & viscous_stress]', copy='[forces, torques]', copyin='[dynamic_viscosities]', collapse=3)
+            do i = 0, m
+                do j = 0, n
+                    do k = 0, p
+                        encoded_ib_idx = ib_markers%sf(i, j, k)
+                        if (encoded_ib_idx /= 0) then
+                            call s_decode_patch_periodicity(encoded_ib_idx, ib_idx_temp, xp, yp, zp)
+                            call s_get_neighborhood_idx(ib_idx_temp, ib_idx)  ! global patch ID -> local index
+                            if (ib_idx > 0) then
+                                ! get the vector pointing to the grid cell from the IB centroid
+                                radial_vector(1) = x_cc(i) - (patch_ib(ib_idx)%x_centroid + real(xp, &
+                                              & wp)*(glb_bounds(1)%end - glb_bounds(1)%beg))
+                                radial_vector(2) = y_cc(j) - (patch_ib(ib_idx)%y_centroid + real(yp, &
+                                              & wp)*(glb_bounds(2)%end - glb_bounds(2)%beg))
+                                radial_vector(3) = 0._wp
+                                if (num_dims == 3) radial_vector(3) = z_cc(k) - (patch_ib(ib_idx)%z_centroid + real(zp, &
+                                    & wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
 
-                            local_force_contribution(:) = 0._wp
+                                local_force_contribution(:) = 0._wp
 
-                            ! compute the pressure force component, which is the negative pressure gradient
-                            do l = -fd_number, fd_number
-                                local_force_contribution(1) = local_force_contribution(1) - (fd_coeff_x(l, &
-                                                         & i)*q_prim_vf(eqn_idx%E)%sf(i + l, j, k))
-                                local_force_contribution(2) = local_force_contribution(2) - (fd_coeff_y(l, &
-                                                         & j)*q_prim_vf(eqn_idx%E)%sf(i, j + l, k))
-                                if (num_dims == 3) then
-                                    local_force_contribution(3) = local_force_contribution(3) - (fd_coeff_z(l, &
-                                                             & k)*q_prim_vf(eqn_idx%E)%sf(i, j, k + l))
-                                end if
-                            end do
-
-                            ! get the viscous stress and add its contribution if that is considered
-                            if (viscous) then
-                                ! compute the volume-weighted local dynamic viscosity
-                                dynamic_viscosity = 0._wp
-                                do fluid_idx = 1, num_fluids
-                                    ! local dynamic viscosity is the dynamic viscosity of the fluid times alpha of the fluid
-                                    dynamic_viscosity = dynamic_viscosity + (q_prim_vf(fluid_idx + eqn_idx%adv%beg - 1)%sf(i, j, &
-                                        & k)*dynamic_viscosities(fluid_idx))
-                                end do
-
+                                ! compute the pressure force component, which is the negative pressure gradient
                                 do l = -fd_number, fd_number
-                                    call s_compute_viscous_stress_tensor(viscous_stress, q_prim_vf, dynamic_viscosity, i + l, j, k)
-                                    local_force_contribution(1:3) = local_force_contribution(1:3) + fd_coeff_x(l, &
-                                                             & i)*viscous_stress(1,1:3)
-
-                                    call s_compute_viscous_stress_tensor(viscous_stress, q_prim_vf, dynamic_viscosity, i, j + l, k)
-                                    local_force_contribution(1:3) = local_force_contribution(1:3) + fd_coeff_y(l, &
-                                                             & j)*viscous_stress(2,1:3)
-
+                                    local_force_contribution(1) = local_force_contribution(1) - (fd_coeff_x(l, &
+                                                             & i)*q_prim_vf(eqn_idx%E)%sf(i + l, j, k))
+                                    local_force_contribution(2) = local_force_contribution(2) - (fd_coeff_y(l, &
+                                                             & j)*q_prim_vf(eqn_idx%E)%sf(i, j + l, k))
                                     if (num_dims == 3) then
-                                        call s_compute_viscous_stress_tensor(viscous_stress, q_prim_vf, dynamic_viscosity, i, j, &
-                                                                             & k + l)
-                                        local_force_contribution(1:3) = local_force_contribution(1:3) + fd_coeff_z(l, &
-                                                                 & k)*viscous_stress(3,1:3)
+                                        local_force_contribution(3) = local_force_contribution(3) - (fd_coeff_z(l, &
+                                                                 & k)*q_prim_vf(eqn_idx%E)%sf(i, j, k + l))
                                     end if
                                 end do
-                            end if
 
-                            call s_cross_product(radial_vector, local_force_contribution, local_torque_contribution)
+                                ! get the viscous stress and add its contribution if that is considered
+                                if (viscous) then
+                                    ! compute the volume-weighted local dynamic viscosity
+                                    dynamic_viscosity = 0._wp
+                                    do fluid_idx = 1, num_fluids
+                                        ! local dynamic viscosity is the dynamic viscosity of the fluid times alpha of the fluid
+                                        dynamic_viscosity = dynamic_viscosity + (q_prim_vf(fluid_idx + eqn_idx%adv%beg - 1)%sf(i, &
+                                            & j, k)*dynamic_viscosities(fluid_idx))
+                                    end do
 
-                            ! Update the force and torque values atomically to prevent race conditions
-                            cell_volume = dx(i)*dy(j)
-                            if (num_dims == 3) cell_volume = cell_volume*dz(k)
-                            do l = 1, num_dims
-                                $:GPU_ATOMIC(atomic='update')
-                                forces(ib_idx, l) = forces(ib_idx, l) + (local_force_contribution(l)*cell_volume)
-                                $:GPU_ATOMIC(atomic='update')
-                                torques(ib_idx, l) = torques(ib_idx, l) + local_torque_contribution(l)*cell_volume
-                            end do
-                        end if  ! ib_idx > 0
-                    end if
+                                    do l = -fd_number, fd_number
+                                        call s_compute_viscous_stress_tensor(viscous_stress, q_prim_vf, dynamic_viscosity, i + l, &
+                                                                             & j, k)
+                                        local_force_contribution(1:3) = local_force_contribution(1:3) + fd_coeff_x(l, &
+                                                                 & i)*viscous_stress(1,1:3)
+
+                                        call s_compute_viscous_stress_tensor(viscous_stress, q_prim_vf, dynamic_viscosity, i, &
+                                                                             & j + l, k)
+                                        local_force_contribution(1:3) = local_force_contribution(1:3) + fd_coeff_y(l, &
+                                                                 & j)*viscous_stress(2,1:3)
+
+                                        if (num_dims == 3) then
+                                            call s_compute_viscous_stress_tensor(viscous_stress, q_prim_vf, dynamic_viscosity, i, &
+                                                                                 & j, k + l)
+                                            local_force_contribution(1:3) = local_force_contribution(1:3) + fd_coeff_z(l, &
+                                                                     & k)*viscous_stress(3,1:3)
+                                        end if
+                                    end do
+                                end if
+
+                                call s_cross_product(radial_vector, local_force_contribution, local_torque_contribution)
+
+                                ! Update the force and torque values atomically to prevent race conditions
+                                cell_volume = dx(i)*dy(j)
+                                if (num_dims == 3) cell_volume = cell_volume*dz(k)
+                                do l = 1, num_dims
+                                    $:GPU_ATOMIC(atomic='update')
+                                    forces(ib_idx, l) = forces(ib_idx, l) + (local_force_contribution(l)*cell_volume)
+                                    $:GPU_ATOMIC(atomic='update')
+                                    torques(ib_idx, l) = torques(ib_idx, l) + local_torque_contribution(l)*cell_volume
+                                end do
+                            end if  ! ib_idx > 0
+                        end if
+                    end do
                 end do
             end do
-        end do
-        $:END_GPU_PARALLEL_LOOP()
+            $:END_GPU_PARALLEL_LOOP()
+        end if  ! num_ibs > 0
 
-        call s_apply_collision_forces(ghost_points, num_gps, ib_markers, forces, torques)
+        if (num_ibs > 0) call s_apply_collision_forces(ghost_points, num_gps, ib_markers, forces, torques)
 
-        ! reduce the forces across local neighborhood ranks
+        ! reduce the forces across local neighborhood ranks (host: MPI and O(num_ibs) arithmetic)
         call s_communicate_ib_forces(forces, torques)
 
-        ! consider body forces after reducing to avoid double counting
-        do i = 1, num_ibs
-            if (bf_x) then
-                forces(i, 1) = forces(i, 1) + accel_bf(1)*patch_ib(i)%mass
-            end if
-            if (bf_y) then
-                forces(i, 2) = forces(i, 2) + accel_bf(2)*patch_ib(i)%mass
-            end if
-            if (bf_z) then
-                forces(i, 3) = forces(i, 3) + accel_bf(3)*patch_ib(i)%mass
-            end if
-        end do
+        if (num_ibs > 0) then
+            ! consider body forces after reducing to avoid double counting
+            do i = 1, num_ibs
+                if (bf_x) forces(i, 1) = forces(i, 1) + accel_bf(1)*patch_ib(i)%mass
+                if (bf_y) forces(i, 2) = forces(i, 2) + accel_bf(2)*patch_ib(i)%mass
+                if (bf_z) forces(i, 3) = forces(i, 3) + accel_bf(3)*patch_ib(i)%mass
+            end do
 
-        ! apply the summed forces
-        $:GPU_PARALLEL_LOOP(private='[i]', copyin='[forces, torques]')
-        do i = 1, num_ibs
-            patch_ib(i)%force(:) = forces(i,:)
-            patch_ib(i)%torque(:) = torques(i,:)
-        end do
-        $:END_GPU_PARALLEL_LOOP()
+            ! the definitive totals, on the host, for the writer
+            do i = 1, num_ibs
+                ib_force_host(:,i) = forces(i,:)
+                ib_torque_host(:,i) = torques(i,:)
+                patch_ib(i)%force(:) = forces(i,:)
+                patch_ib(i)%torque(:) = torques(i,:)
+            end do
+
+            ! apply the summed forces on the device (two-way coupling reads them in the kinematics kernel)
+            $:GPU_PARALLEL_LOOP(private='[i]', copyin='[forces, torques]')
+            do i = 1, num_ibs
+                patch_ib(i)%force(:) = forces(i,:)
+                patch_ib(i)%torque(:) = torques(i,:)
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        end if
 
         call nvtxEndRange
 
@@ -1205,6 +1258,66 @@ contains
 
     !> Computes the center of mass for IB patch types where we are unable to determine their center of mass analytically.
     !> These patches include things like NACA airfoils and STL models
+    !> Collective form of s_compute_centroid_offset: called by every rank for global patch gid, with local index ib_marker < 0 on
+    !! ranks that do not track it. Those ranks contribute nothing but still join every reduction, so the call is safe inside a loop
+    !! over the global patch list.
+    subroutine s_compute_centroid_offset_global(gid, ib_marker)
+
+        integer, intent(in)      :: gid, ib_marker
+        integer                  :: i, j, k, num_cells_local, decoded_gbl_id, geom
+        integer(kind=8)          :: num_cells, flag
+        real(wp), dimension(1:3) :: center_of_mass, center_of_mass_local
+        logical                  :: tracked, needs
+
+        tracked = ib_marker > 0
+        needs = .false.
+        if (tracked) then
+            geom = patch_ib(ib_marker)%geometry
+            needs = patch_ib(ib_marker)%moving_ibm /= 0 .and. (geom == 4 .or. geom == 5 .or. geom == 11 .or. geom == 12)
+        end if
+        ! every rank must agree on whether this patch takes the collective path: reduce the decision
+        flag = 0_8; if (needs) flag = 1_8
+        call s_mpi_allreduce_integer_sum(flag, num_cells)
+        if (num_cells == 0) return
+
+        center_of_mass_local = [0._wp, 0._wp, 0._wp]
+        num_cells_local = 0
+        if (tracked) then
+            do i = 0, m
+                do j = 0, n
+                    do k = 0, p
+                        if (ib_markers%sf(i, j, k) /= 0) then
+                            call s_decode_patch_periodicity(ib_markers%sf(i, j, k), decoded_gbl_id)
+                            if (decoded_gbl_id == gid) then
+                                num_cells_local = num_cells_local + 1
+                                center_of_mass_local = center_of_mass_local + [x_cc(i), y_cc(j), 0._wp]
+                                if (num_dims == 3) center_of_mass_local(3) = center_of_mass_local(3) + z_cc(k)
+                            end if
+                        end if
+                    end do
+                end do
+            end do
+        end if
+        call s_mpi_allreduce_integer_sum(int(num_cells_local, 8), num_cells)
+        call s_mpi_allreduce_sum(center_of_mass_local(1), center_of_mass(1))
+        call s_mpi_allreduce_sum(center_of_mass_local(2), center_of_mass(2))
+        call s_mpi_allreduce_sum(center_of_mass_local(3), center_of_mass(3))
+        if (.not. tracked) return
+        if (num_cells == 0) then
+            patch_ib(ib_marker)%centroid_offset = [0._wp, 0._wp, 0._wp]
+            return
+        end if
+        center_of_mass = center_of_mass/real(num_cells, wp)
+        patch_ib(ib_marker)%centroid_offset = [patch_ib(ib_marker)%x_centroid, patch_ib(ib_marker)%y_centroid, &
+                 & patch_ib(ib_marker)%z_centroid] - center_of_mass
+        patch_ib(ib_marker)%x_centroid = center_of_mass(1)
+        patch_ib(ib_marker)%y_centroid = center_of_mass(2)
+        patch_ib(ib_marker)%z_centroid = center_of_mass(3)
+        patch_ib(ib_marker)%centroid_offset = matmul(patch_ib(ib_marker)%rotation_matrix_inverse, &
+                 & patch_ib(ib_marker)%centroid_offset)
+
+    end subroutine s_compute_centroid_offset_global
+
     subroutine s_compute_centroid_offset(ib_marker)
 
         integer, intent(in)      :: ib_marker
@@ -1394,38 +1507,33 @@ contains
                 send_neighbor = merge(bc_${X}$%end, MPI_PROC_NULL, bc_${X}$%end >= 0)
                 recv_neighbor = merge(bc_${X}$%beg, MPI_PROC_NULL, bc_${X}$%beg >= 0)
 
-                recv_forces_snap = 0._wp
-                recv_torques_snap = 0._wp
-                $:GPU_UPDATE(device='[recv_forces_snap, recv_torques_snap]')
+                recv_forces_snap(1:num_ibs,:) = 0._wp
+                recv_torques_snap(1:num_ibs,:) = 0._wp
                 tag = 300
 
                 do k = 1, min(2*ib_neighborhood_radius, num_procs_${X}$ - 1)
                     ! send forces to +${X}$ neighbor; receive from -${X}$ neighbor. Add received values then
                     pack_pos = 0
-                    $:GPU_PARALLEL_LOOP(private='[i]', copyin='[forces, torques]')
                     do i = 1, num_ibs
                         send_ids(i) = patch_ib(i)%gbl_patch_id
                         send_ft(1:3,i) = forces(i,:)
                         send_ft(4:6,i) = torques(i,:)
                     end do
-                    $:END_GPU_PARALLEL_LOOP()
-                    $:GPU_UPDATE(host='[send_ids, send_ft]')
                     call MPI_PACK(num_ibs, 1, MPI_INTEGER, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
                     call MPI_PACK(send_ids, num_ibs, MPI_INTEGER, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
                     call MPI_PACK(send_ft, 6*num_ibs, mpi_p, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
                     call MPI_SENDRECV(ib_force_send_buf, pack_pos, MPI_PACKED, send_neighbor, tag, ib_force_recv_buf, buf_size, &
                                       & MPI_PACKED, recv_neighbor, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE, ierr)
 
-                    if (recv_neighbor /= MPI_PROC_NULL) then
+                    ! a rank tracking no patch has nothing to absorb
+                    if (recv_neighbor /= MPI_PROC_NULL .and. num_ibs > 0) then
                         unpack_pos = 0
                         call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_count, 1, MPI_INTEGER, MPI_COMM_WORLD, ierr)
                         call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_ids, recv_count, MPI_INTEGER, &
                                         & MPI_COMM_WORLD, ierr)
                         call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_ft, 6*recv_count, mpi_p, MPI_COMM_WORLD, ierr)
-                        $:GPU_UPDATE(device='[recv_ids(1:recv_count), recv_ft(:, 1:recv_count)]')
-                        $:GPU_PARALLEL_LOOP(private='[i, j]', copy='[forces, torques]')
                         do i = 1, recv_count
-                            call s_get_neighborhood_idx(recv_ids(i), j)
+                            j = ib_gbl_idx_lookup(recv_ids(i))
                             if (j > 0) then
                                 ! add forces and subtract recv_snap prevent double-counting
                                 forces(j,:) = forces(j,:) + recv_ft(1:3,i) - recv_forces_snap(j,:)
@@ -1434,7 +1542,6 @@ contains
                                 recv_torques_snap(j,:) = recv_ft(4:6,i)
                             end if
                         end do
-                        $:END_GPU_PARALLEL_LOOP()
                     end if
                     tag = tag + 2
                 end do
@@ -1449,40 +1556,60 @@ contains
 
                 do k = 1, min(2*ib_neighborhood_radius, num_procs_${X}$ - 1)
                     pack_pos = 0
-                    $:GPU_PARALLEL_LOOP(private='[i]', copyin='[forces, torques]')
                     do i = 1, num_ibs
                         send_ids(i) = patch_ib(i)%gbl_patch_id
                         send_ft(1:3,i) = forces(i,:)
                         send_ft(4:6,i) = torques(i,:)
                     end do
-                    $:END_GPU_PARALLEL_LOOP()
-                    $:GPU_UPDATE(host='[send_ids, send_ft]')
                     call MPI_PACK(num_ibs, 1, MPI_INTEGER, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
                     call MPI_PACK(send_ids, num_ibs, MPI_INTEGER, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
                     call MPI_PACK(send_ft, 6*num_ibs, mpi_p, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
                     call MPI_SENDRECV(ib_force_send_buf, pack_pos, MPI_PACKED, send_neighbor, tag, ib_force_recv_buf, buf_size, &
                                       & MPI_PACKED, recv_neighbor, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE, ierr)
-                    if (recv_neighbor /= MPI_PROC_NULL) then
+
+                    if (recv_neighbor /= MPI_PROC_NULL .and. num_ibs > 0) then
                         unpack_pos = 0
                         call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_count, 1, MPI_INTEGER, MPI_COMM_WORLD, ierr)
                         call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_ids, recv_count, MPI_INTEGER, &
                                         & MPI_COMM_WORLD, ierr)
                         call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_ft, 6*recv_count, mpi_p, MPI_COMM_WORLD, ierr)
-                        $:GPU_UPDATE(device='[recv_ids(1:recv_count), recv_ft(:, 1:recv_count)]')
-                        $:GPU_PARALLEL_LOOP(private='[i, j]', copy='[forces, torques]')
                         do i = 1, recv_count
-                            call s_get_neighborhood_idx(recv_ids(i), j)
+                            j = ib_gbl_idx_lookup(recv_ids(i))
                             if (j > 0) then
                                 forces(j,:) = recv_ft(1:3,i)
                                 torques(j,:) = recv_ft(4:6,i)
                             end if
                         end do
-                        $:END_GPU_PARALLEL_LOOP()
                     end if
                     tag = tag + 2
                 end do
             end if
         #:endfor
+
+        deallocate (ib_force_send_buf, ib_force_recv_buf)
+
+        ! DIAG: every rank that tracks patch 1 must now hold the same total; ranks tracking nothing contribute
+        ! neutral values. One allreduce of six numbers per call.
+        block
+            real(wp) :: lo(3), hi(3), glo(3), ghi(3)
+            integer  :: l
+            ! compare global patch 1 specifically: local index 1 is a different body on different ranks
+            lo = huge(1._wp); hi = -huge(1._wp); l = ib_gbl_idx_lookup(1)
+            if (num_ibs > 0 .and. l > 0) then
+                lo = forces(l,:); hi = forces(l,:)
+            end if
+            do l = 1, 3
+                call s_mpi_allreduce_min(lo(l), glo(l))
+                call s_mpi_allreduce_max(hi(l), ghi(l))
+            end do
+            if (num_ibs > 0 .and. l > 0 .and. ib_relay_warned < 5) then
+                if (any(abs(ghi - glo) > 1.e-9_wp*max(1._wp, maxval(abs(ghi))))) then
+                    ib_relay_warned = ib_relay_warned + 1
+                    print '(a,i0,a,3es12.4,a,3es12.4,a,3es12.4)', 'IB DIAG relay: rank ', proc_rank, ' holds ', forces(l,:), &
+                        & ' | min over tracking ranks ', glo, ' | max ', ghi
+                end if
+            end if
+        end block
 #endif
 
     end subroutine s_communicate_ib_forces
@@ -1494,7 +1621,9 @@ contains
         integer                               :: new_count, recv_count
         integer                               :: pack_pos, unpack_pos, buf_size, patch_bytes
         integer                               :: send_neighbor, recv_neighbor, ierr
-        integer                               :: dx, dy, dz, tag, nbr_idx, nreqs
+        integer                               :: dx, dy, dz, tag, nbr_idx, nreqs, round, n_fwd
+        integer, allocatable                  :: fwd_list(:)
+        logical, allocatable                  :: forwarded(:)
         real(wp), dimension(3)                :: centroid
         logical                               :: is_new
         type(ib_patch_parameters)             :: tmp_patch
@@ -1539,22 +1668,26 @@ contains
                     end if
                 end if
             end do
+            if (output_idx /= num_ibs) print '(a,i0,a,i0,a,i0)', 'IB DIAG: rank ', proc_rank, ' neighbourhood count ', num_ibs, &
+                & ' -> ', output_idx
             num_ibs = output_idx
             num_local_ibs = local_output_idx
             $:GPU_UPDATE(device='[patch_ib]')
             call s_update_ib_lookup()
 
-            ! Broadcast newly-owned patches to all neighborhood neighbors
+            ! Broadcast newly-owned patches through the neighbourhood. One exchange only reaches the owner's 26
+            ! immediate neighbours, while the neighbourhood is ib_neighborhood_radius hops wide: after an ownership
+            ! change the ranks 2..radius hops away on the new side could never (re)gain the patch, so the tracking
+            ! set shrank by one rank per crossing and a body moving that far would have lost its markers there.
+            ! Round 1 sends what this rank newly owns; round k forwards what it gained in round k-1.
             patch_bytes = storage_size(tmp_patch)/8
-            buf_size = storage_size(0)/8 + patch_bytes*num_local_ibs_max
-            allocate (send_buf(buf_size), recv_bufs(buf_size, max_nbrs))
+            ! a rank gains a given patch at most once, so no round carries more than num_gbl_ibs patches
+            buf_size = storage_size(0)/8 + patch_bytes*max(num_local_ibs_max, min(num_gbl_ibs, size(patch_ib)))
+            allocate (send_buf(buf_size), recv_bufs(buf_size, max_nbrs), fwd_list(size(patch_ib)), &
+                      & forwarded(size(ib_gbl_idx_lookup)))
+            forwarded = .false.
 
-            ! Write placeholder count at position 0
-            pack_pos = 0
-            call MPI_PACK(0, 1, MPI_INTEGER, send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
-
-            ! pack new patches and count them
-            new_count = 0
+            n_fwd = 0
             do i = 1, num_local_ibs
                 k = local_ib_patch_ids(i)
                 is_new = .true.
@@ -1565,69 +1698,84 @@ contains
                     end if
                 end do
                 if (is_new) then
-                    call MPI_PACK(patch_ib(k), patch_bytes, MPI_BYTE, send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
-                    new_count = new_count + 1
+                    n_fwd = n_fwd + 1
+                    fwd_list(n_fwd) = k
+                    forwarded(patch_ib(k)%gbl_patch_id) = .true.
                 end if
             end do
 
-            ! Overwrite the placeholder with the real count
-            pack_pos = 0
-            call MPI_PACK(new_count, 1, MPI_INTEGER, send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
-            pack_pos = storage_size(0)/8 + new_count*patch_bytes
+            do round = 1, max(1, ib_neighborhood_radius)
+                pack_pos = 0
+                call MPI_PACK(n_fwd, 1, MPI_INTEGER, send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
+                do i = 1, n_fwd
+                    call MPI_PACK(patch_ib(fwd_list(i)), patch_bytes, MPI_BYTE, send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
+                end do
 
-            ! Post all receives first, then sends
-            nreqs = 0
-            nbr_idx = 0
-            do dz = merge(-1, 0, num_dims == 3), merge(1, 0, num_dims == 3)
-                do dy = -1, 1
-                    do dx = -1, 1
-                        if (dx == 0 .and. dy == 0 .and. dz == 0) cycle
-                        nbr_idx = nbr_idx + 1
-                        tag = 200 + (dx + 1)*9 + (dy + 1)*3 + (dz + 1)
-                        recv_neighbor = ib_neighbor_ranks(-dx, -dy, -dz)
-                        recv_neighbor_list(nbr_idx) = MPI_PROC_NULL
-                        if (recv_neighbor < 0) cycle
-                        recv_neighbor_list(nbr_idx) = recv_neighbor
-                        nreqs = nreqs + 1
-                        call MPI_IRECV(recv_bufs(:,nbr_idx), buf_size, MPI_PACKED, recv_neighbor, tag, MPI_COMM_WORLD, &
-                                       & requests(nreqs), ierr)
+                ! Post all receives first, then sends
+                nreqs = 0
+                nbr_idx = 0
+                do dz = merge(-1, 0, num_dims == 3), merge(1, 0, num_dims == 3)
+                    do dy = -1, 1
+                        do dx = -1, 1
+                            if (dx == 0 .and. dy == 0 .and. dz == 0) cycle
+                            nbr_idx = nbr_idx + 1
+                            tag = 200 + (dx + 1)*9 + (dy + 1)*3 + (dz + 1)
+                            recv_neighbor = ib_neighbor_ranks(-dx, -dy, -dz)
+                            recv_neighbor_list(nbr_idx) = MPI_PROC_NULL
+                            if (recv_neighbor < 0) cycle
+                            recv_neighbor_list(nbr_idx) = recv_neighbor
+                            nreqs = nreqs + 1
+                            call MPI_IRECV(recv_bufs(:,nbr_idx), buf_size, MPI_PACKED, recv_neighbor, tag, MPI_COMM_WORLD, &
+                                           & requests(nreqs), ierr)
+                        end do
+                    end do
+                end do
+
+                do dz = merge(-1, 0, num_dims == 3), merge(1, 0, num_dims == 3)
+                    do dy = -1, 1
+                        do dx = -1, 1
+                            if (dx == 0 .and. dy == 0 .and. dz == 0) cycle
+                            tag = 200 + (dx + 1)*9 + (dy + 1)*3 + (dz + 1)
+                            send_neighbor = ib_neighbor_ranks(dx, dy, dz)
+                            if (send_neighbor < 0) cycle
+                            nreqs = nreqs + 1
+                            call MPI_ISEND(send_buf, pack_pos, MPI_PACKED, send_neighbor, tag, MPI_COMM_WORLD, requests(nreqs), &
+                                           & ierr)
+                        end do
+                    end do
+                end do
+
+                call MPI_WAITALL(nreqs, requests, MPI_STATUSES_IGNORE, ierr)
+
+                ! Unpack all received buffers; what is new here is what gets forwarded next round
+                n_fwd = 0
+                do nbr_idx = 1, merge(26, 8, num_dims == 3)
+                    if (recv_neighbor_list(nbr_idx) == MPI_PROC_NULL) cycle
+                    unpack_pos = 0
+                    call MPI_UNPACK(recv_bufs(:,nbr_idx), buf_size, unpack_pos, recv_count, 1, MPI_INTEGER, MPI_COMM_WORLD, ierr)
+                    do i = 1, recv_count
+                        call MPI_UNPACK(recv_bufs(:,nbr_idx), buf_size, unpack_pos, tmp_patch, patch_bytes, MPI_BYTE, &
+                                        & MPI_COMM_WORLD, ierr)
+                        if (ib_gbl_idx_lookup(tmp_patch%gbl_patch_id) < 0) then
+                            num_ibs = num_ibs + 1
+                            @:ASSERT(num_ibs <= size(patch_ib), 'patch_ib overflow in neighborhood handoff')
+                            patch_ib(num_ibs) = tmp_patch
+                            ib_gbl_idx_lookup(tmp_patch%gbl_patch_id) = num_ibs  ! host copy; device refreshed below
+                            print '(a,i0,a,i0,a,i0,a,i0)', 'IB DIAG: rank ', proc_rank, ' gained patch ', tmp_patch%gbl_patch_id, &
+                                & ' in round ', round, ' -> count ', num_ibs
+                        end if
+                        ! forward whether or not it was new here: the ranks between the owner and the edge of the
+                        ! neighbourhood already track the patch and must still pass it along (once each)
+                        if (.not. forwarded(tmp_patch%gbl_patch_id)) then
+                            forwarded(tmp_patch%gbl_patch_id) = .true.
+                            n_fwd = n_fwd + 1
+                            fwd_list(n_fwd) = ib_gbl_idx_lookup(tmp_patch%gbl_patch_id)
+                        end if
                     end do
                 end do
             end do
 
-            do dz = merge(-1, 0, num_dims == 3), merge(1, 0, num_dims == 3)
-                do dy = -1, 1
-                    do dx = -1, 1
-                        if (dx == 0 .and. dy == 0 .and. dz == 0) cycle
-                        tag = 200 + (dx + 1)*9 + (dy + 1)*3 + (dz + 1)
-                        send_neighbor = ib_neighbor_ranks(dx, dy, dz)
-                        if (send_neighbor < 0) cycle
-                        nreqs = nreqs + 1
-                        call MPI_ISEND(send_buf, pack_pos, MPI_PACKED, send_neighbor, tag, MPI_COMM_WORLD, requests(nreqs), ierr)
-                    end do
-                end do
-            end do
-
-            call MPI_WAITALL(nreqs, requests, MPI_STATUSES_IGNORE, ierr)
-
-            ! Unpack all received buffers
-            do nbr_idx = 1, merge(26, 8, num_dims == 3)
-                if (recv_neighbor_list(nbr_idx) == MPI_PROC_NULL) cycle
-                unpack_pos = 0
-                call MPI_UNPACK(recv_bufs(:,nbr_idx), buf_size, unpack_pos, recv_count, 1, MPI_INTEGER, MPI_COMM_WORLD, ierr)
-                do i = 1, recv_count
-                    call MPI_UNPACK(recv_bufs(:,nbr_idx), buf_size, unpack_pos, tmp_patch, patch_bytes, MPI_BYTE, MPI_COMM_WORLD, &
-                                    & ierr)
-                    call s_get_neighborhood_idx(tmp_patch%gbl_patch_id, j)
-                    if (j < 0) then
-                        num_ibs = num_ibs + 1
-                        @:ASSERT(num_ibs <= size(patch_ib), 'patch_ib overflow in neighborhood handoff')
-                        patch_ib(num_ibs) = tmp_patch
-                    end if
-                end do
-            end do
-
-            deallocate (send_buf, recv_bufs)
+            deallocate (send_buf, recv_bufs, fwd_list, forwarded)
             $:GPU_UPDATE(device='[patch_ib]')
             call s_update_ib_lookup()
         end if
@@ -1651,16 +1799,16 @@ contains
 
         integer :: i
 
-        ib_gbl_idx_lookup = -1
-        $:GPU_UPDATE(device='[ib_gbl_idx_lookup]')
+        ! Built on the host and pushed once. It used to be zeroed on the host, pushed, filled by a device kernel
+        ! and read back; after an ownership handoff the read-back left -1 on some ranks (the host relay then
+        ! absorbed nothing there and the owner's total came back zero -- VERIFICATION.md), so nothing here
+        ! depends on the order of a small update against a kernel any more.
 
-        $:GPU_PARALLEL_LOOP(private='[i]')
+        ib_gbl_idx_lookup = -1
         do i = 1, num_ibs
             ib_gbl_idx_lookup(patch_ib(i)%gbl_patch_id) = i
         end do
-        $:END_GPU_PARALLEL_LOOP()
-
-        $:GPU_UPDATE(host='[ib_gbl_idx_lookup]')
+        $:GPU_UPDATE(device='[ib_gbl_idx_lookup]')
 
     end subroutine s_update_ib_lookup
 
@@ -1686,8 +1834,8 @@ contains
         if (collision_model > 0) call s_finalize_collisions_module()
 #ifdef MFC_MPI
         if (num_procs > 1) then
-            @:DEALLOCATE(send_ids, send_ft)
-            @:DEALLOCATE(recv_forces_snap, recv_torques_snap, recv_ids, recv_ft)
+            deallocate (send_ids, send_ft)
+            deallocate (recv_forces_snap, recv_torques_snap, recv_ids, recv_ft)
         end if
 #endif
 

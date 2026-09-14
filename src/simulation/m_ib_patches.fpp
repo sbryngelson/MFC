@@ -48,7 +48,9 @@ contains
         real(wp), dimension(3) :: center, xyz_local, length
         real(wp) :: radius, eta
 
-        $:GPU_UPDATE(host='[patch_ib(1:num_ibs)]')
+        if (num_ibs > 0) then
+            $:GPU_UPDATE(host='[patch_ib(1:num_ibs)]')
+        end if
 
         !  3D Patch Geometries
         if (num_dims == 3) then
