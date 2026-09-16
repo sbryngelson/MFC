@@ -1199,6 +1199,7 @@ contains
         else
             call s_write_serial_ib_state(time_step)
         end if
+        call s_write_centroid_offsets(time_step)
 
     end subroutine s_write_ib_state_file
 

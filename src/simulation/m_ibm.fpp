@@ -27,13 +27,20 @@ module m_ibm
 
     private :: s_compute_image_points, s_compute_interpolation_coeffs, s_interpolate_image_point, s_find_ghost_points, &
         & s_find_num_ghost_points
-    ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module
+    ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, s_write_centroid_offsets
 
     type(integer_field), public :: ib_markers
     $:GPU_DECLARE(create='[ib_markers]')
 
     type(ghost_point), dimension(:), allocatable :: ghost_points
     $:GPU_DECLARE(create='[ghost_points]')
+    ! Per-ghost-point buffer for the primitive values the reconstruction assigns (alpha_rho(1:nf), alpha(1:nf), p, c).
+    ! The reconstruction loop reads q_prim at image-point stencils, and a stencil can contain other ghost cells
+    ! (the all-body fallback in s_compute_interpolation_coeffs); writing q_prim in the same parallel loop is a
+    ! read-after-write race across ghost points, which made a moving body's evolution nondeterministic run to
+    ! run (VERIFICATION.md, restart continuity). Writes go here and are copied to q_prim after the loop.
+    real(wp), dimension(:,:), allocatable :: gp_prim_buf
+    $:GPU_DECLARE(create='[gp_prim_buf]')
 
     integer :: num_gps  !< Number of ghost points
 #if defined(MFC_OpenACC)
@@ -140,6 +147,11 @@ contains
         do i = 1, num_ibs
             $:GPU_UPDATE(device='[patch_ib(i)]')
         end do
+        ! A restart re-measures the centre of mass from the body voxelised at the restart attitude, which differs
+        ! from the t = 0 measurement by the voxelisation, so the kinematics then run about a slightly different
+        ! point than the run being continued (VERIFICATION.md, restart continuity). When the checkpoint carries
+        ! the offsets the run was using, restore them and re-evaluate the kinematics about them.
+        call s_restore_centroid_offsets(t_init)
 
         ! find the number of ghost points and set them to be the maximum total across ranks
         call s_find_num_ghost_points(num_gps)
@@ -161,6 +173,8 @@ contains
         ! set the size of the ghost point arrays to be the amount of points total, plus a factor of 2 buffer
         $:GPU_UPDATE(device='[num_gps]')
         @:ALLOCATE(ghost_points(1:max_num_gps))
+        @:ALLOCATE(gp_prim_buf(1:max_num_gps, 1:2*num_fluids + 2))
+        $:GPU_ENTER_DATA(copyin='[gp_prim_buf]')
 
         $:GPU_ENTER_DATA(copyin='[ghost_points]')
         ! Ghost-cell IBM, Tseng & Ferziger JCP (2003), Mittal & Iaccarino ARFM (2005)
@@ -308,25 +322,25 @@ contains
                 ! Set q_prim_vf params at GP so that mixture vars calculated properly
                 $:GPU_LOOP(parallelism='[seq]')
                 do q = 1, num_fluids
-                    q_prim_vf(q)%sf(j, k, l) = alpha_rho_IP(q)
-                    q_prim_vf(eqn_idx%adv%beg + q - 1)%sf(j, k, l) = alpha_IP(q)
+                    gp_prim_buf(i, q) = alpha_rho_IP(q)
+                    gp_prim_buf(i, num_fluids + q) = alpha_IP(q)
                 end do
 
                 if (surface_tension) then
-                    q_prim_vf(eqn_idx%c)%sf(j, k, l) = c_IP
+                    gp_prim_buf(i, 2*num_fluids + 2) = c_IP
                 end if
 
                 ! set the pressure
                 if (patch_ib(patch_id)%moving_ibm <= 1) then
-                    q_prim_vf(eqn_idx%E)%sf(j, k, l) = pres_IP
+                    gp_prim_buf(i, 2*num_fluids + 1) = pres_IP
                 else
-                    q_prim_vf(eqn_idx%E)%sf(j, k, l) = 0._wp
+                    gp_prim_buf(i, 2*num_fluids + 1) = 0._wp
                     $:GPU_LOOP(parallelism='[seq]')
                     do q = 1, num_fluids
                         ! Pressure correction for moving IB: accounts for acceleration of IB surface
-                        q_prim_vf(eqn_idx%E)%sf(j, k, l) = q_prim_vf(eqn_idx%E)%sf(j, k, &
-                                  & l) + pres_IP/(1._wp - 2._wp*abs(gp%levelset*alpha_rho_IP(q)/pres_IP) &
-                                  & *dot_product(patch_ib(patch_id)%force/patch_ib(patch_id)%mass, gp%levelset_norm))
+                        gp_prim_buf(i, 2*num_fluids + 1) = gp_prim_buf(i, &
+                                    & 2*num_fluids + 1) + pres_IP/(1._wp - 2._wp*abs(gp%levelset*alpha_rho_IP(q)/pres_IP) &
+                                    & *dot_product(patch_ib(patch_id)%force/patch_ib(patch_id)%mass, gp%levelset_norm))
                     end do
                 end if
 
@@ -486,6 +500,21 @@ contains
                         q_cons_vf(q)%sf(j, k, l) = e_q
                     end do
                 end if
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+            ! second pass: the buffered primitive values into q_prim, no ghost point reading another's write
+            $:GPU_PARALLEL_LOOP(private='[i, j, k, l, q]')
+            do i = 1, num_gps
+                j = ghost_points(i)%loc(1)
+                k = ghost_points(i)%loc(2)
+                l = ghost_points(i)%loc(3)
+                $:GPU_LOOP(parallelism='[seq]')
+                do q = 1, num_fluids
+                    q_prim_vf(q)%sf(j, k, l) = gp_prim_buf(i, q)
+                    q_prim_vf(eqn_idx%adv%beg + q - 1)%sf(j, k, l) = gp_prim_buf(i, num_fluids + q)
+                end do
+                q_prim_vf(eqn_idx%E)%sf(j, k, l) = gp_prim_buf(i, 2*num_fluids + 1)
+                if (surface_tension) q_prim_vf(eqn_idx%c)%sf(j, k, l) = gp_prim_buf(i, 2*num_fluids + 2)
             end do
             $:END_GPU_PARALLEL_LOOP()
         end if
@@ -996,6 +1025,12 @@ contains
         call nvtxStartRange("COMPUTE-GHOST-POINTS")
         ! recalculate the ghost point locations and coefficients
         call s_find_num_ghost_points(num_gps)
+        ! num_gps is a declare-target module variable and every device loop over the ghost points is bounded by it;
+        ! it was refreshed on the device once, at setup, so as a moving body's count changed the device loops kept
+        ! the setup count: stale list entries beyond the current count were "corrected" as if they were ghost
+        ! cells (or new ones left uncorrected), and which entries those were depended on the atomic fill order --
+        ! the run-to-run nondeterminism of every moving-body case (VERIFICATION.md).
+        $:GPU_UPDATE(device='[num_gps]')
         if (int(num_gps, 8) > size(ghost_points, kind=8)) then
             ! Writing past the array is a device-side memory fault with no diagnostic (V20 died at exactly the
             ! instant a 4-cell-thick panel crossed zero pitch at peak rate). Abort with the numbers instead.
@@ -1261,6 +1296,72 @@ contains
     !> Collective form of s_compute_centroid_offset: called by every rank for global patch gid, with local index ib_marker < 0 on
     !! ranks that do not track it. Those ranks contribute nothing but still join every reduction, so the call is safe inside a loop
     !! over the global patch list.
+    !> Restore per-body centroid offsets written alongside the checkpoint (restart_data/ib_offset_<step>.dat: one line per global
+    !! patch, "gid ox oy oz"). Absent file: the offsets stay as measured.
+    impure subroutine s_restore_centroid_offsets(t_init)
+
+        real(wp), intent(in)                 :: t_init
+        character(len=path_len + 2*name_len) :: file_loc
+        logical                              :: file_exist
+        integer                              :: gid, i, ios, file_unit, step
+        real(wp), dimension(3)               :: off
+
+        step = t_step_start
+        if (cfl_dt) step = n_start
+        if (step == 0) return
+        write (file_loc, '(A,I0,A)') trim(case_dir) // '/restart_data/ib_offset_', step, '.dat'
+        inquire (file=trim(file_loc), exist=file_exist)
+        if (.not. file_exist) return
+        open (newunit=file_unit, file=trim(file_loc), status='old', action='read', iostat=ios)
+        if (ios /= 0) return
+        do
+            read (file_unit, *, iostat=ios) gid, off
+            if (ios /= 0) exit
+            call s_get_neighborhood_idx(gid, i)
+            if (i > 0) then
+                patch_ib(i)%centroid_offset = off
+                if (patch_ib(i)%moving_ibm /= 0 .and. patch_ib(i)%kin_model > 0) call s_prescribed_kinematics(i, t_init)
+                $:GPU_UPDATE(device='[patch_ib(i)]')
+            end if
+        end do
+        close (file_unit)
+        if (proc_rank == 0) print '(A)', ' IB: centroid offsets restored from ' // trim(file_loc)
+
+    end subroutine s_restore_centroid_offsets
+
+    !> Write the centroid offsets of every global patch next to the checkpoint (rank 0), so a restart can continue the run about the
+    !! same points. Offsets are identical on every rank tracking a patch; a max-reduction over ranks collects them without caring
+    !! which ranks track what.
+    impure subroutine s_write_centroid_offsets(step)
+
+        integer, intent(in)                   :: step
+        character(len=path_len + 2*name_len)  :: file_loc
+        real(wp), dimension(:,:), allocatable :: off_loc, off_glb
+        integer                               :: gid, i, k, file_unit
+
+        allocate (off_loc(num_gbl_ibs, 3), off_glb(num_gbl_ibs, 3))
+        off_loc = -huge(1._wp)
+        do i = 1, num_ibs
+            gid = patch_ib(i)%gbl_patch_id
+            if (gid >= 1 .and. gid <= num_gbl_ibs) off_loc(gid,:) = patch_ib(i)%centroid_offset
+        end do
+        do gid = 1, num_gbl_ibs
+            do k = 1, 3
+                call s_mpi_allreduce_max(off_loc(gid, k), off_glb(gid, k))
+            end do
+        end do
+        if (proc_rank == 0) then
+            write (file_loc, '(A,I0,A)') trim(case_dir) // '/restart_data/ib_offset_', step, '.dat'
+            open (newunit=file_unit, file=trim(file_loc), status='replace', action='write')
+            do gid = 1, num_gbl_ibs
+                if (off_glb(gid, 1) > -huge(1._wp)) write (file_unit, '(I0,3(1X,ES24.16))') gid, off_glb(gid,:)
+            end do
+            close (file_unit)
+        end if
+        deallocate (off_loc, off_glb)
+
+    end subroutine s_write_centroid_offsets
+
     subroutine s_compute_centroid_offset_global(gid, ib_marker)
 
         integer, intent(in)      :: gid, ib_marker
@@ -1830,6 +1931,7 @@ contains
         end if
         if (allocated(ghost_points)) then
             @:DEALLOCATE(ghost_points)
+            @:DEALLOCATE(gp_prim_buf)
         end if
         if (collision_model > 0) call s_finalize_collisions_module()
 #ifdef MFC_MPI
