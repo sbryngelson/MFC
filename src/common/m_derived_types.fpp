@@ -363,9 +363,13 @@ module m_derived_types
         !    0 = zero-normal-gradient temperature
         !    1 = prescribed wall temperature (Twall)
         !    2 = reacting surface energy balance
+        !    3 = lumped solid: Twall evolves with the body's heat balance
         integer  :: thermal_bc
         real(wp) :: Twall
         real(wp) :: thermal_layer  !< Initial conductive-layer thickness around a thermal_bc = 1 IB [m]; 0 = none
+        real(wp) :: rho_solid, cp_solid  !< Solid density [kg/m^3] and heat capacity [J/kg/K] (thermal_bc = 3)
+        real(wp) :: emissivity, T_rad    !< Surface emissivity and radiative surroundings temperature [K] (thermal_bc = 3)
+        real(wp) :: heat_power           !< Heat supplied to the body, e.g. Joule heating [W; W/m per unit depth in 2D]
 
         ! Heterogeneous surface reaction    0 = none    1 = enabled
         integer :: surface_reaction
