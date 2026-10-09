@@ -780,19 +780,6 @@ contains
 
     end subroutine s_record_gp_surface
 
-    !> Axis (1, 2 or 3) of a cylinder IB: the one length that is set.
-    pure integer function f_cylinder_axis(ib_patch)
-
-        $:GPU_ROUTINE(parallelism='[seq]')
-
-        type(ib_patch_parameters), intent(in) :: ib_patch
-
-        f_cylinder_axis = 3
-        if (ib_patch%length_x > 0._wp) f_cylinder_axis = 1
-        if (ib_patch%length_y > 0._wp) f_cylinder_axis = 2
-
-    end function f_cylinder_axis
-
     !> Write this rank's surface records to D/ib_surface_<rank>_<save>.dat, one line per weighted ghost point.
     impure subroutine s_write_ib_surface(save_count)
 
