@@ -366,7 +366,7 @@ module m_derived_types
         !    3 = lumped solid: Twall evolves with the body's heat balance
         integer  :: thermal_bc
         real(wp) :: Twall
-        real(wp) :: thermal_layer  !< Initial conductive-layer thickness around a thermal_bc = 1 IB [m]; 0 = none
+        real(wp) :: thermal_layer        !< Initial conductive-layer thickness around a thermal_bc = 1 IB [m]; 0 = none
         real(wp) :: rho_solid, cp_solid  !< Solid density [kg/m^3] and heat capacity [J/kg/K] (thermal_bc = 3)
         real(wp) :: emissivity, T_rad    !< Surface emissivity and radiative surroundings temperature [K] (thermal_bc = 3)
         real(wp) :: heat_power           !< Heat supplied to the body, e.g. Joule heating [W; W/m per unit depth in 2D]
@@ -537,6 +537,7 @@ module m_derived_types
         integer, dimension(3)        :: ip_grid        !< Top left grid point of IP
         real(wp), dimension(2, 2, 2) :: interp_coeffs  !< Interpolation Coefficients of image point
         logical                      :: interp_valid   !< .false. if every image point stencil cell lies inside an IB
+        real(wp)                     :: ip_dist        !< Wall distance of the point the interpolation weights sample
         integer                      :: ib_patch_id    !< ID of the IB Patch the ghost point is part of
         real(wp)                     :: levelset
         real(wp), dimension(1:3)     :: levelset_norm
