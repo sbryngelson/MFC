@@ -934,24 +934,6 @@ contains
             allocate (MPI_IO_DATA%var(1:sys_size))
         end if
 
-        if (.not. down_sample) then
-            do i = 1, sys_size
-                allocate (MPI_IO_DATA%var(i)%sf(0:m,0:n,0:p))
-                MPI_IO_DATA%var(i)%sf => null()
-            end do
-        end if
-        if (bubbles_euler .and. qbmm .and. .not. polytropic) then
-            do i = sys_size + 1, sys_size + 2*nb*nnode
-                allocate (MPI_IO_DATA%var(i)%sf(0:m,0:n,0:p))
-                MPI_IO_DATA%var(i)%sf => null()
-            end do
-        else if (bubbles_lagrange) then
-            do i = 1, sys_size + 1
-                allocate (MPI_IO_DATA%var(i)%sf(0:m,0:n,0:p))
-                MPI_IO_DATA%var(i)%sf => null()
-            end do
-        end if
-
         ! Configure WENO averaging flag (arithmetic mean vs. unaltered values)
         wa_flg = 0._wp; if (weno_avg) wa_flg = 1._wp
         $:GPU_UPDATE(device='[wa_flg]')
@@ -960,8 +942,6 @@ contains
         #:if not MFC_CASE_OPTIMIZATION
             wenojs = .not. (mapped_weno .or. wenoz .or. teno)
         #:endif
-
-        if (ib) allocate (MPI_IO_IB_DATA%var%sf(0:m,0:n,0:p))
 
         if (hypoelasticity .or. mhd .or. probe_wrt .or. ib .or. bubbles_lagrange) then
             fd_number = max(1, fd_order/2)
@@ -1120,8 +1100,6 @@ contains
     !> Module deallocation and/or disassociation procedures
     impure subroutine s_finalize_global_parameters_module
 
-        integer :: i
-
         ! Deallocating the variables bookkeeping the indexes of any viscous fluids and any pairs of fluids whose interfaces
         ! supported effects of surface tension
 
@@ -1148,22 +1126,13 @@ contains
         ! Shared: deallocate proc_coords and start_idx
         call s_finalize_global_parameters_common
 
-        if (parallel_io) then
-            if (bubbles_lagrange) then
-                do i = 1, sys_size + 1
-                    MPI_IO_DATA%var(i)%sf => null()
-                end do
-            else
-                do i = 1, sys_size
-                    MPI_IO_DATA%var(i)%sf => null()
-                end do
-            end if
-
-            deallocate (MPI_IO_DATA%var)
-            deallocate (MPI_IO_DATA%view)
-        end if
+        deallocate (MPI_IO_DATA%var, MPI_IO_DATA%view)
 
         if (ib) MPI_IO_IB_DATA%var%sf => null()
+
+        if (allocated(neighbor_ranks)) then
+            @:DEALLOCATE(neighbor_ranks)
+        end if
 
         ! Deallocating grid variables for the x-, y- and z-directions
         @:DEALLOCATE(x_cb, x_cc, dx)
@@ -1173,10 +1142,6 @@ contains
 
         if (p == 0) return
         @:DEALLOCATE(z_cb, z_cc, dz)
-
-        if (allocated(neighbor_ranks)) then
-            @:DEALLOCATE(neighbor_ranks)
-        end if
 
     end subroutine s_finalize_global_parameters_module
 
