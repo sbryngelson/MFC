@@ -854,12 +854,13 @@ contains
     end function f_ib_volume
 
     !> Advance the temperature of each thermal_bc = 3 IB over one step, treating it as one lumped body (small Biot number). With
-    !! E_solid = m c_s (T - T_ref) and the step's face exchange (energy in, mass out) from s_accumulate_ib_face_fluxes, m c_s dT/dt
-    !! = Q_in + c_s (T - T_ref) Mdot_out + heat_power - emissivity sigma A (T^4 - T_rad^4). T_ref = 298.15 K is the reference of the
-    !! formation enthalpies, so the gas energy the solid's lost carbon carries is consistent. The step is explicit: the body's
-    !! thermal time m c_s/(h A) is many orders of magnitude longer than a flow step. For D/ib_heat.dat every body also keeps its
-    !! gasification rate, face mass out and fluid heat in, Q_in (+ the c_s term for thermal_bc = 3), in patch_ib%mdot, %mdot_face
-    !! and %qdot.
+    !! E_solid = m c_s (T - T_ref), the step's face energy in from s_accumulate_ib_face_fluxes and the gasification rate from the
+    !! surface solve, m c_s dT/dt = Q_in + c_s (T - T_ref) Mdot_out + heat_power - emissivity sigma A (T^4 - T_rad^4). Mdot_out is
+    !! the solid's mass loss: the face mass sum also carries the ghost cells' non-conservation (a net inflow on a reacting
+    !! cylinder). T_ref = 298.15 K is the reference of the formation enthalpies, so the gas energy the solid's lost carbon carries
+    !! is consistent. The step is explicit: the body's thermal time m c_s/(h A) is many orders of magnitude longer than a flow step.
+    !! For D/ib_heat.dat every body also keeps its gasification rate, face mass out and fluid heat in, Q_in (+ the c_s term for
+    !! thermal_bc = 3), in patch_ib%mdot, %mdot_face and %qdot.
     impure subroutine s_update_ib_temperatures(dt_step)
 
         real(wp), intent(in) :: dt_step
@@ -898,7 +899,7 @@ contains
         do i = 1, num_ibs
             g = patch_ib(i)%gbl_patch_id
             q_in = ib_heat(2, g)
-            if (patch_ib(i)%thermal_bc == 3) q_in = q_in + patch_ib(i)%cp_solid*(patch_ib(i)%Twall - T_ref)*ib_heat(3, g)
+            if (patch_ib(i)%thermal_bc == 3) q_in = q_in + patch_ib(i)%cp_solid*(patch_ib(i)%Twall - T_ref)*ib_heat(4, g)
             patch_ib(i)%mdot = ib_heat(4, g)
             patch_ib(i)%mdot_face = ib_heat(3, g)
             patch_ib(i)%qdot = q_in
