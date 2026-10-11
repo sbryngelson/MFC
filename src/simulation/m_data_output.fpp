@@ -1103,7 +1103,7 @@ contains
             call s_check_mpi_file_open(ierr, file_loc)
 
             var_MOK = int(sys_size + 1, MPI_OFFSET_KIND)
-            disp = m_MOK*max(MOK, n_MOK)*max(MOK, p_MOK)*WP_MOK*(var_MOK - 1 + int(time_step/t_step_save))
+            disp = m_MOK*max(MOK, n_MOK)*max(MOK, p_MOK)*WP_MOK*(var_MOK - 1 + f_save_index(time_step, cfl_dt, t_step_save))
             if (time_step == 0) disp = 0
 
             call MPI_FILE_SET_VIEW(ifile, disp, MPI_INTEGER, MPI_IO_IB_DATA%view, 'native', mpi_info_int, ierr)
@@ -1341,7 +1341,14 @@ contains
         @:PROHIBIT(len_trim(probe) /= IB_REC_BODY, &
                    & "IB force record width disagrees with IB_REC_BODY;  IB_REC_FMT and IB_REC_BODY must be changed together")
 
-        file_loc = trim(case_dir) // '/D/ib_forces.dat'
+        ! A resumed run writes its own file rather than overwriting the history of the runs before it
+        if (cfl_dt .and. n_start > 0) then
+            write (file_loc, '(A,I0,A)') trim(case_dir) // '/D/ib_forces_n', n_start, '.dat'
+        else if (t_step_start > 0) then
+            write (file_loc, '(A,I0,A)') trim(case_dir) // '/D/ib_forces_', t_step_start, '.dat'
+        else
+            file_loc = trim(case_dir) // '/D/ib_forces.dat'
+        end if
 #ifdef MFC_MPI
         ! MPI_MODE_CREATE does not truncate, so a shorter run following a longer one in the same
         ! directory would keep the old tail past its last record. Delete first, as the ib_state
