@@ -4045,6 +4045,29 @@ def list_cases() -> typing.List[TestCaseBuilder]:
         )
     )
 
+    # Mean gas temperature source: heats the cold gas of a periodic box around the hot lumped wall to a bulk 400 K.
+    cases.append(
+        define_case_f(
+            "2D -> Chemistry -> IBM Reacting Surface -> Lumped Wall -> Thermostat",
+            "examples/2D_ibm_reacting_surface/case.py",
+            mods={
+                "m": 24,
+                "n": 24,
+                "parallel_io": "F",
+                "t_stop": 2.0e-5,
+                "t_save": 2.0e-5,
+                "bc_x%beg": -1,
+                "bc_x%end": -1,
+                "bc_x%grcbc_in": "F",
+                "patch_ib(1)%thermal_bc": 3,
+                "patch_ib(1)%rho_solid": 10.0,
+                "patch_ib(1)%cp_solid": 1000.0,
+                "mean_temp": 400.0,
+                "mean_temp_gain": 0.5,
+            },
+        )
+    )
+
     def direction_symmetry_tests():
         """3D tests with shock propagating in x and y directions.
 

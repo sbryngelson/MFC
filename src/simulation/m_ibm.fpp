@@ -1645,7 +1645,8 @@ contains
                                     if (has_src) f(i) = f(i) + flux_src_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)
                                     f(i) = real(side, wp)*area*f(i)
                                 end do
-                                ! mean pressure gradient: the uniform gradient's surface pressure -f.r gives the displacement force f*V
+                                ! mean pressure gradient: the uniform gradient's surface pressure -f.r gives the displacement force
+                                ! f*V
                                 f(idir) = f(idir) - real(side, wp)*area*dot_product(mpg_force, r)
                                 call s_cross_product(r, f, tq)
                                 do i = 1, 3
