@@ -520,6 +520,7 @@ contains
         ib_state_wrt = .false.
         ib_force_wrt = .false.
         ib_surface_wrt = .false.
+        ib_heat_wrt = .false.
         ib_force_stride = 1
         many_ib_patch_parallelism = .false.
 

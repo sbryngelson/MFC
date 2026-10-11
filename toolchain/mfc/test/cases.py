@@ -3996,7 +3996,8 @@ def list_cases() -> typing.List[TestCaseBuilder]:
         )
     )
     # thermal_bc = 3 on the same example and mechanism, at the Example grid cap (~16 steps to 2e-5 s). rho*c = 1e4 J/m^3/K,
-    # far below graphite's, so the wall temperature moves by a few K within the test; ib_surface_wrt exercises the writer.
+    # far below graphite's, so the wall temperature moves by a few K within the test; ib_surface_wrt and
+    # ib_heat_wrt exercise the writers.
     cases.append(
         define_case_f(
             "2D -> Chemistry -> IBM Reacting Surface -> Lumped Wall",
@@ -4008,6 +4009,7 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                 "t_stop": 2.0e-5,
                 "t_save": 2.0e-5,
                 "ib_surface_wrt": "T",
+                "ib_heat_wrt": "T",
                 "patch_ib(1)%thermal_bc": 3,
                 "patch_ib(1)%rho_solid": 10.0,
                 "patch_ib(1)%cp_solid": 1000.0,

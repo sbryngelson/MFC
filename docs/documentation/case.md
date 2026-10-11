@@ -780,6 +780,7 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `ib_force_wrt`          | Logical | Record the immersed-boundary force history to `D/ib_forces.dat` (default off) |
 | `ib_force_stride`       | Integer | Stride, in time steps, of the per-step immersed-boundary force record (default 1) |
 | `ib_surface_wrt`        | Logical | Write the wall temperature and gasified mass flux at each thermal/reacting IB surface point at every save (default off) |
+| `ib_heat_wrt`           | Logical | Record each immersed body's mass loss and heat exchange rates to `D/ib_heat.dat` (default off) |
 | `ib_state_wrt`          | Logical | Parameter to handle writing IB state on saves and outputting the state as a point mesh to SILO files. |
 | `pi_inf_wrt`            | Logical | Add the liquid stiffness function to the database |
 | `pres_inf_wrt`          | Logical | Add the liquid stiffness to the formatted database	 |
@@ -882,6 +883,19 @@ Rows count from the first step the run records, not from `t_step`, so row 0 is t
 A resumed run writes `D/ib_forces_<t_step_start>.dat` (`D/ib_forces_n<n_start>.dat` with `cfl_dt`) instead of overwriting `D/ib_forces.dat`. When each run resumes from the final step of the run before it, the files concatenate in order with no row repeated and none of the `ib_force_stride` sampling missing. This holds for any stride with a fixed `dt`. With `cfl_dt` the step counter restarts at 0 in each run, so only `ib_force_stride = 1` gives an unbroken history; a larger stride can leave up to `ib_force_stride - 1` unrecorded steps at the end of each run. A run killed mid-way has no final row and may hold rows past the restart it is resumed from.
 
 Rows are written in global body-id order, so the file is byte-identical however the domain is decomposed, and no merge step is needed after a parallel run.
+
+`ib_heat_wrt` writes `D/ib_heat.dat` alongside, with the same rows and resumed-run naming (`ib_force_stride`, row and offset formulas above, 101-byte records: `I10` and five `1X,ES17.9E3` fields), whether or not `ib_force_wrt` is set. Its six columns are, per unit depth in 2D,
+
+| Columns | Quantity |
+| ---:    | :---     |
+| 1       | body id (the global `patch_ib` index) |
+| 2       | time |
+| 3       | gasification rate [kg/s], positive when the body loses mass |
+| 4       | face mass outflow [kg/s] |
+| 5       | heat rate Q [W], positive into the body |
+| 6       | `Twall` [K] |
+
+The gasification rate is the surface-solve mass flux integrated over the body, Σ `area`·`mdot` of the `ib_surface_wrt` points (0 for an inert body): the body's mass loss. Columns 4 and 5 are the step's mass out of and energy into the body summed over its faces, as for `thermal_bc = 3` above; for a `thermal_bc = 3` body, Q also includes c_s (T − 298.15 K) times column 4, so there Q is exactly the fluid's part of m c_s dT/dt (add `heat_power` and radiation for the whole balance). The face mass outflow is not the gasification rate: it also carries the mass the ghost-cell reconstruction does not conserve, which on the `2D_ibm_reacting_surface` cylinder at 20 cells per diameter is a net inflow several times the gasification rate. As for the force, a row carries the exchange over the previous step and `Twall` at its end, so Σ (column 3)·Δt over the rows is the mass the body lost. Every body is summed, so a fixed-`Twall` reacting surface gets its mass loss and a heated wall its heat transfer. `ib_heat_wrt` requires `chemistry` and is rejected with `igr`, which forms no face fluxes.
 
 - `output_partial_domain` activates the output of part of the domain specified by `[x,y,z]_output%%beg` and `[x,y,z]_output%%end`.
 This is useful for large domains where only a portion of the domain is of interest.

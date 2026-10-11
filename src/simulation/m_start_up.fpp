@@ -1154,7 +1154,7 @@ contains
     !> Finalize and deallocate all simulation sub-modules in reverse initialization order
     impure subroutine s_finalize_modules
 
-        if (ib .and. ib_force_wrt) call s_close_ib_force_history()
+        if (ib) call s_close_ib_history()
 
         if (model_eqns == model_eqns_6eq) call s_report_pressure_relaxation()
         if (ib .and. chemistry) call s_report_ibm_surface()

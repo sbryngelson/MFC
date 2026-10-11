@@ -746,8 +746,9 @@ contains
                         call nvtxEndRange
                     end if
 
-                    ! Momentum (IB forces) and energy/mass (thermal_bc = 3) exchanged with each IB through this direction's faces
-                    if (ib .and. (moving_immersed_boundary_flag .or. ib_state_wrt .or. lumped_ib)) then
+                    ! Momentum (IB forces) and energy/mass (thermal_bc = 3, ib_heat_wrt) exchanged with each IB through this
+                    ! direction's faces
+                    if (ib .and. (moving_immersed_boundary_flag .or. ib_state_wrt .or. ib_exchange)) then
                         call s_accumulate_ib_face_fluxes(id, flux_n(id)%vf, flux_src_n(id)%vf, stage)
                     end if
 

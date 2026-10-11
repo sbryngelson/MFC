@@ -672,6 +672,12 @@ class TestImmersedBoundarySurfaceChemistry(ConstraintTestCase):
         self.assertRejects({**self.case(thermal_bc=1, Twall=1200.0), "ib_surface_wrt": "T"}, "ib_surface_wrt requires ib and chemistry")
         self.assertAccepts({**self.case(thermal_bc=1, Twall=1200.0), "chemistry": "T", "ib_surface_wrt": "T"})
 
+    def test_heat_output_needs_chemistry_and_face_fluxes(self):
+        body = {**self.case(thermal_bc=1, Twall=1200.0), "chemistry": "T", "ib_heat_wrt": "T"}
+        self.assertAccepts(body)
+        self.assertRejects({**body, "chemistry": "F"}, "ib_heat_wrt requires ib and chemistry")
+        self.assertRejects({**body, "igr": "T"}, "ib_heat_wrt is not supported with igr")
+
     def test_a_lumped_body_needs_its_heat_capacity_and_shape(self):
         body = {**self.case(thermal_bc=3, Twall=1200.0, rho_solid=1800.0, cp_solid=700.0), "chemistry": "T"}
         self.assertAccepts(body)

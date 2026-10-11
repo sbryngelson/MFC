@@ -135,11 +135,11 @@ def compile(casepath: str) -> typing.Tuple[Pack, str]:
                 lines = content.splitlines()
                 content = "\n".join(lines[1:])  # Skip the first line
                 doubles = _extract_doubles(content)
-            elif "probe" in short_filepath or "integral" in short_filepath or "ib_forces" in short_filepath:
+            elif "probe" in short_filepath or "integral" in short_filepath or "ib_forces" in short_filepath or "ib_heat" in short_filepath:
                 # Probe, integral and IB-force output are multi-column time series, not
                 # spatial fields: each column is a distinct physical quantity (probe: rho,
                 # vel, pres, gamma, pi_inf, qv, c, accel, ...; integral: int_pres,
-                # max_pres; forces: force, torque, velocity, angles, centroid) and the set
+                # max_pres; forces: force, torque, velocity, angles, centroid; heat: mdot, Q, Twall) and the set
                 # varies by configuration. Treating them as <x> <y> <z> <value> would keep
                 # only the last column and silently drop the rest, so every column is
                 # retained. None of them carry a header line: ib_forces.dat keeps its column

@@ -801,6 +801,9 @@ class CaseValidator:
         self.prohibit(ib_force_wrt and not ib, "ib_force_wrt requires ib to be enabled")
         ib_surface_wrt = self.get("ib_surface_wrt", "F") == "T"
         self.prohibit(ib_surface_wrt and not (ib and self.get("chemistry", "F") == "T"), "ib_surface_wrt requires ib and chemistry")
+        ib_heat_wrt = self.get("ib_heat_wrt", "F") == "T"
+        self.prohibit(ib_heat_wrt and not (ib and self.get("chemistry", "F") == "T"), "ib_heat_wrt requires ib and chemistry")
+        self.prohibit(ib_heat_wrt and self.get("igr", "F") == "T", "ib_heat_wrt is not supported with igr")
         ib_force_stride = self.get("ib_force_stride", 1)
         self.prohibit(ib_force_stride < 1, "ib_force_stride must be >= 1")
 
