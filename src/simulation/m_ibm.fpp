@@ -31,7 +31,7 @@ module m_ibm
     private :: s_compute_image_points, s_compute_interpolation_coeffs, s_interpolate_image_point, s_find_ghost_points, &
         & s_find_num_ghost_points, s_compute_ghost_point_pressure, s_compute_ghost_point_velocity
     ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, s_report_ibm_surface, &
-        & s_write_ib_surface, s_update_ib_temperatures, s_accumulate_ib_face_fluxes
+        & s_write_ib_surface, s_update_ib_temperatures, s_accumulate_ib_face_fluxes, s_ibm_set_conduction_temperature
 
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
@@ -395,6 +395,7 @@ contains
                                 & reduction='[[n_not_converged, n_ill_posed]]', reductionOp='[+]', present='[ghost_points]')
             do i = 1, num_gps
                 if (record_surface) gp_surf(:,i) = 0._wp
+                ghost_points(i)%T_cond = 0._wp
                 gp = ghost_points(i)
                 if (.not. gp%interp_valid) cycle
                 j = gp%loc(1)
@@ -490,10 +491,12 @@ contains
                     ! Linear extrapolation to the ghost point, |levelset| behind the wall, from the sample d in front
                     buf = 0._wp
                     if (d > 0._wp) buf = abs(real(gp%levelset, kind=wp))/d
-                    call s_blend_ghost_state(buf, T_IP, T_s, Ys_IP, Ys_s, T_g, Ys_g)
+                    call s_blend_ghost_state(buf, f_face_theta(q_prim_vf, gp, buf, T_IP, T_s), T_IP, T_s, Ys_IP, Ys_s, T_g, Ys_g)
 
+                    ! The advected ghost is wall gas at T_s, so no gas leaves the wall hotter or colder than it; conduction
+                    ! sees the mirror T_g instead, through T_cond (s_ibm_set_conduction_temperature)
                     call get_mixture_molecular_weight(Ys_g, mw_g)
-                    alpha_rho_IP(1) = alpha_IP(1)*pres_IP*mw_g/(gas_constant*T_g)
+                    alpha_rho_IP(1) = alpha_IP(1)*pres_IP*mw_g/(gas_constant*T_s)
                 end if
 
                 ! If in simulation, use acc mixture subroutines
@@ -578,7 +581,8 @@ contains
                     if (patch_ib(patch_id)%inj_species == 0 .and. (patch_ib(patch_id)%surface_reaction == 0 &
                         & .or. surface_converged)) then
 
-                        call get_mixture_energy_mass(T_g, Ys_g, e_IP)
+                        call get_mixture_energy_mass(T_s, Ys_g, e_IP)
+                        ghost_points(i)%T_cond = T_g
                         $:GPU_LOOP(parallelism='[seq]')
                         do q = 1, num_species
                             q_cons_vf(eqn_idx%species%beg + q - 1)%sf(j, k, l) = rho*Ys_g(q)
@@ -731,6 +735,24 @@ contains
         n_surface_ill_posed = n_surface_ill_posed + n_ill_posed
 
     end subroutine s_ibm_correct_state
+
+    !> Give the wall conduction the mirrored ghost temperature from s_ibm_correct_state in place of the wall-gas temperature the
+    !! ghost state carries. Call after the conservative-to-primitive conversion, before the halo exchange.
+    subroutine s_ibm_set_conduction_temperature(q_T_sf)
+
+        type(scalar_field), intent(inout) :: q_T_sf
+        integer                           :: i
+
+        if (num_gps == 0) return
+        $:GPU_PARALLEL_LOOP(private='[i]', present='[ghost_points]')
+        do i = 1, num_gps
+            if (ghost_points(i)%T_cond > 0._wp) then
+                q_T_sf%sf(ghost_points(i)%loc(1), ghost_points(i)%loc(2), ghost_points(i)%loc(3)) = ghost_points(i)%T_cond
+            end if
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_ibm_set_conduction_temperature
 
     !> One line at the end of a run if the reacting surface ever failed to solve. Silence means every ghost point on every step
     !! reached the surface-balance tolerance, i.e. the surface chemistry was actually applied everywhere it was asked for.
@@ -1116,6 +1138,7 @@ contains
                             $:END_GPU_ATOMIC_CAPTURE()
 
                             ghost_points(local_idx)%loc = [i, j, k]
+                            ghost_points(local_idx)%T_cond = 0._wp
                             encoded_patch_id = ib_markers%sf(i, j, k)
                             call s_decode_patch_periodicity(encoded_patch_id, patch_id, xp, yp, zp)
                             call s_get_neighborhood_idx(patch_id, neighborhood_patch_id)
@@ -2415,6 +2438,62 @@ contains
 
     end subroutine s_surface_residual
 
+    !> Largest temperature mirror weight, at most theta_max, that keeps the ghost consistent with every fluid cell it shares a face
+    !! with. Conduction across that face is the two-point difference (T_n - T_g)/h, so the line through the ghost (a behind the
+    !! wall) and the cell (b in front) must not reach the wall beyond T_s: T_g - T_s <= (a/b)(T_s - T_n) on the mirror's side, and
+    !! T_g = T_s once the cell is past T_s. The image point sits about a cell out, so without this an under-resolved layer leaves
+    !! the mirror set by the second gas cell and drives the first past the wall temperature. A resolved, convex profile puts the
+    !! mirror inside the bound, so it leaves the mirror untouched there.
+    function f_face_theta(q_prim_vf, gp, theta_max, T_IP, T_s) result(theta)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+
+        type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
+        type(ghost_point), intent(in)                       :: gp
+        real(wp), intent(in)                                :: theta_max, T_IP, T_s
+        real(wp)                                            :: theta, a, b, h, T_n, mw_n, r
+        real(wp), dimension(3)                              :: nrm
+        real(wp), dimension(${NUM_SPECIES}$)                :: Ys_n
+        integer, dimension(3)                               :: c
+        integer                                             :: dir, sgn, q
+
+        theta = theta_max
+        if (f_approx_equal(T_s, T_IP)) return
+        a = abs(real(gp%levelset, kind=wp))
+        nrm = gp%levelset_norm/max(sqrt(sum(gp%levelset_norm**2)), sgm_eps)
+        do dir = 1, num_dims
+            do sgn = -1, 1, 2
+                c = gp%loc
+                c(dir) = c(dir) + sgn
+                if (ib_markers%sf(c(1), c(2), c(3)) /= 0) cycle
+                select case (dir)
+                case (1)
+                    h = x_cc(c(1)) - x_cc(gp%loc(1))
+                case (2)
+                    h = y_cc(c(2)) - y_cc(gp%loc(2))
+                case default
+                    h = z_cc(c(3)) - z_cc(gp%loc(3))
+                end select
+                do q = 1, num_species
+                    Ys_n(q) = q_prim_vf(eqn_idx%species%beg + q - 1)%sf(c(1), c(2), c(3))
+                end do
+                call get_mixture_molecular_weight(Ys_n, mw_n)
+                T_n = q_prim_vf(eqn_idx%E)%sf(c(1), c(2), c(3))*mw_n*q_prim_vf(eqn_idx%adv%beg)%sf(c(1), c(2), &
+                                & c(3))/(q_prim_vf(eqn_idx%cont%beg)%sf(c(1), c(2), c(3))*gas_constant)
+                r = (T_s - T_n)/(T_s - T_IP)
+                ! Wall distance of the neighbor from the ghost's tangent plane; at an edge it can come out <= 0 for a cell
+                ! just outside the curved wall, which then only gets the past-T_s condition
+                b = h*nrm(dir) - a
+                if (r <= 0._wp) then
+                    theta = 0._wp
+                else if (b > 0._wp) then
+                    theta = min(theta, (a/b)*r)
+                end if
+            end do
+        end do
+
+    end function f_face_theta
+
     !> Ghost state for an immersed surface, from the image-point state and the surface state.
     !!
     !! The natural closure is the linear mirror phi_g = 2*phi_s - phi_IP, which is what makes the midpoint of the ghost/image
@@ -2443,11 +2522,12 @@ contains
     !! 270:106134, 2024) trace the same cold-wall, large-gradient regime in ablation to ghost-cell mass conservation error
     !! that surfaces as spurious blowing, and resolve it only by moving to a flux-based cut-cell boundary -- a different
     !! discretization from this one, not a tuning of it.
-    subroutine s_blend_ghost_state(theta_max, T_IP, T_s, Ys_IP, Ys_s, T_g, Ys_g)
+    subroutine s_blend_ghost_state(theta_max, theta_T_max, T_IP, T_s, Ys_IP, Ys_s, T_g, Ys_g)
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
-        real(wp), intent(in)  :: theta_max  !< Mirror weight the geometry allows: ghost over sample wall distance
+        real(wp), intent(in)  :: theta_max    !< Mirror weight the geometry allows: ghost over sample wall distance
+        real(wp), intent(in)  :: theta_T_max  !< Temperature's cap, from f_face_theta
         real(wp), intent(in)  :: T_IP, T_s
         real(wp), intent(in)  :: Ys_IP(num_species), Ys_s(num_species)
         real(wp), intent(out) :: T_g, Ys_g(num_species)
@@ -2462,7 +2542,7 @@ contains
         ! but evaluates the NASA polynomials far below their T_low. Both ends are constrained, since a hot wall extrapolates
         ! the other way. T_s itself can sit outside the window only if the case prescribed a Twall there; theta = 0 then hands
         ! back exactly that value rather than quietly substituting a different wall temperature.
-        theta_T = theta_max
+        theta_T = theta_T_max
         if (T_s < T_IP) theta_T = min(theta_T, blend_safety*(T_s - T_surface_min)/(T_IP - T_s))
         if (T_s > T_IP) theta_T = min(theta_T, blend_safety*(T_surface_max - T_s)/(T_s - T_IP))
         theta_T = max(theta_T, 0._wp)

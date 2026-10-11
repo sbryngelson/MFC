@@ -406,19 +406,19 @@ contains
                             P_L = q_prim_qp(eqn_idx%E)%sf(x, y, z)
                             P_R = q_prim_qp(eqn_idx%E)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
 
-                            rho_L = q_prim_qp(1)%sf(x, y, z)
-                            rho_R = q_prim_qp(1)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
-
                             T_L = q_T_sf%sf(x, y, z)
                             T_R = q_T_sf%sf(x + offsets(1), y + offsets(2), z + offsets(3))
-
-                            rho_cell = 0.5_wp*(rho_L + rho_R)
                             dT_dxi = (T_R - T_L)/grid_spacing
 
                             ! Transport state and species enthalpies [J/kg] of each side
                             call get_mixavg_transport_state(P_L, T_L, Ys_L, MW_L, Xs_L, mass_diffusivities_mixavg1, lambda_L)
                             call get_mixavg_transport_state(P_R, T_R, Ys_R, MW_R, Xs_R, mass_diffusivities_mixavg2, lambda_R)
                             MW_cell = 0.5_wp*(MW_L + MW_R)
+
+                            ! Density from (p, T, Y), as q_T_sf can hold an IB ghost's conduction temperature (m_ibm)
+                            rho_L = P_L*MW_L/(gas_constant*T_L)
+                            rho_R = P_R*MW_R/(gas_constant*T_R)
+                            rho_cell = 0.5_wp*(rho_L + rho_R)
 
                             call get_species_enthalpies_mass(T_L, h_l)
                             call get_species_enthalpies_mass(T_R, h_r)
@@ -527,12 +527,12 @@ contains
                             P_L = q_prim_qp(eqn_idx%E)%sf(x, y, z)
                             P_R = q_prim_qp(eqn_idx%E)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
 
-                            rho_L = q_prim_qp(1)%sf(x, y, z)
-                            rho_R = q_prim_qp(1)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
-
                             T_L = q_T_sf%sf(x, y, z)
                             T_R = q_T_sf%sf(x + offsets(1), y + offsets(2), z + offsets(3))
 
+                            ! Density from (p, T, Y), as q_T_sf can hold an IB ghost's conduction temperature (m_ibm)
+                            rho_L = P_L*MW_L/(gas_constant*T_L)
+                            rho_R = P_R*MW_R/(gas_constant*T_R)
                             rho_cell = 0.5_wp*(rho_L + rho_R)
 
                             call get_mixture_specific_heat_cp_mass(T_L, Ys_L, Cp_L)

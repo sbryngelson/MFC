@@ -540,6 +540,7 @@ module m_derived_types
         real(wp), dimension(2, 2, 2) :: interp_coeffs  !< Interpolation Coefficients of image point
         logical                      :: interp_valid   !< .false. if every image point stencil cell lies inside an IB
         real(wp)                     :: ip_dist        !< Wall distance of the point the interpolation weights sample
+        real(wp)                     :: T_cond         !< Ghost temperature the wall conduction sees (chemistry); 0 = its own
         integer                      :: ib_patch_id    !< ID of the IB Patch the ghost point is part of
         real(wp)                     :: levelset
         real(wp), dimension(1:3)     :: levelset_norm

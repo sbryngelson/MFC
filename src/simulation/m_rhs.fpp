@@ -646,6 +646,7 @@ contains
             call nvtxStartRange("RHS-CONVERT")
             call s_convert_conservative_to_primitive_variables(q_cons_qp%vf, q_T_sf, q_prim_qp%vf, idwint)
             call nvtxEndRange
+            if (ib .and. chemistry) call s_ibm_set_conduction_temperature(q_T_sf)
 
             call nvtxStartRange("RHS-COMMUNICATION")
             call s_populate_variables_buffers(bc_type, q_prim_qp%vf, pb_in, mv_in, q_T_sf)
