@@ -859,11 +859,11 @@ class CaseValidator:
 
             self.prohibit(thermal_bc == 2 and surface_reaction != 1, f"patch_ib({i})%thermal_bc = 2 requires surface_reaction = 1")
 
-            # The initial conductive layer is the analytic solution around a circle or sphere held at Twall.
+            # The initial conductive layer is the analytic solution around a circle or sphere at Twall (prescribed, or the initial value of a lumped body).
             thermal_layer = self.get(f"patch_ib({i})%thermal_layer", 0.0) or 0.0
             self.prohibit(thermal_layer < 0, f"patch_ib({i})%thermal_layer must be >= 0")
             if thermal_layer > 0:
-                self.prohibit(thermal_bc != 1, f"patch_ib({i})%thermal_layer > 0 requires thermal_bc = 1")
+                self.prohibit(thermal_bc not in (1, 3), f"patch_ib({i})%thermal_layer > 0 requires thermal_bc = 1 or 3")
                 self.prohibit(
                     self.get(f"patch_ib({i})%geometry", 0) not in (2, 8),
                     f"patch_ib({i})%thermal_layer > 0 requires a circle (geometry 2) or sphere (geometry 8)",

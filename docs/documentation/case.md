@@ -365,7 +365,7 @@ This is enabled by adding ``'elliptic_smoothing': "T",`` and ``'elliptic_smoothi
 | `slip`               | Logical | Apply a slip boundary |
 | `thermal_bc`         | Integer | Thermal boundary-condition selector: 0 = zero-normal-gradient temperature, 1 = prescribed wall temperature, 2 = reacting surface energy balance, 3 = lumped solid whose temperature evolves. |
 | `Twall`              | Real    | Wall temperature: prescribed (`thermal_bc = 1`) or initial (`thermal_bc = 3`). |
-| `thermal_layer`      | Real    | Thickness of the initial conductive layer around a `thermal_bc = 1` circle or sphere [m]; 0 = none. |
+| `thermal_layer`      | Real    | Thickness of the initial conductive layer around a `thermal_bc = 1` or `3` circle or sphere [m]; 0 = none. |
 | `rho_solid`, `cp_solid` | Real | Solid density [kg/m³] and heat capacity [J/kg/K] (`thermal_bc = 3`). |
 | `emissivity`, `T_rad` | Real   | Surface emissivity and radiative surroundings temperature [K] (`thermal_bc = 3`; default 0, no radiation). |
 | `heat_power`         | Real    | Heat supplied to the body [W; W/m per unit depth in 2D], e.g. Joule heating (`thermal_bc = 3`). |
@@ -424,7 +424,7 @@ Additional details on this specification can be found in [NACA airfoil](https://
 
 - `Twall` specifies the prescribed surface temperature when `thermal_bc = 1` and must be positive in that case.
 
-- `thermal_layer` = δ > 0 starts the gas around a `thermal_bc = 1` circle (geometry 2) or sphere (geometry 8) in the conduction solution for a wall brought to `Twall` a time t₀ = δ²/(4α) earlier: T = T∞ + (`Twall` − T∞)(R/r)^((d−1)/2) erfc((r − R)/δ), with pressure and composition unchanged. It is exact for a sphere and the leading-order term for a cylinder. Without it a hot wall meets ambient gas as a temperature step at t = 0, and the near-wall cells heat faster than they can expand; on coarse grids that transient can drive the state non-physical. Resolve δ with a few cells. Where layers overlap, the IB with the largest temperature change sets the cell, and periodic directions use the nearest image.
+- `thermal_layer` = δ > 0 starts the gas around a `thermal_bc = 1` or `3` circle (geometry 2) or sphere (geometry 8) in the conduction solution for a wall brought to `Twall` (the initial `Twall` for `thermal_bc = 3`) a time t₀ = δ²/(4α) earlier: T = T∞ + (`Twall` − T∞)(R/r)^((d−1)/2) erfc((r − R)/δ), with pressure and composition unchanged. It is exact for a sphere and the leading-order term for a cylinder. Without it a hot wall meets ambient gas as a temperature step at t = 0, and the near-wall cells heat faster than they can expand; on coarse grids that transient can drive the state non-physical. Resolve δ with a few cells. Where layers overlap, the IB with the largest temperature change sets the cell, and periodic directions use the nearest image.
 
 - `surface_reaction` enables heterogeneous surface chemistry when set to 1. Surface reactions require `chemistry = T` and cannot be combined with `inj_species > 0`.
 
