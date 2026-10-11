@@ -1666,8 +1666,9 @@ contains
         ! reduce the forces across local neighborhood ranks
         call s_communicate_ib_forces(forces, torques)
 
-        ! consider body forces after reducing to avoid double counting
+        ! consider body forces after reducing to avoid double counting; fixed IBs have no mass input
         do i = 1, num_ibs
+            if (patch_ib(i)%moving_ibm == 0) cycle
             if (bf_x) then
                 forces(i, 1) = forces(i, 1) + accel_bf(1)*patch_ib(i)%mass
             end if
