@@ -39,6 +39,7 @@ module m_rhs
     use m_igr
     use m_thinc
     use m_pressure_relaxation
+    use m_species_bounds
 
     implicit none
 
@@ -1001,7 +1002,11 @@ contains
             end if
         end if
 
-        if (chemistry) call s_bound_face_states(id)
+        ! Species onto the simplex first; the convex rho/p/T scaling then keeps them there
+        if (chemistry) then
+            call s_bound_species_faces(q_prim_qp%vf, qL_rsx_vf, qR_rsx_vf, id)
+            call s_bound_face_states(id)
+        end if
 
         ! Reconstruct viscous derivatives for viscosity
         if (weno_Re_flux) then
