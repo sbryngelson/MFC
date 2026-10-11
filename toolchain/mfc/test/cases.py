@@ -2027,6 +2027,14 @@ def list_cases() -> typing.List[TestCaseBuilder]:
             cases.append(define_case_d(stack, "", {}))
             stack.pop()
 
+            # Mean pressure gradient: constant in x, bulk-mass-flux controller in y
+            stack.push(
+                "MeanDpdx",
+                {"bc_x%beg": -1, "bc_x%end": -1, "bc_y%beg": -1, "bc_y%end": -1, "mean_dpdx(1)": -0.5, "mean_mflux(2)": 0.05, "mean_dpdx_gain": 0.5},
+            )
+            cases.append(define_case_d(stack, "", {}))
+            stack.pop()
+
     def alter_synthetic_turbulence(dimInfo):
         # 3-D solenoidal synthetic-turbulence forcing (m_body_forces): a quiescent,
         # triply-periodic single-fluid box driven by a deterministic (compiler-independent)
@@ -3366,6 +3374,8 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                 # is platform-marginal (CPU goldens fail on most GPU lanes). The fast
                 # "Non-Newtonian -> IBM" suite case covers IBM+NN portably at 1e-12.
                 "2D_ibm_poiseuille_nn",
+                # Validation case; under the grid cap its IB slabs are as marginal as above. 2D -> MeanDpdx covers the forcing.
+                "2D_ibm_channel_mean_dpdx",
                 # Synthetic turbulence now uses a deterministic (compiler-independent) PRNG,
                 # but the 50-step forced run with a moving airfoil IB is FP-sensitive enough
                 # that Intel's aggressive FP model (FMA/fast trig) diverges from the golden on
