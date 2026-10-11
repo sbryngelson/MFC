@@ -1530,8 +1530,8 @@ contains
     !> Add direction idir's fluid-body face fluxes to each IB. These are the fluxes the RHS differences, Riemann (flux_vf) plus
     !! viscous, capillary, conductive and diffusive (flux_src_vf), so each body receives exactly what the fluid loses. A face counts
     !! on the rank owning its fluid cell. With IB forces: force (1:3) and torque about the centroid (4:6) of each local IB into
-    !! ib_face_ft, from the last RHS evaluation (idir = 1 starts afresh). With lumped_ib: energy in and mass out of each
-    !! thermal_bc = 3 body into ib_heat(2:3), weighted so a step's stages sum to its exchange (SSP-RK: 1; 1/2, 1/2; 1/6, 1/6, 2/3).
+    !! ib_face_ft, from the last RHS evaluation (idir = 1 starts afresh). With lumped_ib: energy in and mass out of each lumped body
+    !! into ib_heat(2:3), weighted so a step's stages sum to its exchange (SSP-RK: 1; 1/2, 1/2; 1/6, 1/6, 2/3).
     subroutine s_accumulate_ib_face_fluxes(idir, flux_vf, flux_src_vf, stage)
 
         integer, intent(in)                                 :: idir, stage
@@ -1601,8 +1601,9 @@ contains
                                   & wp)*(glb_bounds(1)%end - glb_bounds(1)%beg))
                                 r(2) = merge(y_cb(k), y_cc(k), idir == 2) - (patch_ib(ib_id)%y_centroid + real(yp, &
                                   & wp)*(glb_bounds(2)%end - glb_bounds(2)%beg))
-                                if (num_dims == 3) r(3) = merge(z_cb(l), z_cc(l), idir == 3) - (patch_ib(ib_id)%z_centroid &
-                                    & + real(zp, wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
+                                if (num_dims == 3) r(3) = merge(z_cb(l), z_cc(l), &
+                                    & idir == 3) - (patch_ib(ib_id)%z_centroid + real(zp, &
+                                    & wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
                                 f = 0._wp
                                 do i = 1, num_dims
                                     f(i) = flux_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)

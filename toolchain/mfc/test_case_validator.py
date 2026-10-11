@@ -650,6 +650,7 @@ class TestImmersedBoundarySurfaceChemistry(ConstraintTestCase):
         self.assertRejects({**self.case(thermal_layer=1.0e-3), "chemistry": "T"}, "thermal_layer > 0 requires thermal_bc = 1")
         self.assertRejects({**hot, "patch_ib(1)%geometry": 3, "patch_ib(1)%length_x": 0.1, "patch_ib(1)%length_y": 0.1}, "requires a circle (geometry 2) or sphere")
         self.assertRejects({**hot, "patch_ib(1)%thermal_layer": -1.0}, "thermal_layer must be >= 0")
+
     def test_surface_output_needs_chemistry(self):
         self.assertRejects({**self.case(thermal_bc=1, Twall=1200.0), "ib_surface_wrt": "T"}, "ib_surface_wrt requires ib and chemistry")
         self.assertAccepts({**self.case(thermal_bc=1, Twall=1200.0), "chemistry": "T", "ib_surface_wrt": "T"})
