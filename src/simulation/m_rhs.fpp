@@ -746,8 +746,10 @@ contains
                         call nvtxEndRange
                     end if
 
-                    ! Energy and mass the fluid exchanges with each thermal_bc = 3 body through this direction's faces
-                    if (lumped_ib) call s_accumulate_ib_face_fluxes(id, flux_n(id)%vf, flux_src_n(id)%vf, stage)
+                    ! Momentum (IB forces) and energy/mass (thermal_bc = 3) exchanged with each IB through this direction's faces
+                    if (ib .and. (moving_immersed_boundary_flag .or. ib_state_wrt .or. lumped_ib)) then
+                        call s_accumulate_ib_face_fluxes(id, flux_n(id)%vf, flux_src_n(id)%vf, stage)
+                    end if
 
                     ! Bubble dynamics source terms
                     if (bubbles_euler) then

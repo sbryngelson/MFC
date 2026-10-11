@@ -18,7 +18,6 @@ module m_ibm
     use m_constants
     use m_compute_levelset
     use m_ib_patches
-    use m_viscous
     use m_model
     use m_patch_geometries
     use m_collisions
@@ -85,6 +84,10 @@ module m_ibm
     real(wp), allocatable :: send_ft(:,:), recv_ft(:,:)
     real(wp), allocatable :: recv_forces_snap(:,:), recv_torques_snap(:,:)
 
+    !> Force (1:3) and torque (4:6) on each local IB from the fluid-body face fluxes of the last RHS evaluation
+    real(wp), allocatable, dimension(:,:) :: ib_face_ft
+    $:GPU_DECLARE(create='[ib_face_ft]')
+
 contains
 
     !> Allocates memory for the variables in the IBM module
@@ -149,6 +152,10 @@ contains
                        & recv_ft(6, size(patch_ib)))
         end if
 #endif
+
+        @:ALLOCATE(ib_face_ft(6, num_local_ibs_max))
+        ib_face_ft = 0._wp
+        $:GPU_UPDATE(device='[ib_face_ft]')
 
         call s_update_ib_lookup()
 
@@ -844,77 +851,6 @@ contains
 
     end function f_ib_volume
 
-    !> Add this RK stage's fluid-body face fluxes to ib_heat(2:3), weighted so the stages of a step sum to the step's exchange
-    !! (SSP-RK: 1; 1/2, 1/2; 1/6, 1/6, 2/3). A face counts on the rank owning its fluid cell, so no face is counted twice. The
-    !! fluxes are the totals the RHS differences: Riemann (flux_vf) plus viscous, conductive and diffusive (flux_src_vf).
-    subroutine s_accumulate_ib_face_fluxes(idir, flux_vf, flux_src_vf, stage)
-
-        integer, intent(in)                                 :: idir, stage
-        type(scalar_field), dimension(sys_size), intent(in) :: flux_vf, flux_src_vf
-        real(wp), dimension(3), parameter                   :: w_rk3 = [1._wp/6._wp, 1._wp/6._wp, 2._wp/3._wp]
-        real(wp)                                            :: w, area, f_E, f_m
-        integer                                             :: j, k, l, jn, kn, ln, cell(3), side, ib_id, ib_tmp, g, q
-        integer                                             :: j0, k0, l0
-        logical                                             :: has_src
-
-        w = 1._wp
-        if (time_stepper == time_stepper_rk2) w = 0.5_wp
-        if (time_stepper == time_stepper_rk3) w = w_rk3(stage)
-        has_src = viscous .or. surface_tension .or. chem_params%diffusion .or. heat_conduction
-        j0 = 0; k0 = 0; l0 = 0
-        if (idir == 1) j0 = -1
-        if (idir == 2) k0 = -1
-        if (idir == 3) l0 = -1
-
-        ! Face (j, k, l) lies between that cell and the next one along idir
-        $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l, jn, kn, ln, cell, side, ib_id, ib_tmp, g, q, area, f_E, f_m]', &
-                            & copyin='[w, has_src, idir, j0, k0, l0]')
-        do l = l0, p
-            do k = k0, n
-                do j = j0, m
-                    jn = j; kn = k; ln = l
-                    if (idir == 1) jn = j + 1
-                    if (idir == 2) kn = k + 1
-                    if (idir == 3) ln = l + 1
-                    ! side = +1: body on the far side, the face flux enters it; -1: body on the near side, the flux leaves it
-                    side = 0
-                    if (ib_markers%sf(j, k, l) == 0 .and. ib_markers%sf(jn, kn, ln) /= 0) then
-                        if (j >= 0 .and. k >= 0 .and. l >= 0) side = 1
-                    else if (ib_markers%sf(j, k, l) /= 0 .and. ib_markers%sf(jn, kn, ln) == 0) then
-                        if (jn <= m .and. kn <= n .and. ln <= p) side = -1
-                    end if
-                    if (side /= 0) then
-                        cell = [jn, kn, ln]
-                        if (side == -1) cell = [j, k, l]
-                        call s_decode_patch_periodicity(ib_markers%sf(cell(1), cell(2), cell(3)), ib_tmp)
-                        call s_get_neighborhood_idx(ib_tmp, ib_id)
-                        if (ib_id > 0) then
-                            if (patch_ib(ib_id)%thermal_bc == 3) then
-                                if (idir == 1) area = dy(k)
-                                if (idir == 2) area = dx(j)
-                                if (idir == 3) area = dx(j)*dy(k)
-                                if (num_dims == 3 .and. idir /= 3) area = area*dz(l)
-                                f_E = flux_vf(eqn_idx%E)%sf(j, k, l)
-                                if (has_src) f_E = f_E + flux_src_vf(eqn_idx%E)%sf(j, k, l)
-                                f_m = 0._wp
-                                do q = eqn_idx%cont%beg, eqn_idx%cont%end
-                                    f_m = f_m + flux_vf(q)%sf(j, k, l)
-                                end do
-                                g = patch_ib(ib_id)%gbl_patch_id
-                                $:GPU_ATOMIC(atomic='update')
-                                ib_heat(2, g) = ib_heat(2, g) + real(side, wp)*w*area*f_E
-                                $:GPU_ATOMIC(atomic='update')
-                                ib_heat(3, g) = ib_heat(3, g) - real(side, wp)*w*area*f_m
-                            end if
-                        end if
-                    end if
-                end do
-            end do
-        end do
-        $:END_GPU_PARALLEL_LOOP()
-
-    end subroutine s_accumulate_ib_face_fluxes
-
     !> Advance the temperature of each thermal_bc = 3 IB over one step, treating it as one lumped body (small Biot number). With
     !! E_solid = m c_s (T - T_ref) and the step's face exchange (energy in, mass out) from s_accumulate_ib_face_fluxes, m c_s dT/dt
     !! = Q_in + c_s (T - T_ref) Mdot_out + heat_power - emissivity sigma A (T^4 - T_rad^4). T_ref = 298.15 K is the reference of the
@@ -1591,119 +1527,134 @@ contains
 
     end subroutine s_prescribed_kinematics
 
-    !> Compute pressure and viscous forces and torques on immersed bodies via volume integration
-    subroutine s_compute_ib_forces(q_prim_vf, fluid_pp)
+    !> Add direction idir's fluid-body face fluxes to each IB. These are the fluxes the RHS differences, Riemann (flux_vf) plus
+    !! viscous, capillary, conductive and diffusive (flux_src_vf), so each body receives exactly what the fluid loses. A face counts
+    !! on the rank owning its fluid cell. With IB forces: force (1:3) and torque about the centroid (4:6) of each local IB into
+    !! ib_face_ft, from the last RHS evaluation (idir = 1 starts afresh). With lumped_ib: energy in and mass out of each
+    !! thermal_bc = 3 body into ib_heat(2:3), weighted so a step's stages sum to its exchange (SSP-RK: 1; 1/2, 1/2; 1/6, 1/6, 2/3).
+    subroutine s_accumulate_ib_face_fluxes(idir, flux_vf, flux_src_vf, stage)
 
-        type(scalar_field), dimension(1:sys_size), intent(in) :: q_prim_vf
-        type(physical_parameters), dimension(1:num_fluids), intent(in) :: fluid_pp
-        integer :: i, j, k, l, encoded_ib_idx, xp, yp, zp, ib_idx, ib_idx_temp, fluid_idx
+        integer, intent(in)                                 :: idir, stage
+        type(scalar_field), dimension(sys_size), intent(in) :: flux_vf, flux_src_vf
+        real(wp), dimension(3), parameter                   :: w_rk3 = [1._wp/6._wp, 1._wp/6._wp, 2._wp/3._wp]
+        real(wp), dimension(3)                              :: f, r, tq
+        real(wp)                                            :: area, w, f_E, f_m
+        integer                                             :: i, j, k, l, jn, kn, ln, cell(3), side, ib_id, ib_tmp, xp, yp, zp, g
+        integer                                             :: j0, k0, l0
+        logical                                             :: has_src, has_src_E, do_ft
+
+        if (num_ibs == 0) return
+        do_ft = moving_immersed_boundary_flag .or. ib_state_wrt
+
+        if (do_ft .and. idir == 1) then
+            $:GPU_PARALLEL_LOOP(private='[i, l]', collapse=2)
+            do i = 1, num_ibs
+                do l = 1, 6
+                    ib_face_ft(l, i) = 0._wp
+                end do
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        end if
+
+        ! The conditions under which s_compute_additional_physics_rhs differences flux_src for the momentum and the energy
+        has_src = viscous .or. surface_tension .or. heat_conduction
+        has_src_E = has_src .or. chem_params%diffusion
+        w = 1._wp
+        if (time_stepper == time_stepper_rk2) w = 0.5_wp
+        if (time_stepper == time_stepper_rk3) w = w_rk3(stage)
+        j0 = 0; k0 = 0; l0 = 0
+        if (idir == 1) j0 = -1
+        if (idir == 2) k0 = -1
+        if (idir == 3) l0 = -1
+
+        ! Face (j, k, l) lies between that cell and the next one along idir
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, jn, kn, ln, cell, side, ib_id, ib_tmp, xp, yp, zp, g, area, f, r, &
+                            & tq, f_E, f_m]', copyin='[has_src, has_src_E, do_ft, w, idir, j0, k0, l0]')
+        do l = l0, p
+            do k = k0, n
+                do j = j0, m
+                    jn = j; kn = k; ln = l
+                    if (idir == 1) jn = j + 1
+                    if (idir == 2) kn = k + 1
+                    if (idir == 3) ln = l + 1
+                    ! side = +1: body on the far side, the face flux enters it; -1: body on the near side, the flux leaves it
+                    side = 0
+                    if (ib_markers%sf(j, k, l) == 0 .and. ib_markers%sf(jn, kn, ln) /= 0) then
+                        if (j >= 0 .and. k >= 0 .and. l >= 0) side = 1
+                    else if (ib_markers%sf(j, k, l) /= 0 .and. ib_markers%sf(jn, kn, ln) == 0) then
+                        if (jn <= m .and. kn <= n .and. ln <= p) side = -1
+                    end if
+                    if (side /= 0) then
+                        cell = [jn, kn, ln]
+                        if (side == -1) cell = [j, k, l]
+                        call s_decode_patch_periodicity(ib_markers%sf(cell(1), cell(2), cell(3)), ib_tmp, xp, yp, zp)
+                        call s_get_neighborhood_idx(ib_tmp, ib_id)
+                        if (ib_id > 0) then
+                            if (idir == 1) area = dy(k)
+                            if (idir == 2) area = dx(j)
+                            if (idir == 3) area = dx(j)*dy(k)
+                            if (num_dims == 3 .and. idir /= 3) area = area*dz(l)
+                            if (do_ft) then
+                                ! Lever arm: face centre minus the centroid of the body's periodic image
+                                r = 0._wp
+                                r(1) = merge(x_cb(j), x_cc(j), idir == 1) - (patch_ib(ib_id)%x_centroid + real(xp, &
+                                  & wp)*(glb_bounds(1)%end - glb_bounds(1)%beg))
+                                r(2) = merge(y_cb(k), y_cc(k), idir == 2) - (patch_ib(ib_id)%y_centroid + real(yp, &
+                                  & wp)*(glb_bounds(2)%end - glb_bounds(2)%beg))
+                                if (num_dims == 3) r(3) = merge(z_cb(l), z_cc(l), idir == 3) - (patch_ib(ib_id)%z_centroid &
+                                    & + real(zp, wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
+                                f = 0._wp
+                                do i = 1, num_dims
+                                    f(i) = flux_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)
+                                    if (has_src) f(i) = f(i) + flux_src_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)
+                                    f(i) = real(side, wp)*area*f(i)
+                                end do
+                                call s_cross_product(r, f, tq)
+                                do i = 1, 3
+                                    $:GPU_ATOMIC(atomic='update')
+                                    ib_face_ft(i, ib_id) = ib_face_ft(i, ib_id) + f(i)
+                                    $:GPU_ATOMIC(atomic='update')
+                                    ib_face_ft(i + 3, ib_id) = ib_face_ft(i + 3, ib_id) + tq(i)
+                                end do
+                            end if
+                            if (patch_ib(ib_id)%thermal_bc == 3) then
+                                f_E = flux_vf(eqn_idx%E)%sf(j, k, l)
+                                if (has_src_E) f_E = f_E + flux_src_vf(eqn_idx%E)%sf(j, k, l)
+                                f_m = 0._wp
+                                do i = eqn_idx%cont%beg, eqn_idx%cont%end
+                                    f_m = f_m + flux_vf(i)%sf(j, k, l)
+                                end do
+                                g = patch_ib(ib_id)%gbl_patch_id
+                                $:GPU_ATOMIC(atomic='update')
+                                ib_heat(2, g) = ib_heat(2, g) + real(side, wp)*w*area*f_E
+                                $:GPU_ATOMIC(atomic='update')
+                                ib_heat(3, g) = ib_heat(3, g) - real(side, wp)*w*area*f_m
+                            end if
+                        end if
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_accumulate_ib_face_fluxes
+
+    !> Set each IB's force and torque: the fluid's share from the face fluxes of the last RHS evaluation
+    !! (s_accumulate_ib_face_fluxes), plus collisions and body forces
+    subroutine s_compute_ib_forces()
+
+        integer                         :: i, l
         real(wp), dimension(num_ibs, 3) :: forces, torques
-        ! viscous stress tensor with temp vectors to hold divergence calculations
-        real(wp), dimension(1:3,1:3) :: viscous_stress
-        real(wp), dimension(1:3)     :: local_force_contribution, radial_vector, local_torque_contribution
-        real(wp)                     :: cell_volume, dynamic_viscosity
-
-        #:if not MFC_CASE_OPTIMIZATION and USING_AMD
-            real(wp), dimension(3) :: dynamic_viscosities
-        #:else
-            real(wp), dimension(num_fluids) :: dynamic_viscosities
-        #:endif
 
         call nvtxStartRange("COMPUTE-IB-FORCES")
 
-        forces = 0._wp
-        torques = 0._wp
-
-        if (viscous) then
-            do fluid_idx = 1, num_fluids
-                if (fluid_pp(fluid_idx)%Re(1) > 0._wp) then
-                    dynamic_viscosities(fluid_idx) = 1._wp/fluid_pp(fluid_idx)%Re(1)
-                else
-                    dynamic_viscosities(fluid_idx) = 0._wp
-                end if
-            end do
-        end if
-
         ! no kernel over zero-size mapped arrays: a rank can hold no patch after a handoff
         if (num_ibs > 0) then
-            $:GPU_PARALLEL_LOOP(private='[i, j, k, l, xp, yp, zp, ib_idx, ib_idx_temp, encoded_ib_idx, fluid_idx, radial_vector, &
-                                & local_force_contribution, cell_volume, local_torque_contribution, dynamic_viscosity, &
-                                & viscous_stress]', copy='[forces, torques]', copyin='[dynamic_viscosities]', collapse=3)
-            do i = 0, m
-                do j = 0, n
-                    do k = 0, p
-                        encoded_ib_idx = ib_markers%sf(i, j, k)
-                        if (encoded_ib_idx /= 0) then
-                            call s_decode_patch_periodicity(encoded_ib_idx, ib_idx_temp, xp, yp, zp)
-                            call s_get_neighborhood_idx(ib_idx_temp, ib_idx)  ! global patch ID -> local index
-                            if (ib_idx > 0) then
-                                ! get the vector pointing to the grid cell from the IB centroid
-                                radial_vector(1) = x_cc(i) - (patch_ib(ib_idx)%x_centroid + real(xp, &
-                                              & wp)*(glb_bounds(1)%end - glb_bounds(1)%beg))
-                                radial_vector(2) = y_cc(j) - (patch_ib(ib_idx)%y_centroid + real(yp, &
-                                              & wp)*(glb_bounds(2)%end - glb_bounds(2)%beg))
-                                radial_vector(3) = 0._wp
-                                if (num_dims == 3) radial_vector(3) = z_cc(k) - (patch_ib(ib_idx)%z_centroid + real(zp, &
-                                    & wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
-
-                                local_force_contribution(:) = 0._wp
-
-                                ! compute the pressure force component, which is the negative pressure gradient
-                                do l = -fd_number, fd_number
-                                    local_force_contribution(1) = local_force_contribution(1) - (fd_coeff_x(l, &
-                                                             & i)*q_prim_vf(eqn_idx%E)%sf(i + l, j, k))
-                                    local_force_contribution(2) = local_force_contribution(2) - (fd_coeff_y(l, &
-                                                             & j)*q_prim_vf(eqn_idx%E)%sf(i, j + l, k))
-                                    if (num_dims == 3) then
-                                        local_force_contribution(3) = local_force_contribution(3) - (fd_coeff_z(l, &
-                                                                 & k)*q_prim_vf(eqn_idx%E)%sf(i, j, k + l))
-                                    end if
-                                end do
-
-                                ! get the viscous stress and add its contribution if that is considered
-                                if (viscous) then
-                                    ! compute the volume-weighted local dynamic viscosity
-                                    dynamic_viscosity = 0._wp
-                                    do fluid_idx = 1, num_fluids
-                                        ! local dynamic viscosity is the dynamic viscosity of the fluid times alpha of the fluid
-                                        dynamic_viscosity = dynamic_viscosity + (q_prim_vf(fluid_idx + eqn_idx%adv%beg - 1)%sf(i, &
-                                            & j, k)*dynamic_viscosities(fluid_idx))
-                                    end do
-
-                                    do l = -fd_number, fd_number
-                                        call s_compute_viscous_stress_tensor(viscous_stress, q_prim_vf, dynamic_viscosity, i + l, &
-                                                                             & j, k)
-                                        local_force_contribution(1:3) = local_force_contribution(1:3) + fd_coeff_x(l, &
-                                                                 & i)*viscous_stress(1,1:3)
-
-                                        call s_compute_viscous_stress_tensor(viscous_stress, q_prim_vf, dynamic_viscosity, i, &
-                                                                             & j + l, k)
-                                        local_force_contribution(1:3) = local_force_contribution(1:3) + fd_coeff_y(l, &
-                                                                 & j)*viscous_stress(2,1:3)
-
-                                        if (num_dims == 3) then
-                                            call s_compute_viscous_stress_tensor(viscous_stress, q_prim_vf, dynamic_viscosity, i, &
-                                                                                 & j, k + l)
-                                            local_force_contribution(1:3) = local_force_contribution(1:3) + fd_coeff_z(l, &
-                                                                     & k)*viscous_stress(3,1:3)
-                                        end if
-                                    end do
-                                end if
-
-                                call s_cross_product(radial_vector, local_force_contribution, local_torque_contribution)
-
-                                ! Update the force and torque values atomically to prevent race conditions
-                                cell_volume = dx(i)*dy(j)
-                                if (num_dims == 3) cell_volume = cell_volume*dz(k)
-                                do l = 1, num_dims
-                                    $:GPU_ATOMIC(atomic='update')
-                                    forces(ib_idx, l) = forces(ib_idx, l) + (local_force_contribution(l)*cell_volume)
-                                    $:GPU_ATOMIC(atomic='update')
-                                    torques(ib_idx, l) = torques(ib_idx, l) + local_torque_contribution(l)*cell_volume
-                                end do
-                            end if  ! ib_idx > 0
-                        end if
-                    end do
+            $:GPU_PARALLEL_LOOP(private='[i, l]', copyout='[forces, torques]')
+            do i = 1, num_ibs
+                do l = 1, 3
+                    forces(i, l) = ib_face_ft(l, i)
+                    torques(i, l) = ib_face_ft(l + 3, i)
                 end do
             end do
             $:END_GPU_PARALLEL_LOOP()
@@ -2325,6 +2276,7 @@ contains
         @:DEALLOCATE(ib_markers%sf)
         @:DEALLOCATE(corrected_gps%sf)
         @:DEALLOCATE(ib_gbl_idx_lookup)
+        @:DEALLOCATE(ib_face_ft)
         do i = 1, num_ib_airfoils_max
             if (allocated(ib_airfoil_grids(i)%upper)) then
                 @:DEALLOCATE(ib_airfoil_grids(i)%upper)
