@@ -1,53 +1,19 @@
-This file was created on 2026-02-03 16:54:57.734442.
+This file was created on 2026-10-11 15:28:14.020777.
 
 mfc.sh:
 
-    Invocation: test --generate --only 4F5A5E32
-    Lock:       mpi=Yes & gpu=No & debug=No & gcov=No & unified=No & single=No & mixed=No & fastmath=No
-    Git:        d987bdb5a38c912183f371ddff56c6b1642d05d7 on generate-new-golden-temp (dirty)
-
-pre_process:
-
-    CMake Configuration:
-    
-        CMake v3.28.3 on schwarzschild
-    
-        C       : GNU v13.3.0 (/usr/bin/cc)
-        Fortran : GNU v13.3.0 (/usr/bin/gfortran)
-    
-        PRE_PROCESS   : ON
-        SIMULATION    : OFF
-        POST_PROCESS  : OFF
-        SYSCHECK      : OFF
-        DOCUMENTATION : OFF
-        ALL           : OFF
-    
-        MPI     : ON
-        OpenACC : OFF
-        OpenMP  : OFF
-    
-        Fypp    : /home/dan/Documents/repos/MFC/build/venv/bin/fypp
-        Doxygen : 
-    
-        Build Type : Release
-    
-    Configuration Environment:
-    
-        CC       : 
-        CXX      : 
-        FC       : 
-        OMPI_CC  : 
-        OMPI_CXX : 
-        OMPI_FC  : 
+    Invocation: test --generate --no-mpi --no-gpu -j 24 -o 0387594F 07D9EBD1 09FDDC81 0B07F3A1 0BD42F35 127A967A 135F548B 136C6387 155FF5E4 16574715 18B832DD 1B218CF1 1D4832F8 1E62093F 1E6FD465 204838D0 221C9980 28D037A7 2EE0C3AA 3008BA80 32DD0363 34A93376 408BF558 431554F7 43A1D3C6 4646053A 49893269 4B8105EA 4BED9896 4C3164AE 4C64244B 4E0FBE72 4F5A5E32 5173E637 5334FF40 5A22B45F 5B350250 6076815B 6171E9D4 641CC3F0
+    Lock:       mpi=No & gpu=No & debug=No & reldebug=No & gcov=No & unified=No & single=No & mixed=No & fastmath=No
+    Git:        f9a3fa1f8dad1a9ef59ea483f536fc1e28f50bb6 on noslip-ghost (dirty)
 
 post_process:
 
     CMake Configuration:
     
-        CMake v3.28.3 on schwarzschild
+        CMake v3.24.2 on tuolumne2150
     
-        C       : GNU v13.3.0 (/usr/bin/cc)
-        Fortran : GNU v13.3.0 (/usr/bin/gfortran)
+        C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
+        Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
     
         PRE_PROCESS   : OFF
         SIMULATION    : OFF
@@ -56,54 +22,20 @@ post_process:
         DOCUMENTATION : OFF
         ALL           : OFF
     
-        MPI     : ON
+        MPI     : OFF
         OpenACC : OFF
         OpenMP  : OFF
     
-        Fypp    : /home/dan/Documents/repos/MFC/build/venv/bin/fypp
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/noslip-ghost/build/venv/bin/fypp
         Doxygen : 
     
         Build Type : Release
     
     Configuration Environment:
     
-        CC       : 
-        CXX      : 
-        FC       : 
-        OMPI_CC  : 
-        OMPI_CXX : 
-        OMPI_FC  : 
-
-syscheck:
-
-    CMake Configuration:
-    
-        CMake v3.28.3 on schwarzschild
-    
-        C       : GNU v13.3.0 (/usr/bin/cc)
-        Fortran : GNU v13.3.0 (/usr/bin/gfortran)
-    
-        PRE_PROCESS   : OFF
-        SIMULATION    : OFF
-        POST_PROCESS  : OFF
-        SYSCHECK      : ON
-        DOCUMENTATION : OFF
-        ALL           : OFF
-    
-        MPI     : ON
-        OpenACC : OFF
-        OpenMP  : OFF
-    
-        Fypp    : /home/dan/Documents/repos/MFC/build/venv/bin/fypp
-        Doxygen : 
-    
-        Build Type : Release
-    
-    Configuration Environment:
-    
-        CC       : 
-        CXX      : 
-        FC       : 
+        CC       : /opt/cray/pe/craype/2.7.34/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.34/bin/CC
+        FC       : /opt/cray/pe/craype/2.7.34/bin/ftn
         OMPI_CC  : 
         OMPI_CXX : 
         OMPI_FC  : 
@@ -112,10 +44,10 @@ simulation:
 
     CMake Configuration:
     
-        CMake v3.28.3 on schwarzschild
+        CMake v3.24.2 on tuolumne2150
     
-        C       : GNU v13.3.0 (/usr/bin/cc)
-        Fortran : GNU v13.3.0 (/usr/bin/gfortran)
+        C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
+        Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
     
         PRE_PROCESS   : OFF
         SIMULATION    : ON
@@ -124,20 +56,88 @@ simulation:
         DOCUMENTATION : OFF
         ALL           : OFF
     
-        MPI     : ON
+        MPI     : OFF
         OpenACC : OFF
         OpenMP  : OFF
     
-        Fypp    : /home/dan/Documents/repos/MFC/build/venv/bin/fypp
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/noslip-ghost/build/venv/bin/fypp
         Doxygen : 
     
         Build Type : Release
     
     Configuration Environment:
     
-        CC       : 
-        CXX      : 
-        FC       : 
+        CC       : /opt/cray/pe/craype/2.7.34/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.34/bin/CC
+        FC       : /opt/cray/pe/craype/2.7.34/bin/ftn
+        OMPI_CC  : 
+        OMPI_CXX : 
+        OMPI_FC  : 
+
+syscheck:
+
+    CMake Configuration:
+    
+        CMake v3.24.2 on tuolumne2150
+    
+        C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
+        Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
+    
+        PRE_PROCESS   : OFF
+        SIMULATION    : OFF
+        POST_PROCESS  : OFF
+        SYSCHECK      : ON
+        DOCUMENTATION : OFF
+        ALL           : OFF
+    
+        MPI     : OFF
+        OpenACC : OFF
+        OpenMP  : OFF
+    
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/noslip-ghost/build/venv/bin/fypp
+        Doxygen : 
+    
+        Build Type : Release
+    
+    Configuration Environment:
+    
+        CC       : /opt/cray/pe/craype/2.7.34/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.34/bin/CC
+        FC       : /opt/cray/pe/craype/2.7.34/bin/ftn
+        OMPI_CC  : 
+        OMPI_CXX : 
+        OMPI_FC  : 
+
+pre_process:
+
+    CMake Configuration:
+    
+        CMake v3.24.2 on tuolumne2150
+    
+        C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
+        Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
+    
+        PRE_PROCESS   : ON
+        SIMULATION    : OFF
+        POST_PROCESS  : OFF
+        SYSCHECK      : OFF
+        DOCUMENTATION : OFF
+        ALL           : OFF
+    
+        MPI     : OFF
+        OpenACC : OFF
+        OpenMP  : OFF
+    
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/noslip-ghost/build/venv/bin/fypp
+        Doxygen : 
+    
+        Build Type : Release
+    
+    Configuration Environment:
+    
+        CC       : /opt/cray/pe/craype/2.7.34/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.34/bin/CC
+        FC       : /opt/cray/pe/craype/2.7.34/bin/ftn
         OMPI_CC  : 
         OMPI_CXX : 
         OMPI_FC  : 
@@ -146,48 +146,33 @@ CPU:
 
     CPU Info:
     From lscpu
-    Architecture:                            x86_64
-    CPU op-mode(s):                          32-bit, 64-bit
-    Address sizes:                           46 bits physical, 48 bits virtual
-    Byte Order:                              Little Endian
-    CPU(s):                                  20
-    On-line CPU(s) list:                     0-19
-    Vendor ID:                               GenuineIntel
-    Model name:                              12th Gen Intel(R) Core(TM) i7-12700K
-    CPU family:                              6
-    Model:                                   151
-    Thread(s) per core:                      2
-    Core(s) per socket:                      12
-    Socket(s):                               1
-    Stepping:                                2
-    CPU(s) scaling MHz:                      28%
-    CPU max MHz:                             5100.0000
-    CPU min MHz:                             800.0000
-    BogoMIPS:                                7219.20
-    Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf tsc_known_freq pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault cat_l2 cdp_l2 ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid rdt_a rdseed adx smap clflushopt clwb intel_pt sha_ni xsaveopt xsavec xgetbv1 xsaves split_lock_detect user_shstk avx_vnni dtherm ida arat pln pts hwp hwp_notify hwp_act_window hwp_epp hwp_pkg_req hfi vnmi umip pku ospke waitpkg gfni vaes vpclmulqdq rdpid movdiri movdir64b fsrm md_clear serialize pconfig arch_lbr ibt flush_l1d arch_capabilities
-    Virtualization:                          VT-x
-    L1d cache:                               512 KiB (12 instances)
-    L1i cache:                               512 KiB (12 instances)
-    L2 cache:                                12 MiB (9 instances)
-    L3 cache:                                25 MiB (1 instance)
-    NUMA node(s):                            1
-    NUMA node0 CPU(s):                       0-19
-    Vulnerability Gather data sampling:      Not affected
-    Vulnerability Ghostwrite:                Not affected
-    Vulnerability Indirect target selection: Not affected
-    Vulnerability Itlb multihit:             Not affected
-    Vulnerability L1tf:                      Not affected
-    Vulnerability Mds:                       Not affected
-    Vulnerability Meltdown:                  Not affected
-    Vulnerability Mmio stale data:           Not affected
-    Vulnerability Reg file data sampling:    Mitigation; Clear Register File
-    Vulnerability Retbleed:                  Not affected
-    Vulnerability Spec rstack overflow:      Not affected
-    Vulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl
-    Vulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization
-    Vulnerability Spectre v2:                Mitigation; Enhanced / Automatic IBRS; IBPB conditional; PBRSB-eIBRS SW sequence; BHI BHI_DIS_S
-    Vulnerability Srbds:                     Not affected
-    Vulnerability Tsa:                       Not affected
-    Vulnerability Tsx async abort:           Not affected
-    Vulnerability Vmscape:                   Mitigation; IBPB before exit to userspace
+    Architecture:         x86_64
+    CPU op-mode(s):       32-bit, 64-bit
+    Byte Order:           Little Endian
+    CPU(s):               192
+    On-line CPU(s) list:  0-95
+    Off-line CPU(s) list: 96-191
+    Thread(s) per core:   1
+    Core(s) per socket:   24
+    Socket(s):            4
+    NUMA node(s):         4
+    Vendor ID:            AuthenticAMD
+    CPU family:           25
+    Model:                144
+    Model name:           AMD Instinct MI300A Accelerator
+    Stepping:             1
+    CPU MHz:              3700.000
+    CPU max MHz:          3700.0000
+    CPU min MHz:          1500.0000
+    BogoMIPS:             7399.70
+    Virtualization:       AMD-V
+    L1d cache:            32K
+    L1i cache:            32K
+    L2 cache:             1024K
+    L3 cache:             32768K
+    NUMA node0 CPU(s):    0-23
+    NUMA node1 CPU(s):    24-47
+    NUMA node2 CPU(s):    48-71
+    NUMA node3 CPU(s):    72-95
+    Flags:                fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good amd_lbr_v2 nopl nonstop_tsc cpuid extd_apicid aperfmperf pni pclmulqdq monitor ssse3 fma cx16 pcid sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 invpcid_single hw_pstate ssbd mba perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local avx512_bf16 clzero irperf xsaveerptr wbnoinvd amd_ppin cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif x2avic v_spec_ctrl avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid overflow_recov succor smca fsrm flush_l1d
 
