@@ -816,6 +816,10 @@ class CaseValidator:
 
         p = self.get("p", 0)
         for i in range(1, (num_ibs or 0) + 1):
+            moving = self.get(f"patch_ib({i})%moving_ibm", 0) or 0
+            has_bf = any(self.get(f"bf_{d}", "F") == "T" for d in "xyz")
+            mass = self.get(f"patch_ib({i})%mass", None)
+            self.prohibit(moving != 0 and has_bf and (mass is None or mass <= 0), f"patch_ib({i})%mass must be > 0 for a moving IB with a body force (bf_x/y/z)")
             kin_model = self.get(f"patch_ib({i})%kin_model", 0) or 0
             self.prohibit(kin_model not in (0, 1, 2), f"patch_ib({i})%kin_model must be 0, 1 or 2")
             self.prohibit(kin_model > 0 and self.get(f"patch_ib({i})%moving_ibm", 0) != 1, f"patch_ib({i})%kin_model requires moving_ibm = 1")

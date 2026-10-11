@@ -155,6 +155,21 @@ class TestImmersedBoundaryFlags(ConstraintTestCase):
         self.assertAccepts(BASE)
 
 
+class TestMovingIbBodyForceMass(ConstraintTestCase):
+    MSG = "mass must be > 0 for a moving IB with a body force"
+    IB = {**BASE_2D, "ib": "T", "num_ibs": 1, "fd_order": 2, "patch_ib(1)%geometry": 2, "patch_ib(1)%x_centroid": 0.5, "patch_ib(1)%y_centroid": 0.5, "patch_ib(1)%radius": 0.1}
+    BF = {"bf_x": "T", "k_x": 0, "w_x": 0, "p_x": 0, "g_x": 1}
+
+    def test_rejects_moving_without_mass(self):
+        self.assertRejects({**self.IB, **self.BF, "patch_ib(1)%moving_ibm": 2}, self.MSG)
+
+    def test_accepts_moving_with_mass(self):
+        self.assertAccepts({**self.IB, **self.BF, "patch_ib(1)%moving_ibm": 2, "patch_ib(1)%mass": 1.0})
+
+    def test_accepts_fixed_without_mass(self):
+        self.assertAccepts({**self.IB, **self.BF})
+
+
 class TestBodyForceSpatialSupport(ConstraintTestCase):
     MSG = "bf_spatial_support is implemented for 2D only"
 
