@@ -763,6 +763,7 @@ contains
         real(wp), intent(in)          :: T_s, mdot_s
         logical, intent(in)           :: reacting
         real(wp)                      :: d, dV, h, R
+        real(wp), dimension(3)        :: length
 
         d = abs(real(gp%levelset, kind=wp))
         dV = dx(gp%loc(1))*dy(gp%loc(2))
@@ -776,7 +777,8 @@ contains
         case (2, 8)
             gp_surf(1, i) = gp_surf(1, i)*(R/(R - d))**(num_dims - 1)
         case (10)  ! curved side only; the flat caps need no correction
-            if (abs(gp%levelset_norm(f_cylinder_axis(patch_ib(gp%ib_patch_id)))) < 0.5_wp) gp_surf(1, i) = gp_surf(1, i)*R/(R - d)
+            length = [patch_ib(gp%ib_patch_id)%length_x, patch_ib(gp%ib_patch_id)%length_y, patch_ib(gp%ib_patch_id)%length_z]
+            if (abs(gp%levelset_norm(f_cylinder_axis(length))) < 0.5_wp) gp_surf(1, i) = gp_surf(1, i)*R/(R - d)
         end select
 
         gp_surf(2, i) = T_s
