@@ -1,10 +1,10 @@
-This file was created on 2026-10-11 13:33:26.475397.
+This file was created on 2026-10-11 18:50:28.210351.
 
 mfc.sh:
 
-    Invocation: test --no-mpi --no-gpu -j 24 --generate --only 641CC3F0 020B2F0C F389CE57 A74B7381 F52F0D4C
+    Invocation: test --generate --no-mpi --no-gpu -j 24 -o 641CC3F0 A74B7381 F389CE57 F52F0D4C
     Lock:       mpi=No & gpu=No & debug=No & reldebug=No & gcov=No & unified=No & single=No & mixed=No & fastmath=No
-    Git:        a0a69043d64bbd7f953b4901ac84305e0dff2f4d on ib-species-theta (dirty)
+    Git:        a19d7deb99a7ee3d80bacb7477bc989ca779c835 on campaign-v6 (dirty)
 
 pre_process:
 
@@ -12,8 +12,8 @@ pre_process:
     
         CMake v3.24.2 on tuolumne1001
     
-        C       : Clang v20.1.6 (/opt/cray/pe/craype/2.7.35/bin/cc)
-        Fortran : Cray v20.0.0 (/opt/cray/pe/craype/2.7.35/bin/ftn)
+        C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
+        Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
     
         PRE_PROCESS   : ON
         SIMULATION    : OFF
@@ -26,16 +26,50 @@ pre_process:
         OpenACC : OFF
         OpenMP  : OFF
     
-        Fypp    : /p/lustre5/bryngelson1/mfc-wt/ib-species-theta/build/venv/bin/fypp
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/campaign-v6/build/venv/bin/fypp
         Doxygen : 
     
         Build Type : Release
     
     Configuration Environment:
     
-        CC       : /opt/cray/pe/craype/2.7.35/bin/cc
-        CXX      : /opt/cray/pe/craype/2.7.35/bin/CC
-        FC       : /opt/cray/pe/craype/2.7.35/bin/ftn
+        CC       : /opt/cray/pe/craype/2.7.34/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.34/bin/CC
+        FC       : /opt/cray/pe/craype/2.7.34/bin/ftn
+        OMPI_CC  : 
+        OMPI_CXX : 
+        OMPI_FC  : 
+
+post_process:
+
+    CMake Configuration:
+    
+        CMake v3.24.2 on tuolumne1001
+    
+        C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
+        Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
+    
+        PRE_PROCESS   : OFF
+        SIMULATION    : OFF
+        POST_PROCESS  : ON
+        SYSCHECK      : OFF
+        DOCUMENTATION : OFF
+        ALL           : OFF
+    
+        MPI     : OFF
+        OpenACC : OFF
+        OpenMP  : OFF
+    
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/campaign-v6/build/venv/bin/fypp
+        Doxygen : 
+    
+        Build Type : Release
+    
+    Configuration Environment:
+    
+        CC       : /opt/cray/pe/craype/2.7.34/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.34/bin/CC
+        FC       : /opt/cray/pe/craype/2.7.34/bin/ftn
         OMPI_CC  : 
         OMPI_CXX : 
         OMPI_FC  : 
@@ -46,8 +80,8 @@ simulation:
     
         CMake v3.24.2 on tuolumne1001
     
-        C       : Clang v20.1.6 (/opt/cray/pe/craype/2.7.35/bin/cc)
-        Fortran : Cray v20.0.0 (/opt/cray/pe/craype/2.7.35/bin/ftn)
+        C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
+        Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
     
         PRE_PROCESS   : OFF
         SIMULATION    : ON
@@ -60,16 +94,16 @@ simulation:
         OpenACC : OFF
         OpenMP  : OFF
     
-        Fypp    : /p/lustre5/bryngelson1/mfc-wt/ib-species-theta/build/venv/bin/fypp
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/campaign-v6/build/venv/bin/fypp
         Doxygen : 
     
         Build Type : Release
     
     Configuration Environment:
     
-        CC       : /opt/cray/pe/craype/2.7.35/bin/cc
-        CXX      : /opt/cray/pe/craype/2.7.35/bin/CC
-        FC       : /opt/cray/pe/craype/2.7.35/bin/ftn
+        CC       : /opt/cray/pe/craype/2.7.34/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.34/bin/CC
+        FC       : /opt/cray/pe/craype/2.7.34/bin/ftn
         OMPI_CC  : 
         OMPI_CXX : 
         OMPI_FC  : 
@@ -80,8 +114,8 @@ syscheck:
     
         CMake v3.24.2 on tuolumne1001
     
-        C       : Clang v20.1.6 (/opt/cray/pe/craype/2.7.35/bin/cc)
-        Fortran : Cray v20.0.0 (/opt/cray/pe/craype/2.7.35/bin/ftn)
+        C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
+        Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
     
         PRE_PROCESS   : OFF
         SIMULATION    : OFF
@@ -94,16 +128,16 @@ syscheck:
         OpenACC : OFF
         OpenMP  : OFF
     
-        Fypp    : /p/lustre5/bryngelson1/mfc-wt/ib-species-theta/build/venv/bin/fypp
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/campaign-v6/build/venv/bin/fypp
         Doxygen : 
     
         Build Type : Release
     
     Configuration Environment:
     
-        CC       : /opt/cray/pe/craype/2.7.35/bin/cc
-        CXX      : /opt/cray/pe/craype/2.7.35/bin/CC
-        FC       : /opt/cray/pe/craype/2.7.35/bin/ftn
+        CC       : /opt/cray/pe/craype/2.7.34/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.34/bin/CC
+        FC       : /opt/cray/pe/craype/2.7.34/bin/ftn
         OMPI_CC  : 
         OMPI_CXX : 
         OMPI_FC  : 
