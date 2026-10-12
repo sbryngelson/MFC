@@ -1,16 +1,50 @@
-This file was created on 2026-10-08 21:50:19.520853.
+This file was created on 2026-10-11 15:28:36.783038.
 
 mfc.sh:
 
-    Invocation: test --no-mpi --no-gpu -j 24 --generate -o D43B28D4 F418A5E2 F2F0B673 136C6387 F5DFBD7A FBB35783
+    Invocation: test --generate --no-mpi --no-gpu -j 24 -o 0387594F 07D9EBD1 09FDDC81 0B07F3A1 0BD42F35 127A967A 135F548B 136C6387 155FF5E4 16574715 18B832DD 1B218CF1 1D4832F8 1E62093F 1E6FD465 204838D0 221C9980 28D037A7 2EE0C3AA 3008BA80 32DD0363 34A93376 408BF558 431554F7 43A1D3C6 4646053A 49893269 4B8105EA 4BED9896 4C3164AE 4C64244B 4E0FBE72 4F5A5E32 5173E637 5334FF40 5A22B45F 5B350250 6076815B 6171E9D4 641CC3F0
     Lock:       mpi=No & gpu=No & debug=No & reldebug=No & gcov=No & unified=No & single=No & mixed=No & fastmath=No
-    Git:        a6add01e35239cf9e87de38972e968ad1799c04c on fix-cylinder-axis (dirty)
+    Git:        f9a3fa1f8dad1a9ef59ea483f536fc1e28f50bb6 on noslip-ghost (dirty)
+
+post_process:
+
+    CMake Configuration:
+    
+        CMake v3.24.2 on tuolumne2150
+    
+        C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
+        Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
+    
+        PRE_PROCESS   : OFF
+        SIMULATION    : OFF
+        POST_PROCESS  : ON
+        SYSCHECK      : OFF
+        DOCUMENTATION : OFF
+        ALL           : OFF
+    
+        MPI     : OFF
+        OpenACC : OFF
+        OpenMP  : OFF
+    
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/noslip-ghost/build/venv/bin/fypp
+        Doxygen : 
+    
+        Build Type : Release
+    
+    Configuration Environment:
+    
+        CC       : /opt/cray/pe/craype/2.7.34/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.34/bin/CC
+        FC       : /opt/cray/pe/craype/2.7.34/bin/ftn
+        OMPI_CC  : 
+        OMPI_CXX : 
+        OMPI_FC  : 
 
 simulation:
 
     CMake Configuration:
     
-        CMake v3.24.2 on tuolumne2149
+        CMake v3.24.2 on tuolumne2150
     
         C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
         Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
@@ -26,7 +60,7 @@ simulation:
         OpenACC : OFF
         OpenMP  : OFF
     
-        Fypp    : /p/lustre5/bryngelson1/mfc-wt/fix-cylinder-axis/build/venv/bin/fypp
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/noslip-ghost/build/venv/bin/fypp
         Doxygen : 
     
         Build Type : Release
@@ -44,7 +78,7 @@ syscheck:
 
     CMake Configuration:
     
-        CMake v3.24.2 on tuolumne2149
+        CMake v3.24.2 on tuolumne2150
     
         C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
         Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
@@ -60,7 +94,7 @@ syscheck:
         OpenACC : OFF
         OpenMP  : OFF
     
-        Fypp    : /p/lustre5/bryngelson1/mfc-wt/fix-cylinder-axis/build/venv/bin/fypp
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/noslip-ghost/build/venv/bin/fypp
         Doxygen : 
     
         Build Type : Release
@@ -78,7 +112,7 @@ pre_process:
 
     CMake Configuration:
     
-        CMake v3.24.2 on tuolumne2149
+        CMake v3.24.2 on tuolumne2150
     
         C       : Clang v19.1.6 (/opt/cray/pe/craype/2.7.34/bin/cc)
         Fortran : Cray v19.0.0 (/opt/cray/pe/craype/2.7.34/bin/ftn)
@@ -94,7 +128,7 @@ pre_process:
         OpenACC : OFF
         OpenMP  : OFF
     
-        Fypp    : /p/lustre5/bryngelson1/mfc-wt/fix-cylinder-axis/build/venv/bin/fypp
+        Fypp    : /p/lustre5/bryngelson1/mfc-wt/noslip-ghost/build/venv/bin/fypp
         Doxygen : 
     
         Build Type : Release
@@ -127,10 +161,10 @@ CPU:
     Model:                144
     Model name:           AMD Instinct MI300A Accelerator
     Stepping:             1
-    CPU MHz:              3699.933
+    CPU MHz:              3700.000
     CPU max MHz:          3700.0000
     CPU min MHz:          1500.0000
-    BogoMIPS:             7400.37
+    BogoMIPS:             7399.70
     Virtualization:       AMD-V
     L1d cache:            32K
     L1i cache:            32K

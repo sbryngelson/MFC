@@ -246,63 +246,40 @@ contains
 
     end subroutine s_compute_ghost_point_pressure
 
-    subroutine s_compute_ghost_point_velocity(gp, gp_patch_id, radial_vector, vel_IP, pres_IP, vel_GP)
+    !> Ghost velocity mirrored through the wall about u_w (body velocity at the wall point plus the normal transpiration v_n:
+    !! blowing, Stefan flow): u_g = u_w + theta (u_w - u_IP), theta = |levelset|/(sample wall distance), puts u_w on the wall. A
+    !! slip wall mirrors only the normal part and keeps the image point's tangential velocity.
+    subroutine s_compute_ghost_point_velocity(gp, gp_patch_id, radial_vector, vel_IP, pres_IP, theta, v_n, vel_GP)
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
         type(ghost_point), intent(in)       :: gp
         integer, intent(in)                 :: gp_patch_id
         real(wp), dimension(3), intent(in)  :: radial_vector, vel_IP
-        real(wp), intent(in)                :: pres_IP
+        real(wp), intent(in)                :: pres_IP, theta, v_n
         real(wp), dimension(3), intent(out) :: vel_GP
-        real(wp), dimension(3)              :: norm, vel_norm_IP, rotation_velocity
-        real(wp)                            :: buf, v_blow_eff
-        integer                             :: q  !< Iterator variable
+        real(wp), dimension(3)              :: norm, vel_w
+        real(wp)                            :: v_blow_eff
 
-        ! Calculate velocity of ghost cell
-        if (gp%slip) then
-            norm(1:3) = gp%levelset_norm
-            buf = sqrt(sum(norm**2))
-            norm = norm/buf
-            vel_norm_IP = sum(vel_IP*norm)*norm
-            vel_GP = vel_IP - vel_norm_IP
-            if (patch_ib(gp_patch_id)%moving_ibm /= 0) then
-                ! compute the linear velocity of the ghost point due to rotation
-                call s_cross_product(patch_ib(gp_patch_id)%angular_vel, radial_vector, rotation_velocity)
+        ! A zero normal (ghost at a circle's centre or on a flat face) leaves norm = 0 rather than 0/0
+        norm = gp%levelset_norm/max(sqrt(sum(gp%levelset_norm**2)), sgm_eps)
 
-                ! add only the component of the IB's motion that is normal to the surface
-                vel_GP = vel_GP + sum((patch_ib(gp_patch_id)%vel + rotation_velocity)*norm)*norm
-            end if
-        else
-            if (patch_ib(gp_patch_id)%moving_ibm == 0) then
-                ! we know the object is not moving if moving_ibm is 0 (false)
-                vel_GP = 0._wp
-            else
-                ! convert the angular velocity from the inertial reference frame to the fluids frame, then convert to linear
-                ! velocity
-                call s_cross_product(patch_ib(gp_patch_id)%angular_vel, radial_vector, rotation_velocity)
-                do q = 1, 3
-                    ! if mibm is 1 or 2, then the boundary may be moving
-                    vel_GP(q) = patch_ib(gp_patch_id)%vel(q)  ! add the linear velocity
-                    vel_GP(q) = vel_GP(q) + rotation_velocity(q)  ! add the rotational velocity
-                end do
-            end if
+        vel_w = 0._wp
+        if (patch_ib(gp_patch_id)%moving_ibm /= 0) then
+            call s_cross_product(patch_ib(gp_patch_id)%angular_vel, radial_vector + abs(real(gp%levelset, kind=wp))*norm, vel_w)
+            vel_w = vel_w + patch_ib(gp_patch_id)%vel
         end if
 
-        ! Burning/injecting surface: superimpose wall-normal (outward) blowing on the
-        ! ghost velocity so the immersed surface transpires/injects gas into the flow.
-        if (patch_ib(gp_patch_id)%v_blow > 0._wp) then
-            v_blow_eff = patch_ib(gp_patch_id)%v_blow
-            ! Pressure-coupled burn rate (Vieille's law r_dot ~ p^n)
-            if (patch_ib(gp_patch_id)%burn_rate_pref > 0._wp) then
-                ! max(pres_IP, 0) guards the fractional power against a transient negative
-                v_blow_eff = v_blow_eff*(max(pres_IP, &
-                                         & 0._wp)/patch_ib(gp_patch_id)%burn_rate_pref)**patch_ib(gp_patch_id)%burn_rate_exp
-            end if
-            norm(1:3) = gp%levelset_norm
-            buf = sqrt(sum(norm**2))
-            if (buf > 0._wp) vel_GP = vel_GP + v_blow_eff*norm/buf
+        v_blow_eff = patch_ib(gp_patch_id)%v_blow
+        ! Pressure-coupled burn rate (Vieille's law r_dot ~ p^n); max(pres_IP, 0) guards the fractional power
+        if (v_blow_eff > 0._wp .and. patch_ib(gp_patch_id)%burn_rate_pref > 0._wp) then
+            v_blow_eff = v_blow_eff*(max(pres_IP, 0._wp)/patch_ib(gp_patch_id)%burn_rate_pref)**patch_ib(gp_patch_id)%burn_rate_exp
         end if
+        vel_w = vel_w + (max(v_blow_eff, 0._wp) + v_n)*norm
+
+        vel_GP = (1._wp + theta)*(vel_w - vel_IP)
+        if (gp%slip) vel_GP = dot_product(vel_GP, norm)*norm
+        vel_GP = vel_IP + vel_GP
 
     end subroutine s_compute_ghost_point_velocity
 
@@ -341,10 +318,9 @@ contains
         real(wp), dimension(${NUM_SPECIES}$) :: Ys_IP, Ys_g, Ys_s, W_species
         real(wp) :: alpha_q, alpha_rho_q, e_q
         real(wp) :: T_IP, mw_IP, e_IP  !< Image-point temperature, mixture MW, and mass-specific internal energy (chemistry)
-        real(wp) :: T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d
+        real(wp) :: T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta
         logical :: surface_converged
         integer :: n_not_converged, n_ill_posed  !< Per-call reacting-surface failure tallies (see the module-level counters)
-        real(wp), dimension(3) :: norm  !< Levelset normal at the ghost point, normalized below with buf
         ! Primitive variables at the image point associated with a ghost point, interpolated from surrounding fluid cells.
 
         real(wp), dimension(3) :: physical_loc   !< Physical loc of GP
@@ -389,8 +365,8 @@ contains
         if (num_gps > 0) then
             $:GPU_PARALLEL_LOOP(private='[i, physical_loc, dyn_pres, alpha_rho_IP, alpha_IP, alpha_rho_GP, pres_IP, pres_GP, &
                                 & vel_IP, vel_g, r_IP, v_IP, pb_IP, mv_IP, nmom_IP, presb_IP, massv_IP, rho, gamma, pi_inf, Re_K, &
-                                & G_K, Gs, gp, norm, buf, radial_vector, j, k, l, q, qv_K, c_IP, nbub, patch_id, Ys_IP, &
-                                & W_species, T_IP, mw_IP, e_IP, Ys_g, Ys_s, T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, &
+                                & G_K, Gs, gp, radial_vector, j, k, l, q, qv_K, c_IP, nbub, patch_id, Ys_IP, W_species, T_IP, &
+                                & mw_IP, e_IP, Ys_g, Ys_s, T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta, &
                                 & surface_converged, vel_sum_g, E_ghost, alpha_q, alpha_rho_q, e_q]', &
                                 & reduction='[[n_not_converged, n_ill_posed]]', reductionOp='[+]', present='[ghost_points]')
             do i = 1, num_gps
@@ -436,6 +412,11 @@ contains
                     alpha_rho_IP(1) = pres_IP*mw_IP/(T_IP*gas_constant)
                 end if
 
+                ! Mirror weight: the ghost sits |levelset| behind the wall, the image-point value is sampled d in front
+                d = max(gp%ip_dist, abs(real(gp%levelset, kind=wp)))
+                theta = 0._wp
+                if (d > 0._wp) theta = abs(real(gp%levelset, kind=wp))/d
+
                 ! Thermal and heterogeneous reacting-surface boundary conditions.
                 v_stefan = 0._wp
                 surface_converged = .false.
@@ -444,9 +425,6 @@ contains
                     ! Intrinsic gas state at the image point:     rho_IP = (alpha*rho)_IP / alpha_IP
                     call get_mixture_molecular_weight(Ys_IP, mw_IP)
                     T_IP = pres_IP*mw_IP*alpha_IP(1)/(alpha_rho_IP(1)*gas_constant)
-
-                    ! Gas-side gradient length: from the wall to where the image-point value was sampled
-                    d = max(gp%ip_dist, abs(real(gp%levelset, kind=wp)))
 
                     if (patch_ib(patch_id)%surface_reaction == 1) then
                         ! Heterogeneous reacting surface.
@@ -488,10 +466,8 @@ contains
 
                     if (record_surface) call s_record_gp_surface(i, gp, T_s, mdot_s, surface_converged)
 
-                    ! Linear extrapolation to the ghost point, |levelset| behind the wall, from the sample d in front
-                    buf = 0._wp
-                    if (d > 0._wp) buf = abs(real(gp%levelset, kind=wp))/d
-                    call s_blend_ghost_state(buf, f_face_theta(q_prim_vf, gp, buf, T_IP, T_s), T_IP, T_s, Ys_IP, Ys_s, T_g, Ys_g)
+                    call s_blend_ghost_state(theta, f_face_theta(q_prim_vf, gp, theta, T_IP, T_s), T_IP, T_s, Ys_IP, Ys_s, T_g, &
+                                             & Ys_g)
 
                     ! The advected ghost is wall gas at T_s, so no gas leaves the wall hotter or colder than it; conduction
                     ! sees the mirror T_g instead, through T_cond (s_ibm_set_conduction_temperature)
@@ -545,14 +521,7 @@ contains
                     & + real(ghost_points(i)%z_periodicity, wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
 
                 ! Calculate velocity of ghost cell
-                call s_compute_ghost_point_velocity(gp, patch_id, radial_vector, vel_IP, pres_IP, vel_g)
-
-                if (chemistry .and. patch_ib(patch_id)%inj_species == 0 .and. patch_ib(patch_id)%surface_reaction == 1 &
-                    & .and. surface_converged) then
-                    norm(1:3) = gp%levelset_norm
-                    buf = sqrt(sum(norm**2))
-                    if (buf > 0._wp) vel_g = vel_g + v_stefan*norm/buf
-                end if
+                call s_compute_ghost_point_velocity(gp, patch_id, radial_vector, vel_IP, pres_IP, theta, v_stefan, vel_g)
 
                 ! Set momentum
                 vel_sum_g = 0._wp
