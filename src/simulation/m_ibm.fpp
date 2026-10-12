@@ -793,7 +793,8 @@ contains
         integer, intent(in)                  :: save_count
         character(LEN=path_len + 2*name_len) :: file_loc
         real(wp)                             :: x(3)
-        integer                              :: i, unit
+        integer                              :: i, g, unit
+        integer, allocatable                 :: order(:)
 
         if (.not. allocated(gp_surf)) return
 
@@ -801,20 +802,74 @@ contains
             $:GPU_UPDATE(host='[gp_surf(:, 1:num_gps), ghost_points(1:num_gps)]')
         end if
 
+        call s_sort_gps_by_location(order)
+
         write (file_loc, '(A,I0,A,I0,A)') trim(case_dir) // '/D/ib_surface_', proc_rank, '_', save_count, '.dat'
         open (newunit=unit, file=trim(file_loc), status='replace', action='write')
         do i = 1, num_gps
-            if (.not. gp_surf(1, i) > 0._wp) cycle
+            g = order(i)
+            if (.not. gp_surf(1, g) > 0._wp) cycle
             x = 0._wp
-            x(1) = x_cc(ghost_points(i)%loc(1))
-            x(2) = y_cc(ghost_points(i)%loc(2))
-            if (num_dims == 3) x(3) = z_cc(ghost_points(i)%loc(3))
-            write (unit, '(3ES16.8,1X,I0,3ES15.6,3ES16.8)') x, patch_ib(ghost_points(i)%ib_patch_id)%gbl_patch_id, &
-                   & ghost_points(i)%levelset_norm, gp_surf(:,i)
+            x(1) = x_cc(ghost_points(g)%loc(1))
+            x(2) = y_cc(ghost_points(g)%loc(2))
+            if (num_dims == 3) x(3) = z_cc(ghost_points(g)%loc(3))
+            write (unit, '(3ES16.8,1X,I0,3ES15.6,3ES16.8)') x, patch_ib(ghost_points(g)%ib_patch_id)%gbl_patch_id, &
+                   & ghost_points(g)%levelset_norm, gp_surf(:,g)
         end do
         close (unit)
 
     end subroutine s_write_ib_surface
+
+    !> Ghost-point indices ordered by grid location, so per-point output does not inherit the discovery order. s_find_ghost_points
+    !! assigns slots from a GPU atomic, so that order is the thread schedule's and differs between CPU and GPU builds
+    !! (MFlowCode/MFC#2039). Heapsort, since a GPU run's input is unordered and a particle array carries O(10^5) ghost points.
+    pure subroutine s_sort_gps_by_location(order)
+
+        integer, allocatable, intent(out) :: order(:)
+        integer(8), allocatable           :: key(:)
+        integer                           :: i, root, g
+        integer(8)                        :: k
+
+        allocate (order(max(num_gps, 1)), key(max(num_gps, 1)))
+        do i = 1, num_gps
+            order(i) = i
+            ! Lexicographic (i, j, k) as one key; loc is a buffer-inclusive index, so offset it to stay non-negative.
+            k = int(ghost_points(i)%loc(1) + buff_size, 8)
+            k = k*int(n + 1 + 2*buff_size, 8) + int(ghost_points(i)%loc(2) + buff_size, 8)
+            key(i) = k*int(p + 1 + 2*buff_size, 8) + int(ghost_points(i)%loc(3) + buff_size, 8)
+        end do
+
+        do root = num_gps/2, 1, -1
+            call s_sift_gp(order, key, root, num_gps)
+        end do
+        do i = num_gps, 2, -1
+            g = order(1); order(1) = order(i); order(i) = g
+            call s_sift_gp(order, key, 1, i - 1)
+        end do
+
+    end subroutine s_sort_gps_by_location
+
+    !> Restore the max-heap rooted at root over order(1:last), comparing by key.
+    pure subroutine s_sift_gp(order, key, root, last)
+
+        integer, intent(inout) :: order(:)
+        integer(8), intent(in) :: key(:)
+        integer, intent(in)    :: root, last
+        integer                :: r, child, g
+
+        r = root
+        do
+            child = 2*r
+            if (child > last) exit
+            if (child < last) then
+                if (key(order(child + 1)) > key(order(child))) child = child + 1
+            end if
+            if (key(order(child)) <= key(order(r))) exit
+            g = order(r); order(r) = order(child); order(child) = g
+            r = child
+        end do
+
+    end subroutine s_sift_gp
 
     !> The surface temperature is held at Twall: prescribed (thermal_bc = 1) or evolved by the heat balance (thermal_bc = 3).
     pure logical function f_holds_twall(thermal_bc)
