@@ -2480,10 +2480,10 @@ contains
     !! point sits behind it; sampled at wall distance d instead, the linear extrapolation weight is |levelset|/d, which the
     !! caller passes as theta_max. theta = 0 is the first-order Dirichlet ghost phi_g = phi_s, which is
     !! Gibou et al. (JCP 176:205, 2002) Eq. 17 and is what they likewise fall back to where the linear form is ill-behaved.
-    !! One theta is shared by every species, so since both endpoints satisfy sum(Y) = 1, so does every blend between them --
-    !! exactly, with no renormalization. Temperature gets its own theta: nothing couples it to the composition, and sharing
-    !! would let a trace radical the surface consumes to ~1e-9 (O and OH at a burning carbon wall) drag the thermal mirror
-    !! down with it, turning a 2100 K ghost into 1205 K over a species whose own excursion was 1e-9. The cost of limiting
+    !! Each species and the temperature get their own theta, and the most abundant (bath) species absorbs the others'
+    !! changes, so sum(Y_g) = sum(Y_s) exactly. A shared theta would let a radical the surface depletes (O and OH at a
+    !! burning carbon wall) collapse every mirror to the first-order ghost, cutting the wall flux of CO and CO2 the gas
+    !! receives by up to half. A shared theta is the fallback if the bath species would go negative. The cost of limiting
     !! is small: the mirror already delivers only first-order wall flux (Ezra et al., Int. J. Heat Mass Transfer, 2025),
     !! and a boundary closure one order below the interior scheme retains the interior convergence rate (Gustafsson,
     !! Math. Comp. 29:396, 1975).
@@ -2505,7 +2505,7 @@ contains
         ! limit stays strictly positive instead of becoming a hard zero that roundoff can push negative.
         real(wp), parameter :: blend_safety = 0.9_wp
         real(wp)            :: theta_T, theta_Y
-        integer             :: k
+        integer             :: k, k_bath
 
         ! Temperature is held inside the window the thermodynamic model is fitted over, not merely above zero. Positivity alone
         ! is too weak: a 300 K wall in 1500 K gas admits theta = 0.225, and the 30 K ghost temperature that follows is positive
@@ -2517,17 +2517,37 @@ contains
         if (T_s > T_IP) theta_T = min(theta_T, blend_safety*(T_surface_max - T_s)/(T_s - T_IP))
         theta_T = max(theta_T, 0._wp)
 
+        T_g = T_s + theta_T*(T_s - T_IP)
+
+        call s_pick_bath_species(Ys_s, k_bath)
+        Ys_g(k_bath) = Ys_s(k_bath)
+        do k = 1, num_species
+            if (k == k_bath) cycle
+            Ys_g(k) = Ys_s(k) + f_species_theta(theta_max, blend_safety, Ys_s(k), Ys_IP(k))*(Ys_s(k) - Ys_IP(k))
+            Ys_g(k_bath) = Ys_g(k_bath) + Ys_s(k) - Ys_g(k)
+        end do
+        if (Ys_g(k_bath) >= 0._wp) return
+
         theta_Y = theta_max
         do k = 1, num_species
-            if (Ys_s(k) < Ys_IP(k)) theta_Y = min(theta_Y, blend_safety*Ys_s(k)/(Ys_IP(k) - Ys_s(k)))
+            theta_Y = min(theta_Y, f_species_theta(theta_max, blend_safety, Ys_s(k), Ys_IP(k)))
         end do
-
-        T_g = T_s + theta_T*(T_s - T_IP)
         do k = 1, num_species
             Ys_g(k) = Ys_s(k) + theta_Y*(Ys_s(k) - Ys_IP(k))
         end do
 
     end subroutine s_blend_ghost_state
+
+    !> Largest mirror weight, at most theta_max, that keeps a mass fraction positive (short of zero by the safety factor).
+    pure real(wp) function f_species_theta(theta_max, safety, Y_s, Y_IP) result(theta)
+        $:GPU_ROUTINE(parallelism='[seq]')
+
+        real(wp), intent(in) :: theta_max, safety, Y_s, Y_IP
+
+        theta = theta_max
+        if (Y_s < Y_IP) theta = min(theta, safety*Y_s/(Y_IP - Y_s))
+
+    end function f_species_theta
 
     !> Index of the most abundant species, i.e. the balance the sum constraint displaces.
     !!
