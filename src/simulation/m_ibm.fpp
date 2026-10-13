@@ -50,6 +50,11 @@ module m_ibm
     $:GPU_DECLARE(create='[corrected_gps]')
 
     type(ghost_point), dimension(:), allocatable :: ghost_points
+
+    !> New primitive state per ghost point, staged so it is published only after every image-point stencil
+    !! has been read (MFlowCode/MFC#1901). Writing q_prim inside the same loop that reads it at neighboring
+    !! image-point stencils makes a ghost's result depend on whether its neighbors were updated first.
+    real(wp), dimension(:, :), allocatable :: gp_prim_new
     $:GPU_DECLARE(create='[ghost_points]')
 
     !> Surface record per ghost point from the latest s_ibm_correct_state, kept when ib_surface_wrt: (1) area weight, (2) wall
@@ -196,8 +201,9 @@ contains
         ! set the size of the ghost point arrays to be the amount of points total, plus a factor of 2 buffer
         $:GPU_UPDATE(device='[num_gps]')
         @:ALLOCATE(ghost_points(1:max_num_gps))
+        @:ALLOCATE(gp_prim_new(1:sys_size, 1:max_num_gps))
 
-        $:GPU_ENTER_DATA(copyin='[ghost_points]')
+        $:GPU_ENTER_DATA(copyin='[ghost_points, gp_prim_new]')
         ! Global, not per rank: s_update_ib_temperatures is collective, and a rank whose neighborhood holds no thermal_bc = 3
         ! body must still take part in its allreduce.
         call s_mpi_allreduce_integer_sum(int(count(patch_ib(1:num_ibs)%thermal_bc == 3), 8), n_lumped)
@@ -361,6 +367,16 @@ contains
         n_ill_posed = 0
 
         if (num_gps > 0) then
+            ! Seed the staging buffer, so a component no ghost point writes survives the flush unchanged.
+            $:GPU_PARALLEL_LOOP(private='[i, q, j, k, l, gp]', present='[ghost_points, gp_prim_new]')
+            do i = 1, num_gps
+                gp = ghost_points(i)
+                j = gp%loc(1); k = gp%loc(2); l = gp%loc(3)
+                do q = 1, sys_size
+                    gp_prim_new(q, i) = q_prim_vf(q)%sf(j, k, l)
+                end do
+            end do
+            $:END_GPU_PARALLEL_LOOP()
             $:GPU_PARALLEL_LOOP(private='[i, physical_loc, dyn_pres, alpha_rho_IP, alpha_IP, alpha_rho_GP, pres_IP, pres_GP, &
                                 & vel_IP, vel_g, r_IP, v_IP, pb_IP, mv_IP, nmom_IP, presb_IP, massv_IP, rho, gamma, pi_inf, Re_K, &
                                 & G_K, Gs, gp, radial_vector, j, k, l, q, qv_K, c_IP, nbub, patch_id, Ys_IP, W_species, T_IP, &
@@ -481,7 +497,7 @@ contains
                     call s_convert_species_to_mixture_variables_kernel(rho, gamma, pi_inf, qv_K, alpha_IP, alpha_rho_IP, Re_K)
                 end if
 
-                if (surface_tension) q_prim_vf(eqn_idx%c)%sf(j, k, l) = c_IP
+                if (surface_tension) gp_prim_new(eqn_idx%c, i) = c_IP
 
                 ! set the pressure and density
                 if (patch_ib(patch_id)%moving_ibm <= 1) then
@@ -500,13 +516,13 @@ contains
                     end do
                     call s_compute_mixture_coefficients(alpha_rho_GP, alpha_IP, rho, gamma, pi_inf, qv_K)
                 end if
-                q_prim_vf(eqn_idx%E)%sf(j, k, l) = pres_GP
+                gp_prim_new(eqn_idx%E, i) = pres_GP
 
                 ! Set q_prim_vf params at GP
                 $:GPU_LOOP(parallelism='[seq]')
                 do q = 1, num_fluids
-                    q_prim_vf(q)%sf(j, k, l) = alpha_rho_GP(q)
-                    q_prim_vf(eqn_idx%adv%beg + q - 1)%sf(j, k, l) = alpha_IP(q)
+                    gp_prim_new(q, i) = alpha_rho_GP(q)
+                    gp_prim_new(eqn_idx%adv%beg + q - 1, i) = alpha_IP(q)
                 end do
 
                 ! get the vector that points from the centroid to the ghost
@@ -526,7 +542,7 @@ contains
                 $:GPU_LOOP(parallelism='[seq]')
                 do q = eqn_idx%mom%beg, eqn_idx%mom%end
                     q_cons_vf(q)%sf(j, k, l) = rho*vel_g(q - eqn_idx%mom%beg + 1)
-                    q_prim_vf(q)%sf(j, k, l) = vel_g(q - eqn_idx%mom%beg + 1)
+                    gp_prim_new(q, i) = vel_g(q - eqn_idx%mom%beg + 1)
                     vel_sum_g = vel_sum_g + vel_g(q - eqn_idx%mom%beg + 1)**2._wp
                 end do
                 dyn_pres = 5.e-1_wp*rho*vel_sum_g
@@ -669,7 +685,7 @@ contains
                         end do
                     end do
                     q_cons_vf(q)%sf(j, k, l) = buf/real(num_nbrs, wp)
-                    q_prim_vf(q)%sf(j, k, l) = buf_prim/real(num_nbrs, wp)
+                    gp_prim_new(q, i) = buf_prim/real(num_nbrs, wp)
                 end do
 
                 if (qbmm .and. .not. polytropic) then
@@ -694,6 +710,17 @@ contains
                         end do
                     end do
                 end if
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+
+            ! Second pass: publish the staged state now that every stencil has been read.
+            $:GPU_PARALLEL_LOOP(private='[i, q, j, k, l, gp]', present='[ghost_points, gp_prim_new]')
+            do i = 1, num_gps
+                gp = ghost_points(i)
+                j = gp%loc(1); k = gp%loc(2); l = gp%loc(3)
+                do q = 1, sys_size
+                    q_prim_vf(q)%sf(j, k, l) = gp_prim_new(q, i)
+                end do
             end do
             $:END_GPU_PARALLEL_LOOP()
         end if
@@ -2349,6 +2376,7 @@ contains
         end if
         if (allocated(ghost_points)) then
             @:DEALLOCATE(ghost_points)
+            @:DEALLOCATE(gp_prim_new)
         end if
         if (allocated(gp_surf)) then
             @:DEALLOCATE(gp_surf)
