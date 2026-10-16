@@ -105,6 +105,8 @@ module m_global_parameters
     integer :: cpu_start, cpu_end, cpu_rate
 
     $:GPU_DECLARE(create='[shear_stress, bulk_stress]')
+    logical :: ib_smooth_contact  !< ib .and. viscous .and. weno_Re_flux: blend the tangential interface velocity across s_S = 0
+    $:GPU_DECLARE(create='[ib_smooth_contact]')
     $:GPU_DECLARE(create='[hypo_nc_mode]')
 
     logical               :: bc_io
@@ -981,6 +983,8 @@ contains
         call s_configure_coordinate_bounds(recon_type, weno_polyn, muscl_polyn, igr_order, buff_size, idwint, idwbuff, viscous, &
                                            & bubbles_lagrange, m, n, p, num_dims, igr, ib, fd_number)
         $:GPU_UPDATE(device='[idwint, idwbuff]')
+        ib_smooth_contact = ib .and. viscous .and. weno_Re_flux
+        $:GPU_UPDATE(device='[ib_smooth_contact]')
 
         ! Configuring Coordinate Direction Indexes
         if (bubbles_euler) then

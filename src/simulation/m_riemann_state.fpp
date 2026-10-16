@@ -119,6 +119,17 @@ contains
 
     end function f_low_Mach_pcorr_hll
 
+    !> Weight on the left state of the contact-upwinded tangential interface velocity: the step sign(s_S) smoothed to a linear ramp
+    !! of half-width contact_ramp*c, so a face with s_S at round-off averages the two sides rather than picking one.
+    pure function f_contact_weight(s_S, c) result(w)
+
+        $:GPU_ROUTINE(function_name='f_contact_weight', parallelism='[seq]', cray_inline=True)
+        real(wp), intent(in) :: s_S, c
+        real(wp)             :: w
+        w = min(max(5.e-1_wp + 5.e-1_wp*s_S/max(contact_ramp*c, sgm_eps), 0._wp), 1._wp)
+
+    end function f_contact_weight
+
     !> The same correction for the HLLC flux, where the star state supplies the pressure jump directly and the correction scales
     !! with the mass flux through the acoustic waves instead. Zero unless low_Mach == 1.
     function f_low_Mach_pcorr_hllc(vel_L_rms, vel_R_rms, c_L, c_R, rho_L, rho_R, s_L, s_R, vel_L_norm, vel_R_norm) result(pcorr)

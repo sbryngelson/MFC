@@ -81,7 +81,7 @@ contains
         real(wp)                             :: s_L, s_R, s_M, s_P, s_S
         real(wp)                             :: xi_L, xi_R        !< Left and right wave speeds functions
         real(wp)                             :: xi_L_m1, xi_R_m1  !< xi_L/R - 1, computed without cancellation
-        real(wp)                             :: xi_M, xi_P
+        real(wp)                             :: xi_M, xi_P, xi_tan
         real(wp)                             :: xi_MP, xi_PP
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(3) :: R0_L, R0_R
@@ -856,7 +856,7 @@ contains
                         #:set _hllc_s2 = ['pi_inf_R', 'qv_R', 'alpha_L_sum', 'alpha_R_sum', 'E_L', 'E_R', 'MW_L', 'MW_R', &
                             & 'R_gas_L', 'R_gas_R', 'Cp_L', 'Cp_R', 'Cv_L', 'Cv_R', 'c_sum_Yi_Phi']
                         #:set _hllc_s3 = ['Gamm_L', 'Gamm_R', 'Y_L', 'Y_R', 'H_L', 'H_R', 'qv_avg', 'rho_avg', 'gamma_avg', &
-                            & 'H_avg', 'c_L', 'c_R', 'c_avg', 's_P', 's_M', 'xi_P', 'xi_M', 'xi_L']
+                            & 'H_avg', 'c_L', 'c_R', 'c_avg', 's_P', 's_M', 'xi_P', 'xi_M', 'xi_tan', 'xi_L']
                         #:set _hllc_s4 = ['xi_R', 'xi_L_m1', 'xi_R_m1', 'Ms_L', 'Ms_R', 'pres_SL', 'pres_SR', 'vel_L', 'vel_R', &
                             & 'Re_L', 'Re_R', 'alpha_L', 'alpha_R', 'alpha_rho_L', 'alpha_rho_R']
                         #:set _hllc_s5 = ['alpha_lim_L', 'alpha_lim_R', 's_L', 's_R', 's_S', 'vel_avg_rms', 'pcorr', 'Ys_L', &
@@ -1369,6 +1369,15 @@ contains
                                                        & dir_idx(i)) = xi_M*(vel_L(dir_idx(i)) + dir_flg(dir_idx(i))*s_M*xi_L_m1) &
                                                        & + xi_P*(vel_R(dir_idx(i)) + dir_flg(dir_idx(i))*s_P*xi_R_m1)
                                     end do
+                                    if (ib_smooth_contact) then
+                                        xi_tan = f_contact_weight(s_S, max(c_L, c_R))
+                                        $:GPU_LOOP(parallelism='[seq]')
+                                        do i = 2, num_dims
+                                            vel_src_rsx_vf(${SF('')}$, &
+                                                           & dir_idx(i)) = xi_tan*vel_L(dir_idx(i)) + (1._wp - xi_tan) &
+                                                           & *vel_R(dir_idx(i))
+                                        end do
+                                    end if
 
                                     ! COLOR FUNCTION FLUX
                                     if (surface_tension) then

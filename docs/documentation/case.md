@@ -687,6 +687,7 @@ Setting `muscl_eps = 0` gives textbook limiter behavior where limiters activate 
 
 - `weno_Re_flux` activates the scalar divergence theorem in computing the velocity gradients using WENO-reconstructed cell boundary values.
 If this option is false, velocity gradient is computed using finite difference scheme of order 2 which is independent of the WENO order.
+With `ib` and `viscous`, the HLLC tangential interface velocity in the viscous work blends the left and right states across the contact wave over |s_S| < 0.01 c instead of switching on the sign of s_S, so a face next to a ghost cell whose contact speed is round-off no longer picks one side arbitrarily (the constant contact_ramp in m_constants.fpp).
 
 - `weno_avg` it activates the arithmetic average of the left and right, WENO-reconstructed, cell-boundary values.
 This option requires `weno_Re_flux` to be true because cell boundary values are only utilized when employing the scalar divergence method in the computation of velocity gradients.

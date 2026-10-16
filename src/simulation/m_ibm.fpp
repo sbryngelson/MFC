@@ -51,10 +51,10 @@ module m_ibm
 
     type(ghost_point), dimension(:), allocatable :: ghost_points
 
-    !> New primitive state per ghost point, staged so it is published only after every image-point stencil
-    !! has been read (MFlowCode/MFC#1901). Writing q_prim inside the same loop that reads it at neighboring
-    !! image-point stencils makes a ghost's result depend on whether its neighbors were updated first.
-    real(wp), dimension(:, :), allocatable :: gp_prim_new
+    !> New primitive state per ghost point, staged so it is published only after every image-point stencil has been read
+    !! (MFlowCode/MFC#1901). Writing q_prim inside the same loop that reads it at neighboring image-point stencils makes a ghost's
+    !! result depend on whether its neighbors were updated first.
+    real(wp), dimension(:,:), allocatable :: gp_prim_new
     $:GPU_DECLARE(create='[ghost_points]')
 
     !> Surface record per ghost point from the latest s_ibm_correct_state, kept when ib_surface_wrt: (1) area weight, (2) wall
