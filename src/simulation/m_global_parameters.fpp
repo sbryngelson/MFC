@@ -201,6 +201,8 @@ module m_global_parameters
 
     integer :: buff_size  !< Number of ghost cells for boundary condition storage
     $:GPU_DECLARE(create='[buff_size]')
+    integer :: gp_layers  !< Depth of the immersed-boundary ghost shell (cells of a body's interior that hold current values)
+    $:GPU_DECLARE(create='[gp_layers]')
 
     ! shear_num, shear_indices, shear_BC_flip_num, shear_BC_flip_indices: in m_global_parameters_common
 
@@ -980,8 +982,11 @@ contains
             adv_src_mode = adv_src_mode_none
         end if
 
+        gp_layers = f_ghost_point_layers(gp_layers_full, recon_type, weno_polyn, muscl_polyn, igr, viscous, weno_Re_flux, ib)
+        $:GPU_UPDATE(device='[gp_layers]')
+
         call s_configure_coordinate_bounds(recon_type, weno_polyn, muscl_polyn, igr_order, buff_size, idwint, idwbuff, viscous, &
-                                           & bubbles_lagrange, m, n, p, num_dims, igr, ib, fd_number)
+                                           & bubbles_lagrange, m, n, p, num_dims, igr, ib, fd_number, ib_halo=2*gp_layers + 2)
         $:GPU_UPDATE(device='[idwint, idwbuff]')
         ib_smooth_contact = ib .and. viscous .and. weno_Re_flux
         $:GPU_UPDATE(device='[ib_smooth_contact]')

@@ -688,6 +688,10 @@ Setting `muscl_eps = 0` gives textbook limiter behavior where limiters activate 
 - `weno_Re_flux` activates the scalar divergence theorem in computing the velocity gradients using WENO-reconstructed cell boundary values.
 If this option is false, velocity gradient is computed using finite difference scheme of order 2 which is independent of the WENO order.
 With `ib` and `viscous`, the HLLC tangential interface velocity in the viscous work blends the left and right states across the contact wave over |s_S| < 0.01 c instead of switching on the sign of s_S, so a face next to a ghost cell whose contact speed is round-off no longer picks one side arbitrarily (the constant contact_ramp in m_constants.fpp).
+With `ib = T` this option also sets how far into each immersed body ghost values are kept current.
+The cell gradients are built from reconstructed face values and then reconstructed again, so the viscous flux at a face next to a body reads `2*(weno_polyn + 1)` cells into it (6 for `weno_order = 5`), against `weno_polyn + 1` for the inviscid flux.
+A cell that is never written holds its initial state, which is wrong once the flow has evolved, so MFC fills that many layers.
+The first three layers are filled from an image point, as for any immersed boundary; deeper layers are filled the same way but carry no surface chemistry, and a deep cell whose image point would leave the halo near a rank boundary takes the average of its filled neighbors instead.
 
 - `weno_avg` it activates the arithmetic average of the left and right, WENO-reconstructed, cell-boundary values.
 This option requires `weno_Re_flux` to be true because cell boundary values are only utilized when employing the scalar divergence method in the computation of velocity gradients.

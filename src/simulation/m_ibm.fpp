@@ -78,7 +78,7 @@ module m_ibm
 
     integer :: num_gps  !< Number of ghost points
 #if defined(MFC_OpenACC)
-    $:GPU_DECLARE(create='[gp_layers, num_gps]')
+    $:GPU_DECLARE(create='[num_gps]')
 #elif defined(MFC_OpenMP)
     $:GPU_DECLARE(create='[num_gps]')
 #endif
@@ -451,7 +451,11 @@ contains
                         ! s_solve_surface_linear_system -- NaN <= epsilon is false -- so the solve reports success and writes
                         ! NaN into the ghost state. Such a point is not solvable, so it is recorded and skipped rather than
                         ! having its distance rescaled to something it is not.
-                        if (d > 0._wp) then
+                        if (gp%layer > gp_layers_full) then
+                            ! A deep cell carries no surface chemistry: it keeps the image-point state (the branch below for an
+                            ! unconverged solve), so the solve's cost does not grow with the shell depth.
+                            surface_converged = .false.
+                        else if (d > 0._wp) then
                             call s_solve_surface(pres_IP, T_IP, patch_ib(patch_id)%Twall, d, Ys_IP, W_species, merge(1, &
                                                  & patch_ib(patch_id)%thermal_bc, f_holds_twall(patch_ib(patch_id)%thermal_bc)), &
                                                  & Ys_s, T_s, mdot_s, surface_converged)
@@ -1060,8 +1064,16 @@ contains
 
                     index = ghost_points(q)%loc(dim)
                     temp_loc = ghost_points(q)%ip_loc(dim)
-                    do while ((temp_loc < s_cc(index) .or. temp_loc > s_cc(index + 1)) .and. (.not. bounds_error))
+                    do while ((temp_loc < s_cc(index) .or. temp_loc > s_cc(index + 1)) .and. (.not. bounds_error) &
+                              & .and. ghost_points(q)%ip_ok)
                         index = index + dir
+                        ! A deep cell exists only so the viscous stencils never read a stale cell, and its image point lies
+                        ! twice its depth away, which can pass the halo near a rank boundary. That is not an error: the cell takes
+                        ! the neighbour average in s_ibm_correct_state. A margin of two keeps the interpolation stencil inside.
+                        if (ghost_points(q)%layer > gp_layers_full .and. (index < -buff_size + 2 .or. index > bound - 2)) then
+                            ghost_points(q)%ip_ok = .false.
+                            exit  ! before the loop condition reads s_cc past its end
+                        end if
                         if (index < -buff_size .or. index > bound) then
 #if !defined(MFC_OpenACC) && !defined(MFC_OpenMP)
                             print *, "A required image point is not located in this computational domain."
@@ -1101,41 +1113,70 @@ contains
 
     end subroutine s_compute_image_points
 
+    !> Shell layer of the cell (i, j, k): 0 if it needs no ghost value, 1 .. gp_layers_full for a cell within that box (Chebyshev)
+    !! distance of a fluid cell, which is filled from an image point, and gp_layers_full + 1 for a deeper cell.
+    !!
+    !! Deep cells exist only when gp_layers > gp_layers_full, i.e. for a viscous reconstruction that reaches further into the
+    !! body (see f_ghost_point_layers). Anything such a stencil reads has to hold a current value, not the state the cell was
+    !! initialised with. Those stencils run one coordinate direction at a time, so the cells that matter form a cross, and a
+    !! cell is deep when a fluid cell lies within a Manhattan distance of gp_layers. A box of that radius would swallow all of a
+    !! small body: the inscribed radius of a cube of half-width 6 is 6/sqrt(3) of a sphere's radius in cells.
+    function f_ghost_layer(i, j, k) result(layer)
+
+        $:GPU_ROUTINE(function_name='f_ghost_layer', parallelism='[seq]', cray_inline=True)
+        integer, intent(in) :: i, j, k
+        integer             :: layer, di, dj, dk, dk_max, rem_j, rem_k, cheb
+
+        layer = 0
+        if (ib_markers%sf(i, j, k) == 0) return
+
+        dk_max = merge(gp_layers_full, 0, p > 0)
+        cheb = gp_layers_full + 1
+        do di = -gp_layers_full, gp_layers_full
+            do dj = -gp_layers_full, gp_layers_full
+                do dk = -dk_max, dk_max
+                    if (ib_markers%sf(i + di, j + dj, k + dk) == 0) cheb = min(cheb, max(abs(di), abs(dj), abs(dk)))
+                end do
+            end do
+        end do
+        if (cheb <= gp_layers_full) then
+            layer = cheb
+            return
+        end if
+        if (gp_layers <= gp_layers_full) return
+
+        dk_max = merge(gp_layers, 0, p > 0)
+        do di = -gp_layers, gp_layers
+            rem_j = gp_layers - abs(di)
+            do dj = -rem_j, rem_j
+                rem_k = min(rem_j - abs(dj), dk_max)
+                do dk = -rem_k, rem_k
+                    if (ib_markers%sf(i + di, j + dj, k + dk) == 0) then
+                        layer = gp_layers_full + 1
+                        return
+                    end if
+                end do
+            end do
+        end do
+
+    end function f_ghost_layer
+
     !> Count the number of ghost points for memory allocation
     subroutine s_find_num_ghost_points(num_gps_out)
 
         integer, intent(out) :: num_gps_out
-        integer              :: i, j, k, ii, jj, kk, gp_layers_z  !< Iterator variables
-        integer              :: num_gps_local                     !< local copies of the gp count to support GPU compute
-        logical              :: is_gp
+        integer              :: i, j, k        !< Iterator variables
+        integer              :: num_gps_local  !< local copies of the gp count to support GPU compute
 
         num_gps_local = 0
-        gp_layers_z = gp_layers
-        if (p == 0) gp_layers_z = 0
 
-        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, is_gp]', copy='[num_gps_local]', firstprivate='[gp_layers, &
-                            & gp_layers_z]', collapse=3)
+        $:GPU_PARALLEL_LOOP(private='[i, j, k]', copy='[num_gps_local]', collapse=3)
         do i = 0, m
             do j = 0, n
                 do k = 0, p
-                    if (ib_markers%sf(i, j, k) /= 0) then
-                        is_gp = .false.
-                        marker_search: do ii = i - gp_layers, i + gp_layers
-                            do jj = j - gp_layers, j + gp_layers
-                                do kk = k - gp_layers_z, k + gp_layers_z
-                                    if (ib_markers%sf(ii, jj, kk) == 0) then
-                                        ! if any neighbors are not in the IB, it is a ghost point
-                                        is_gp = .true.
-                                        exit marker_search
-                                    end if
-                                end do
-                            end do
-                        end do marker_search
-
-                        if (is_gp) then
-                            $:GPU_ATOMIC(atomic='update')
-                            num_gps_local = num_gps_local + 1
-                        end if
+                    if (f_ghost_layer(i, j, k) > 0) then
+                        $:GPU_ATOMIC(atomic='update')
+                        num_gps_local = num_gps_local + 1
                     end if
                 end do
             end do
@@ -1149,45 +1190,31 @@ contains
     !> Locate all ghost points in the domain
     subroutine s_find_ghost_points()
 
-        integer :: i, j, k, ii, jj, kk, gp_layers_z  !< Iterator variables
-        integer :: xp, yp, zp                        !< periodicities
+        integer :: i, j, k, lay  !< Iterator variables
+        integer :: xp, yp, zp    !< periodicities
         integer :: count, count_i, local_idx
         integer :: patch_id, encoded_patch_id, neighborhood_patch_id
-        logical :: is_gp
 
         count = 0
         count_i = 0
-        gp_layers_z = gp_layers
-        if (p == 0) gp_layers_z = 0
 
-        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, is_gp, local_idx, patch_id, encoded_patch_id, neighborhood_patch_id, &
-                            & xp, yp, zp]', copyin='[count, count_i, glb_bounds]', firstprivate='[gp_layers, gp_layers_z]', &
-                            & present='[ghost_points]', collapse=3)
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, lay, local_idx, patch_id, encoded_patch_id, neighborhood_patch_id, xp, yp, zp]', &
+                            & copyin='[count, count_i, glb_bounds]', present='[ghost_points]', collapse=3)
         do i = 0, m
             do j = 0, n
                 do k = 0, p
                     if (ib_markers%sf(i, j, k) /= 0) then
-                        is_gp = .false.
-                        marker_search: do ii = i - gp_layers, i + gp_layers
-                            do jj = j - gp_layers, j + gp_layers
-                                do kk = k - gp_layers_z, k + gp_layers_z
-                                    if (ib_markers%sf(ii, jj, kk) == 0) then
-                                        ! if any neighbors are not in the IB, it is a ghost point
-                                        is_gp = .true.
-                                        exit marker_search
-                                    end if
-                                end do
-                            end do
-                        end do marker_search
+                        lay = f_ghost_layer(i, j, k)
 
-                        if (is_gp) then
+                        if (lay > 0) then
                             $:GPU_ATOMIC(atomic='capture')
                             count = count + 1
                             local_idx = count
                             $:END_GPU_ATOMIC_CAPTURE()
-
                             ghost_points(local_idx)%loc = [i, j, k]
                             ghost_points(local_idx)%T_cond = 0._wp
+                            ghost_points(local_idx)%layer = lay
+                            ghost_points(local_idx)%ip_ok = .true.
                             encoded_patch_id = ib_markers%sf(i, j, k)
                             call s_decode_patch_periodicity(encoded_patch_id, patch_id, xp, yp, zp)
                             call s_get_neighborhood_idx(patch_id, neighborhood_patch_id)
@@ -1237,6 +1264,10 @@ contains
                             & sample_loc]', present='[ghost_points]')
         do q = 1, num_gps
             gp = ghost_points(q)
+            if (.not. gp%ip_ok) then
+                ghost_points(q)%interp_valid = .false.  ! takes the neighbour average in s_ibm_correct_state
+                cycle
+            end if
             ! Get the interpolation points
             i = gp%ip_grid(1)
             j = gp%ip_grid(2)

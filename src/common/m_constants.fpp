@@ -53,7 +53,10 @@ module m_constants
     integer, parameter  :: dflt_num_igr_iters = 2              !< number of iterations for IGR elliptic solve
     integer, parameter  :: dflt_num_igr_warm_start_iters = 50  !< default number of iterations for IGR elliptic solve
     real(wp), parameter :: dflt_alf_factor = 10._wp            !< scaling factor for IGR alpha
-    integer, parameter  :: gp_layers = 3                       !< Number of ghost point layers for IBM
+    !> Depth of the ghost shell that is filled from an image point (and, on a reacting surface, the surface Newton solve). Inviscid
+    !! reconstruction reaches this far into a body from a fluid-adjacent face; see f_ghost_point_layers for the deeper shell the
+    !! viscous stencils need.
+    integer, parameter :: gp_layers_full = 3
     !> color function gradient magnitude at which to apply the surface tension fluxes
     real(wp), parameter :: capillary_cutoff = 1.e-6
     !> Spatial support width of acoustic source, used in s_source_spatial

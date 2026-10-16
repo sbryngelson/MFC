@@ -546,8 +546,13 @@ module m_derived_types
         real(wp)                     :: levelset
         real(wp), dimension(1:3)     :: levelset_norm
         logical                      :: slip
-        integer, dimension(3)        :: DB
-        integer                      :: x_periodicity, y_periodicity, z_periodicity
+        !> Shell layer: 1 .. gp_layers_full is the box (Chebyshev) distance to the nearest fluid cell and is filled from an image
+        !! point; gp_layers_full + 1 is a deeper cell kept current only for the viscous stencils.
+        integer :: layer
+        !> .false. if a deep cell's image point would leave the halo; it then takes the neighbour average instead of aborting
+        logical               :: ip_ok
+        integer, dimension(3) :: DB
+        integer               :: x_periodicity, y_periodicity, z_periodicity
     end type ghost_point
 
     !> Species parameters

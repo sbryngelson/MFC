@@ -15,7 +15,7 @@ module m_helper_basic
 
     private
     public :: f_approx_equal, f_approx_in_array, f_is_default, f_all_default, f_is_integer, s_configure_coordinate_bounds, &
-        & s_update_cell_bounds, f_save_index
+        & f_ghost_point_layers, s_update_cell_bounds, f_save_index
 
 contains
 
@@ -120,9 +120,31 @@ contains
 
     end function f_save_index
 
+    !> Depth, in cells, to which an immersed body's interior must hold current values.
+    !!
+    !! A reconstruction stencil that straddles a body surface reads cells inside the body, and a cell nobody has written
+    !! holds the state it was initialised with, which is wrong as soon as the flow has evolved. An inviscid face
+    !! reconstruction reaches polyn + 1 cells into the body from a fluid-adjacent face (3 for WENO5). With weno_Re_flux the
+    !! cell gradients are built from reconstructed face values and then reconstructed again, so the viscous flux reaches
+    !! 2*(polyn + 1) cells (6 for WENO5), which is why the viscous halo is 2*polyn + 2.
+    !! @param min_layers Depth that is always filled by the image-point mirror (gp_layers_full)
+    pure function f_ghost_point_layers(min_layers, recon_type, weno_polyn, muscl_polyn, igr, viscous, weno_Re_flux, &
+                                       & ib) result(layers)
+
+        integer, intent(in) :: min_layers, recon_type, weno_polyn, muscl_polyn
+        logical, intent(in) :: igr, viscous, weno_Re_flux, ib
+        integer             :: layers, polyn
+
+        layers = min_layers
+        if (.not. (ib .and. viscous .and. weno_Re_flux) .or. igr) return
+        polyn = merge(weno_polyn, muscl_polyn, recon_type == recon_type_weno)
+        layers = max(min_layers, 2*(polyn + 1))
+
+    end function f_ghost_point_layers
+
     !> Compute ghost-cell buffer size and set interior/buffered coordinate index bounds.
     subroutine s_configure_coordinate_bounds(recon_type, weno_polyn, muscl_polyn, igr_order, buff_size, idwint, idwbuff, viscous, &
-        & bubbles_lagrange, m, n, p, num_dims, igr, ib, fd_number)
+        & bubbles_lagrange, m, n, p, num_dims, igr, ib, fd_number, ib_halo)
 
         integer, intent(in)                                :: recon_type, weno_polyn, muscl_polyn
         integer, intent(in)                                :: m, n, p, num_dims, igr_order, fd_number
@@ -131,6 +153,10 @@ contains
         logical, intent(in)                                :: viscous, bubbles_lagrange
         logical, intent(in)                                :: igr
         logical, intent(in)                                :: ib
+        !> Halo an immersed boundary needs beyond the usual minimum, if the caller knows it (the simulation does): the image point
+        !! of a ghost cell lies twice its depth from it, so a shell of depth g needs 2*g + 2 cells for every image point to sit
+        !! inside the halo and the result not to depend on where the rank boundaries fall.
+        integer, intent(in), optional :: ib_halo
 
         ! Determine ghost cell buffer size for boundary conditions
 
@@ -153,6 +179,7 @@ contains
 
         if (ib) then
             buff_size = max(buff_size, 10)
+            if (present(ib_halo)) buff_size = max(buff_size, ib_halo)
         end if
 
         ! Configuring Coordinate Direction Indexes

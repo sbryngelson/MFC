@@ -1322,6 +1322,14 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                         )
                     )
 
+            if viscous and not slip:
+                # weno_Re_flux reconstructs the cell gradients a second time, so the viscous flux reads 2*(polyn + 1) cells into the
+                # body and the ghost shell (and the halo) is deeper than for any other case here.
+                if len(dimInfo[0]) == 3:
+                    cases.append(define_case_d(stack, "Sphere -> weno_Re_flux", {"patch_ib(1)%z_centroid": 0.5, "patch_ib(1)%geometry": 8, "weno_Re_flux": "T"}))
+                elif len(dimInfo[0]) == 2:
+                    cases.append(define_case_d(stack, "Circle -> weno_Re_flux", {"patch_ib(1)%geometry": 2, "n": 49, "weno_Re_flux": "T"}))
+
             stack.pop()
 
         if len(dimInfo[0]) == 3 and not viscous:
