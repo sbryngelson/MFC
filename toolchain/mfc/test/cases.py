@@ -1330,6 +1330,14 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                 elif len(dimInfo[0]) == 2:
                     cases.append(define_case_d(stack, "Circle -> weno_Re_flux", {"patch_ib(1)%geometry": 2, "n": 49, "weno_Re_flux": "T"}))
 
+            if not slip and num_fluids == 1 and len(dimInfo[0]) >= 2:
+                # Image-point interpolation options; every case above runs the default (inverse distance, image point at twice the
+                # wall distance). Min-dist is only run inviscid.
+                shape, geom = ("Sphere", {"patch_ib(1)%z_centroid": 0.5, "patch_ib(1)%geometry": 8}) if len(dimInfo[0]) == 3 else ("Circle", {"patch_ib(1)%geometry": 2, "n": 49})
+                for label, opts in (("ib_ip_interp=2", {"ib_ip_interp": 2}), ("ib_ip_min_dist", {"ib_ip_min_dist": 1.5})):
+                    if not (viscous and "min_dist" in label):
+                        cases.append(define_case_d(stack, f"{shape} -> {label}", {**geom, **opts}))
+
             stack.pop()
 
         if len(dimInfo[0]) == 3 and not viscous:

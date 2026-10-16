@@ -1001,7 +1001,7 @@ contains
     !> Compute the image points for each ghost point
     impure subroutine s_compute_image_points()
 
-        real(wp)                        :: dist
+        real(wp)                        :: dist, h_n
         real(wp), dimension(3)          :: norm
         real(wp), dimension(3)          :: physical_loc
         real(wp)                        :: temp_loc
@@ -1017,7 +1017,7 @@ contains
 
         bounds_error = .false.
 
-        $:GPU_PARALLEL_LOOP(private='[q, gp, i, j, k, physical_loc, patch_id, dist, norm, dim, bound, dir, index, temp_loc, &
+        $:GPU_PARALLEL_LOOP(private='[q, gp, i, j, k, physical_loc, patch_id, dist, h_n, norm, dim, bound, dir, index, temp_loc, &
                             & s_cc]', copy='[bounds_error]', present='[ghost_points]')
         do q = 1, num_gps
             gp = ghost_points(q)
@@ -1036,7 +1036,15 @@ contains
             patch_id = gp%ib_patch_id
             dist = abs(real(gp%levelset, kind=wp))
             norm(:) = gp%levelset_norm
-            ghost_points(q)%ip_loc(:) = physical_loc(:) + 2*dist*norm(:)
+            ! The image point sits at twice the ghost point's wall distance, or at least ib_ip_dmin cell widths (measured along the
+            ! normal) off the wall so its interpolation stencil clears the body (ib_ip_min_dist).
+            h_n = dist
+            if (ib_ip_dmin > 0._wp) then
+                h_n = (dx(i)*norm(1))**2 + (dy(j)*norm(2))**2
+                if (p > 0) h_n = h_n + (dz(k)*norm(3))**2
+                h_n = max(dist, ib_ip_dmin*sqrt(h_n))
+            end if
+            ghost_points(q)%ip_loc(:) = physical_loc(:) + (dist + h_n)*norm(:)
 
             ! Find the closest grid point to the image point
             do dim = 1, num_dims
@@ -1255,95 +1263,108 @@ contains
         real(wp), dimension(2, 2, 2) :: interp_coeffs
         real(wp)                     :: buf
         real(wp), dimension(2, 2, 2) :: eta
+        real(wp), dimension(3, 3, 3) :: stencil_coeffs          !< Coefficients from the stencil's lower corner
+        real(wp)                     :: fluid_w                 !< Weight carried by fluid cells (TSC)
+        integer, dimension(3)        :: lo                      !< Lower corner of the stencil
         real(wp), dimension(3)       :: sample_loc              !< Weighted stencil centroid relative to the ghost point
         type(ghost_point)            :: gp
         integer                      :: q, i, j, k, ii, jj, kk  !< Grid indexes and iterators
         logical                      :: is_cell_center
 
         $:GPU_PARALLEL_LOOP(private='[q, i, j, k, ii, jj, kk, dist, buf, gp, interp_coeffs, eta, alpha, is_cell_center, &
-                            & sample_loc]', present='[ghost_points]')
+                            & stencil_coeffs, fluid_w, lo, sample_loc]', present='[ghost_points]')
         do q = 1, num_gps
             gp = ghost_points(q)
             if (.not. gp%ip_ok) then
                 ghost_points(q)%interp_valid = .false.  ! takes the neighbour average in s_ibm_correct_state
                 cycle
             end if
-            ! Get the interpolation points
-            i = gp%ip_grid(1)
-            j = gp%ip_grid(2)
-            if (p /= 0) then
-                k = gp%ip_grid(3)
+            stencil_coeffs = 0._wp
+            if (ib_ip_interp == 2) then
+                call s_compute_tsc_coeffs(gp, lo, stencil_coeffs, fluid_w)
+                ghost_points(q)%interp_valid = fluid_w > 0._wp
             else
-                k = 0
-            end if
+                ! Get the interpolation points
+                i = gp%ip_grid(1)
+                j = gp%ip_grid(2)
+                if (p /= 0) then
+                    k = gp%ip_grid(3)
+                else
+                    k = 0
+                end if
 
-            ! get the distance to a cell in each direction
-            dist = 0._wp
-            buf = 1._wp
-            do ii = 0, 1
-                do jj = 0, 1
-                    if (p == 0) then
-                        dist(1 + ii, 1 + jj, 1) = sqrt((x_cc(i + ii) - gp%ip_loc(1))**2 + (y_cc(j + jj) - gp%ip_loc(2))**2)
-                    else
-                        do kk = 0, 1
-                            dist(1 + ii, 1 + jj, &
-                                 & 1 + kk) = sqrt((x_cc(i + ii) - gp%ip_loc(1))**2 + (y_cc(j + jj) - gp%ip_loc(2))**2 + (z_cc(k &
-                                 & + kk) - gp%ip_loc(3))**2)
-                        end do
-                    end if
+                ! get the distance to a cell in each direction
+                dist = 0._wp
+                buf = 1._wp
+                do ii = 0, 1
+                    do jj = 0, 1
+                        if (p == 0) then
+                            dist(1 + ii, 1 + jj, 1) = sqrt((x_cc(i + ii) - gp%ip_loc(1))**2 + (y_cc(j + jj) - gp%ip_loc(2))**2)
+                        else
+                            do kk = 0, 1
+                                dist(1 + ii, 1 + jj, &
+                                     & 1 + kk) = sqrt((x_cc(i + ii) - gp%ip_loc(1))**2 + (y_cc(j + jj) - gp%ip_loc(2))**2 &
+                                     & + (z_cc(k + kk) - gp%ip_loc(3))**2)
+                            end do
+                        end if
+                    end do
                 end do
-            end do
 
-            ! check if we are arbitrarily close to a cell center
-            interp_coeffs = 0._wp
-            is_cell_center = .false.
-            check_is_cell_center: do ii = 0, 1
-                do jj = 0, 1
-                    ! A coincident solid cell leaves the point invalid: falling through to the eta
-                    ! branch with dist = 0 would give alpha*eta = 0*Inf = NaN.
-                    if (dist(ii + 1, jj + 1, 1) <= 1.e-16_wp) then
-                        if (ib_markers%sf(i + ii, j + jj, k) == 0) interp_coeffs(ii + 1, jj + 1, 1) = 1._wp
-                        is_cell_center = .true.
-                        exit check_is_cell_center
-                    else
-                        if (p /= 0) then
-                            if (dist(ii + 1, jj + 1, 2) <= 1.e-16_wp) then
-                                if (ib_markers%sf(i + ii, j + jj, k + 1) == 0) interp_coeffs(ii + 1, jj + 1, 2) = 1._wp
-                                is_cell_center = .true.
-                                exit check_is_cell_center
+                ! check if we are arbitrarily close to a cell center
+                interp_coeffs = 0._wp
+                is_cell_center = .false.
+                check_is_cell_center: do ii = 0, 1
+                    do jj = 0, 1
+                        ! A coincident solid cell leaves the point invalid: falling through to the eta
+                        ! branch with dist = 0 would give alpha*eta = 0*Inf = NaN.
+                        if (dist(ii + 1, jj + 1, 1) <= 1.e-16_wp) then
+                            if (ib_markers%sf(i + ii, j + jj, k) == 0) interp_coeffs(ii + 1, jj + 1, 1) = 1._wp
+                            is_cell_center = .true.
+                            exit check_is_cell_center
+                        else
+                            if (p /= 0) then
+                                if (dist(ii + 1, jj + 1, 2) <= 1.e-16_wp) then
+                                    if (ib_markers%sf(i + ii, j + jj, k + 1) == 0) interp_coeffs(ii + 1, jj + 1, 2) = 1._wp
+                                    is_cell_center = .true.
+                                    exit check_is_cell_center
+                                end if
                             end if
                         end if
+                    end do
+                end do check_is_cell_center
+
+                if (.not. is_cell_center) then
+                    ! if we are not arbitrarily close, interpolate
+                    alpha = 1._wp
+                    if (ib_markers%sf(i, j, k) /= 0) alpha(1, 1, 1) = 0._wp
+                    if (ib_markers%sf(i + 1, j, k) /= 0) alpha(2, 1, 1) = 0._wp
+                    if (ib_markers%sf(i, j + 1, k) /= 0) alpha(1, 2, 1) = 0._wp
+                    if (ib_markers%sf(i + 1, j + 1, k) /= 0) alpha(2, 2, 1) = 0._wp
+
+                    if (p == 0) then
+                        eta(:,:,1) = 1._wp/dist(:,:,1)**2
+                        buf = sum(alpha(:,:,1)*eta(:,:,1))
+                        if (buf > 0._wp) interp_coeffs(:,:,1) = alpha(:,:,1)*eta(:,:,1)/buf
+                    else
+                        if (ib_markers%sf(i, j, k + 1) /= 0) alpha(1, 1, 2) = 0._wp
+                        if (ib_markers%sf(i + 1, j, k + 1) /= 0) alpha(2, 1, 2) = 0._wp
+                        if (ib_markers%sf(i, j + 1, k + 1) /= 0) alpha(1, 2, 2) = 0._wp
+                        if (ib_markers%sf(i + 1, j + 1, k + 1) /= 0) alpha(2, 2, 2) = 0._wp
+                        eta = 1._wp/dist**2
+                        buf = sum(alpha*eta)
+                        if (buf > 0._wp) interp_coeffs = alpha*eta/buf
                     end if
-                end do
-            end do check_is_cell_center
-
-            if (.not. is_cell_center) then
-                ! if we are not arbitrarily close, interpolate
-                alpha = 1._wp
-                if (ib_markers%sf(i, j, k) /= 0) alpha(1, 1, 1) = 0._wp
-                if (ib_markers%sf(i + 1, j, k) /= 0) alpha(2, 1, 1) = 0._wp
-                if (ib_markers%sf(i, j + 1, k) /= 0) alpha(1, 2, 1) = 0._wp
-                if (ib_markers%sf(i + 1, j + 1, k) /= 0) alpha(2, 2, 1) = 0._wp
-
-                if (p == 0) then
-                    eta(:,:,1) = 1._wp/dist(:,:,1)**2
-                    buf = sum(alpha(:,:,1)*eta(:,:,1))
-                    if (buf > 0._wp) interp_coeffs(:,:,1) = alpha(:,:,1)*eta(:,:,1)/buf
-                else
-                    if (ib_markers%sf(i, j, k + 1) /= 0) alpha(1, 1, 2) = 0._wp
-                    if (ib_markers%sf(i + 1, j, k + 1) /= 0) alpha(2, 1, 2) = 0._wp
-                    if (ib_markers%sf(i, j + 1, k + 1) /= 0) alpha(1, 2, 2) = 0._wp
-                    if (ib_markers%sf(i + 1, j + 1, k + 1) /= 0) alpha(2, 2, 2) = 0._wp
-                    eta = 1._wp/dist**2
-                    buf = sum(alpha*eta)
-                    if (buf > 0._wp) interp_coeffs = alpha*eta/buf
                 end if
+                lo = gp%ip_grid
+                if (p == 0) lo(3) = 0
+                stencil_coeffs(1:2,1:2,1:2) = interp_coeffs
+                ghost_points(q)%interp_valid = any(interp_coeffs > 0._wp)
             end if
 
             ! An image point buried in a neighboring IB gets no weights at all: its ghost point is
             ! averaged from its own neighbors instead, in s_ibm_correct_state.
-            ghost_points(q)%interp_coeffs = interp_coeffs
-            ghost_points(q)%interp_valid = any(interp_coeffs > 0._wp)
+            ghost_points(q)%interp_coeffs = stencil_coeffs
+            ghost_points(q)%ip_stencil = lo
 
             ! Wall distance of the weighted stencil centroid, which is where the image-point value is
             ! actually sampled: inverse-distance weights over a partly solid stencil sit farther out
@@ -1353,13 +1374,13 @@ contains
             sample_loc(3) = 0._wp
             if (p /= 0) sample_loc(3) = z_cc(gp%loc(3))
             sample_loc = -sample_loc
-            do ii = 0, 1
-                do jj = 0, 1
-                    do kk = 0, min(p, 1)
-                        buf = interp_coeffs(ii + 1, jj + 1, kk + 1)
-                        sample_loc(1) = sample_loc(1) + buf*x_cc(i + ii)
-                        sample_loc(2) = sample_loc(2) + buf*y_cc(j + jj)
-                        if (p /= 0) sample_loc(3) = sample_loc(3) + buf*z_cc(k + kk)
+            do ii = 1, ib_ip_width
+                do jj = 1, ib_ip_width
+                    do kk = 1, merge(ib_ip_width, 1, p /= 0)
+                        buf = stencil_coeffs(ii, jj, kk)
+                        sample_loc(1) = sample_loc(1) + buf*x_cc(lo(1) + ii - 1)
+                        sample_loc(2) = sample_loc(2) + buf*y_cc(lo(2) + jj - 1)
+                        if (p /= 0) sample_loc(3) = sample_loc(3) + buf*z_cc(lo(3) + kk - 1)
                     end do
                 end do
             end do
@@ -1370,7 +1391,70 @@ contains
 
     end subroutine s_compute_interpolation_coeffs
 
-    !> Interpolate primitive variables to a ghost point's image point using bilinear or trilinear interpolation
+    !> Triangular-shaped-cloud (quadratic B-spline) weights of an image point on the 3x3(x3) stencil centred on the cell nearest to
+    !! it (Ezra, Peles & Kozak 2025, Int. J. Heat Mass Transf. 252:127314). The kernel is a partition of unity and smooth across
+    !! cell boundaries, so a wall gradient built from it converges one order faster than from inverse-distance or bilinear weights,
+    !! which are only continuous. The weights use the fractional position in the bracketing cell at integer offsets, which keeps the
+    !! partition of unity exactly on a stretched grid. Solid cells in the stencil carry the ghost values of the last correction
+    !! (staged, #1901); fluid_w is the weight on genuine fluid cells, zero for a point buried in a body.
+    subroutine s_compute_tsc_coeffs(gp, lo, coeffs, fluid_w)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+        type(ghost_point), intent(in)             :: gp
+        integer, dimension(3), intent(out)        :: lo  !< Lower corner of the stencil
+        real(wp), dimension(3, 3, 3), intent(out) :: coeffs
+        real(wp), intent(out)                     :: fluid_w
+        real(wp), dimension(3, 3)                 :: wd  !< 1D weights per direction
+        integer, dimension(3)                     :: ic  !< Cell centring the stencil
+        real(wp)                                  :: ds, frac
+        integer                                   :: dim, ii, jj, kk
+
+        ic = gp%ip_grid
+        wd = 0._wp
+        do dim = 1, merge(3, 2, p /= 0)
+            if (dim == 1) then
+                ds = x_cc(ic(1) + 1) - x_cc(ic(1)); frac = (gp%ip_loc(1) - x_cc(ic(1)))/ds
+            else if (dim == 2) then
+                ds = y_cc(ic(2) + 1) - y_cc(ic(2)); frac = (gp%ip_loc(2) - y_cc(ic(2)))/ds
+            else
+                ds = z_cc(ic(3) + 1) - z_cc(ic(3)); frac = (gp%ip_loc(3) - z_cc(ic(3)))/ds
+            end if
+            if (frac > 0.5_wp) then
+                ic(dim) = ic(dim) + 1
+                frac = frac - 1._wp
+            end if
+            wd(1, dim) = 0.5_wp*(1.5_wp - abs(frac + 1._wp))**2
+            wd(2, dim) = 0.75_wp - frac*frac
+            wd(3, dim) = 0.5_wp*(1.5_wp - abs(frac - 1._wp))**2
+        end do
+        if (p == 0) then
+            ic(3) = 0
+            wd(1, 3) = 1._wp  ! 2D: the consumer indexes this slot as k - k1 + 1 = 1
+        end if
+        ! The stencil reaches one cell further each way than inverse distance: keep it inside the allocated halo
+        ic(1) = min(max(ic(1), -buff_size + 1), m + buff_size - 1)
+        ic(2) = min(max(ic(2), -buff_size + 1), n + buff_size - 1)
+        if (p /= 0) ic(3) = min(max(ic(3), -buff_size + 1), p + buff_size - 1)
+        lo = ic - 1
+        if (p == 0) lo(3) = 0
+
+        coeffs = 0._wp
+        fluid_w = 0._wp
+        do ii = 1, 3
+            do jj = 1, 3
+                do kk = 1, merge(3, 1, p /= 0)
+                    coeffs(ii, jj, kk) = wd(ii, 1)*wd(jj, 2)*wd(kk, 3)
+                    if (ib_markers%sf(ic(1) + ii - 2, ic(2) + jj - 2, ic(3) + (kk - 2)*min(p, 1)) == 0) then
+                        fluid_w = fluid_w + coeffs(ii, jj, kk)
+                    end if
+                end do
+            end do
+        end do
+
+    end subroutine s_compute_tsc_coeffs
+
+    !> Interpolate primitive variables to a ghost point's image point from the weights in gp%interp_coeffs (see
+    !! s_compute_interpolation_coeffs)
     subroutine s_interpolate_image_point(q_prim_vf, gp, alpha_rho_IP, alpha_IP, pres_IP, vel_IP, c_IP, r_IP, v_IP, pb_IP, mv_IP, &
                                          & nmom_IP, pb_in, mv_in, presb_IP, massv_IP, Ys_IP)
         $:GPU_ROUTINE(parallelism='[seq]')
@@ -1394,9 +1478,9 @@ contains
         integer                                         :: i1, i2, j1, j2, k1, k2  !< Iterator variables
         real(wp)                                        :: coeff
 
-        i1 = gp%ip_grid(1); i2 = i1 + 1
-        j1 = gp%ip_grid(2); j2 = j1 + 1
-        k1 = gp%ip_grid(3); k2 = k1 + 1
+        i1 = gp%ip_stencil(1); i2 = i1 + ib_ip_width - 1
+        j1 = gp%ip_stencil(2); j2 = j1 + ib_ip_width - 1
+        k1 = gp%ip_stencil(3); k2 = k1 + ib_ip_width - 1
 
         if (p == 0) then
             k1 = 0

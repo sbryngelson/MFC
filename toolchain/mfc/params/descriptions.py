@@ -144,6 +144,8 @@ DESCRIPTIONS = {
     "num_stl_models": "Number of STL/OBJ model entries in the stl_models array",
     "num_particle_clouds": "Number of particle bed specifications to generate immersed boundary patches from",
     "ib_neighborhood_radius": "Neighborhood radius in ranks for IB awareness",
+    "ib_ip_interp": "Image-point interpolation: 1 inverse-distance weighting over 2x2(x2) cells (default), 2 triangular-shaped-cloud weights over 3x3(x3) cells",
+    "ib_ip_min_dist": "Minimum wall-to-image-point distance in cell widths; 0 (default) puts the image point at twice the ghost point's wall distance",
     "many_ib_patch_parallelism": "Parallelize over IB patches instead of grid cells (better for many small patches)",
     # Acoustic sources
     "acoustic_source": "Enable acoustic source terms",

@@ -355,6 +355,8 @@ This is enabled by adding ``'elliptic_smoothing': "T",`` and ``'elliptic_smoothi
 | `num_stl_models`     | Integer | Number of STL/OBJ model entries in the `stl_models` array |
 | `num_particle_clouds` | Integer | Number of particle bed specifications to generate immersed boundary patches from |
 | `ib_neighborhood_radius`    | Integer | Parameter that controls the neighborhood size for IB detection. |
+| `ib_ip_interp`              | Integer | Image-point interpolation: 1 inverse-distance weighting (default), 2 triangular-shaped-cloud (TSC) weights. |
+| `ib_ip_min_dist`            | Real    | Minimum wall-to-image-point distance in cell widths (default 0: twice the ghost point's wall distance). |
 | `many_ib_patch_parallelism` | Logical | Parallelize over IB patches instead of grid cells (better for many small patches). |
 | `geometry`           | Integer | Geometry configuration of the patch.|
 | `x[y,z]_centroid`    | Real    | Centroid of the applied geometry in the [x,y,z]-direction. |
@@ -457,6 +459,8 @@ Additional details on this specification can be found in [NACA airfoil](https://
 - `ib_coefficient_of_friction` is the coefficient of friction used in IB collisions.
 
 - `ib_neighborhood_radius` controls the size of the neighborhood size. A value of $r$ indicates that any given rank is aware of IBs up to $r$ ranks away. This value defaults to 0, which leaves the radius unset so that it is selected automatically. This parameter is required to strong-scale a case when IBs eventually grow to be larger than one full processor domain wide.
+- `ib_ip_interp` selects how the primitive state at a ghost point's image point is interpolated from the grid. `1` is the inverse-distance weighting over the 2x2(x2) cells around the point, which drops solid cells and is only continuous across cell boundaries. `2` uses triangular-shaped-cloud (quadratic B-spline) weights on the 3x3(x3) cells around the nearest cell (Ezra, Peles and Kozak 2025, Int. J. Heat Mass Transf. 252:127314): a partition of unity, smooth across cells, exact on a stretched grid, with solid cells carrying the ghost values of the last correction. On a steady conduction problem with an exact solution it converges about one order faster than option 1 in the temperature field and the integrated wall flux.
+- `ib_ip_min_dist` holds the image point at least this many cell widths off the wall, measured along the surface normal, so that its stencil clears the body (the rule of MFlowCode/MFC#1958, which calls it `ib_ip_min_dist`). The default `0` leaves the image point at twice the ghost point's wall distance. Values around `1.5` make inverse-distance weighting regain linear exactness.
 
 #### Particle Clouds
 

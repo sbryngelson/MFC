@@ -389,6 +389,8 @@ CONSTRAINTS = {
     "num_patches": {"min": 0, "max": NUM_PATCHES_MAX},
     "num_ibs": {"min": 0},
     "ib_neighborhood_radius": {"min": 0},
+    "ib_ip_interp": {"min": 1, "max": 2},
+    "ib_ip_min_dist": {"min": 0},
     "num_source": {"min": 1},
     "num_probes": {"min": 1},
     "nb": {"min": 1},
@@ -687,6 +689,8 @@ def _load():
     _r("num_stl_models", INT, {"ib"})
     _r("num_particle_clouds", INT, {"ib"})
     _r("ib_neighborhood_radius", INT, {"ib"})
+    _r("ib_ip_interp", INT, {"ib"})
+    _r("ib_ip_min_dist", REAL, {"ib"})
     _r("ib", LOG, {"ib"})
     _r("collision_model", INT, {"ib"})
     _r("collision_temporal_resolution", INT, {"ib"})
@@ -1482,6 +1486,8 @@ _nv(
     "collision_time",
     "ib_coefficient_of_friction",
     "ib_neighborhood_radius",
+    "ib_ip_interp",
+    "ib_ip_min_dist",
     "many_ib_patch_parallelism",
     "tau_star",
     "cont_damage_s",

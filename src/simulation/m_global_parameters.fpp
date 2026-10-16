@@ -107,6 +107,9 @@ module m_global_parameters
     $:GPU_DECLARE(create='[shear_stress, bulk_stress]')
     logical :: ib_smooth_contact  !< ib .and. viscous .and. weno_Re_flux: blend the tangential interface velocity across s_S = 0
     $:GPU_DECLARE(create='[ib_smooth_contact]')
+    integer  :: ib_ip_width  !< Cells per direction in the image-point interpolation stencil: 2 (inverse distance) or 3 (TSC)
+    real(wp) :: ib_ip_dmin   !< ib_ip_min_dist
+    $:GPU_DECLARE(create='[ib_ip_width, ib_ip_dmin]')
     $:GPU_DECLARE(create='[hypo_nc_mode]')
 
     logical               :: bc_io
@@ -518,6 +521,8 @@ contains
 
         ! Immersed Boundaries (sim-specific extras)
         ib_neighborhood_radius = 0
+        ib_ip_interp = 1
+        ib_ip_min_dist = 0._wp
         collision_model = 0
         collision_temporal_resolution = 0
         coefficient_of_restitution = dflt_real
@@ -990,6 +995,9 @@ contains
         $:GPU_UPDATE(device='[idwint, idwbuff]')
         ib_smooth_contact = ib .and. viscous .and. weno_Re_flux
         $:GPU_UPDATE(device='[ib_smooth_contact]')
+        ib_ip_width = merge(3, 2, ib_ip_interp == 2)
+        ib_ip_dmin = ib_ip_min_dist
+        $:GPU_UPDATE(device='[ib_ip_width, ib_ip_dmin]')
 
         ! Configuring Coordinate Direction Indexes
         if (bubbles_euler) then
