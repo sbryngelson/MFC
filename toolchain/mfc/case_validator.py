@@ -823,6 +823,7 @@ class CaseValidator:
         ib_ip_interp = self.get("ib_ip_interp", 1)
         ib_ip_min_dist = self.get("ib_ip_min_dist", 0.0)
         self.prohibit((ib_ip_interp != 1 or ib_ip_min_dist > 0) and not ib, "ib_ip_interp and ib_ip_min_dist require ib to be enabled")
+        self.prohibit(self.get("ib_wall_order", 1) != 1 and not ib, "ib_wall_order requires ib to be enabled")
         ib_heat_wrt = self.get("ib_heat_wrt", "F") == "T"
         self.prohibit(ib_heat_wrt and not (ib and self.get("chemistry", "F") == "T"), "ib_heat_wrt requires ib and chemistry")
         self.prohibit(ib_heat_wrt and self.get("igr", "F") == "T", "ib_heat_wrt is not supported with igr")

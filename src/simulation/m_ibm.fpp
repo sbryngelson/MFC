@@ -36,7 +36,12 @@ module m_ibm
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
     !! mechanism that simply does nothing, and a run can look converged while the surface chemistry never engaged.
-    integer :: n_surface_not_converged = 0
+    !> Tier tallies of the two-probe wall treatment (ib_wall_order = 2), summed over the ghost points updated: tier 1 the two-probe
+    !! quadratic, tier 2 the one-probe linear fallback where a second probe has too little fluid around it, tier 3 the caller's own
+    !! treatment. Reported because a tight packing can sit mostly in tier 2, and a second-order claim is then not true of that
+    !! surface. Gradient tiers are for the surface balance, fill tiers for the ghost state the flow solve sees.
+    integer, dimension(3) :: n_grad_tier = 0, n_fill_tier = 0
+    integer               :: n_surface_not_converged = 0
 
     !> Ghost points whose levelset distance was not positive, leaving the surface gradient (X_IP - X_s)/d undefined. Separate from
     !! the counter above because this is a grid/geometry degeneracy, not a kinetics failure.
@@ -48,6 +53,23 @@ module m_ibm
     !! neighbors, and never over each other.
     type(integer_field) :: corrected_gps
     $:GPU_DECLARE(create='[corrected_gps]')
+
+    !> Quadratic wall-normal fill of one ghost point: two probes along the surface normal, with TSC weights, and the Lagrange
+    !! weights that extrapolate the profile through them back to the ghost (see s_wall_fill).
+    type :: wall_fill
+        integer :: tier  !< 1 quadratic, 2 linear (the mirror), 3 off or too little fluid: the caller's own treatment
+        real(wp), dimension(3) :: lw  !< Lagrange weights on (phi_w, phi_1, phi_2)
+        real(wp), dimension(2) :: llin  !< The linear mirror on (phi_w, phi_1), which bounds the quadratic
+        integer, dimension(3) :: ic1, ic2  !< TSC stencil centres of the two probes
+        real(wp), dimension(3, 3) :: wd1, wd2  !< TSC weights of the two probes
+    end type wall_fill
+
+    !> Wall-normal temperature gradient for the surface balance, dT/dn|_w = a - b*T_s (linear in the Newton unknown T_s). Where quad
+    !! is false the one-sided difference (T_s - T_IP)/d is used, as before.
+    type :: wall_grad
+        logical  :: quad
+        real(wp) :: a, b
+    end type wall_grad
 
     type(ghost_point), dimension(:), allocatable :: ghost_points
 
@@ -253,7 +275,7 @@ contains
     !> Ghost velocity mirrored through the wall about u_w (body velocity at the wall point plus the normal transpiration v_n:
     !! blowing, Stefan flow): u_g = u_w + theta (u_w - u_IP), theta = |levelset|/(sample wall distance), puts u_w on the wall. A
     !! slip wall mirrors only the normal part and keeps the image point's tangential velocity.
-    subroutine s_compute_ghost_point_velocity(gp, gp_patch_id, radial_vector, vel_IP, pres_IP, theta, v_n, vel_GP)
+    subroutine s_compute_ghost_point_velocity(gp, gp_patch_id, radial_vector, vel_IP, pres_IP, theta, v_n, vel_GP, q_prim_vf, wf)
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
@@ -262,8 +284,15 @@ contains
         real(wp), dimension(3), intent(in)  :: radial_vector, vel_IP
         real(wp), intent(in)                :: pres_IP, theta, v_n
         real(wp), dimension(3), intent(out) :: vel_GP
-        real(wp), dimension(3)              :: norm, vel_w
-        real(wp)                            :: v_blow_eff
+        !> Primitive field the quadratic fill probes, and the fill itself (tier 1 uses it). The ghost value is what enforces no-slip
+        !! in the solve, so its order sets the order of the wall shear and hence the drag; a linear profile caps both at first
+        !! order.
+        type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
+        type(wall_fill), intent(in)                         :: wf
+        real(wp), dimension(3)                              :: vel_q
+        integer                                             :: cmp
+        real(wp), dimension(3)                              :: norm, vel_w
+        real(wp)                                            :: v_blow_eff
 
         ! A zero normal (ghost at a circle's centre or on a flat face) leaves norm = 0 rather than 0/0
         norm = gp%levelset_norm/max(sqrt(sum(gp%levelset_norm**2)), sgm_eps)
@@ -281,30 +310,41 @@ contains
         end if
         vel_w = vel_w + (max(v_blow_eff, 0._wp) + v_n)*norm
 
-        vel_GP = (1._wp + theta)*(vel_w - vel_IP)
+        if (wf%tier == 1) then
+            vel_q = 0._wp
+            do cmp = 1, num_dims
+                vel_q(cmp) = f_quad_fill(vel_w(cmp), f_tsc_apply(q_prim_vf(eqn_idx%mom%beg + cmp - 1), wf%ic1, wf%wd1), &
+                      & f_tsc_apply(q_prim_vf(eqn_idx%mom%beg + cmp - 1), wf%ic2, wf%wd2), wf%lw, wf%llin)
+            end do
+            vel_GP = vel_q - vel_IP
+        else
+            vel_GP = (1._wp + theta)*(vel_w - vel_IP)
+        end if
         if (gp%slip) vel_GP = dot_product(vel_GP, norm)*norm
         vel_GP = vel_IP + vel_GP
 
     end subroutine s_compute_ghost_point_velocity
 
     !> Update the conservative variables at the ghost points
-    subroutine s_ibm_correct_state(q_cons_vf, q_prim_vf, pb_in, mv_in)
+    subroutine s_ibm_correct_state(q_cons_vf, q_prim_vf, pb_in, mv_in, q_T_sf)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf  !< Primitive Variables
         type(scalar_field), dimension(sys_size), intent(inout) :: q_prim_vf  !< Primitive Variables
         real(stp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:,1:), intent(inout) :: pb_in, mv_in
-        integer :: i, j, k, l, q, r                                          !< Iterator variables
-        integer :: jj, kk, ll                                                !< Neighbor iterators
-        integer :: rad, rad_z, num_nbrs                                      !< Neighbor stencil radius and population
-        integer :: patch_id, patch_id_temp                                   !< Patch ID of ghost point
-        real(wp) :: rho, gamma, pi_inf, dyn_pres                             !< Mixture variables
-        real(wp) :: vel_sum_g, E_ghost                                       !< Ghost-point velocity magnitude and energy
-        real(wp), dimension(2) :: Re_K
-        real(wp) :: G_K
-        real(wp) :: qv_K
-        real(wp) :: pres_IP, pres_GP
-        real(wp), dimension(3) :: vel_IP
-        real(wp) :: c_IP
+        !> Cell-average temperature of the same stage, probed by the quadratic wall treatment (ib_wall_order = 2, chemistry)
+        type(scalar_field), intent(in) :: q_T_sf
+        integer                        :: i, j, k, l, q, r              !< Iterator variables
+        integer                        :: jj, kk, ll                    !< Neighbor iterators
+        integer                        :: rad, rad_z, num_nbrs          !< Neighbor stencil radius and population
+        integer                        :: patch_id, patch_id_temp       !< Patch ID of ghost point
+        real(wp)                       :: rho, gamma, pi_inf, dyn_pres  !< Mixture variables
+        real(wp)                       :: vel_sum_g, E_ghost            !< Ghost-point velocity magnitude and energy
+        real(wp), dimension(2)         :: Re_K
+        real(wp)                       :: G_K
+        real(wp)                       :: qv_K
+        real(wp)                       :: pres_IP, pres_GP
+        real(wp), dimension(3)         :: vel_IP
+        real(wp)                       :: c_IP
 
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(3)  :: Gs
@@ -325,6 +365,10 @@ contains
         real(wp) :: T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta
         logical :: surface_converged
         integer :: n_not_converged, n_ill_posed  !< Per-call reacting-surface failure tallies (see the module-level counters)
+        integer :: ng1, ng2, ng3, nf1, nf2, nf3  !< Per-call wall-gradient and wall-fill tier tallies
+        type(wall_fill) :: wf  !< Quadratic wall-normal fill of the current ghost point
+        type(wall_grad) :: wg  !< Wall-normal temperature gradient of the current ghost point
+        integer :: tier_wg
         ! Primitive variables at the image point associated with a ghost point, interpolated from surrounding fluid cells.
 
         real(wp), dimension(3) :: physical_loc   !< Physical loc of GP
@@ -335,9 +379,9 @@ contains
         type(ghost_point)      :: gp
 
         ! set the Moving IBM interior conservative variables. A solid cell that is a ghost keeps the value of the last correction
-        ! when the interpolation reads solid cells (ib_keep_ghost): resetting it to the body velocity, and without chemistry to a
-        ! pressure of 1 Pa, would feed those values into the image-point state. Inverse-distance weights drop solid cells, so they
-        ! never see it.
+        ! when the interpolation or the wall probes read solid cells (ib_keep_ghost): resetting it to the body velocity, and without
+        ! chemistry to a pressure of 1 Pa, would feed those values into the image-point state. Inverse-distance weights drop solid
+        ! cells, so they never see it.
         $:GPU_PARALLEL_LOOP(private='[i, j, k, patch_id, rho, patch_id_temp]', collapse=3)
         do l = 0, p
             do k = 0, n
@@ -368,6 +412,7 @@ contains
 
         n_not_converged = 0
         n_ill_posed = 0
+        ng1 = 0; ng2 = 0; ng3 = 0; nf1 = 0; nf2 = 0; nf3 = 0
 
         if (num_gps > 0) then
             ! Seed the staging buffer, so a component no ghost point writes survives the flush unchanged.
@@ -384,8 +429,8 @@ contains
                                 & vel_IP, vel_g, r_IP, v_IP, pb_IP, mv_IP, nmom_IP, presb_IP, massv_IP, rho, gamma, pi_inf, Re_K, &
                                 & G_K, Gs, gp, radial_vector, j, k, l, q, qv_K, c_IP, nbub, patch_id, Ys_IP, W_species, T_IP, &
                                 & mw_IP, e_IP, Ys_g, Ys_s, T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta, &
-                                & surface_converged, vel_sum_g, E_ghost, alpha_q, alpha_rho_q, e_q]', &
-                                & reduction='[[n_not_converged, n_ill_posed]]', reductionOp='[+]', present='[ghost_points]')
+                                & surface_converged, vel_sum_g, E_ghost, alpha_q, alpha_rho_q, e_q, wf, wg, tier_wg]', &
+                                & reduction='[[n_not_converged, n_ill_posed, ng1, ng2, ng3, nf1, nf2, nf3]]', reductionOp='[+]', present='[ghost_points]')
             do i = 1, num_gps
                 if (record_surface) gp_surf(:,i) = 0._wp
                 ghost_points(i)%T_cond = 0._wp
@@ -395,6 +440,15 @@ contains
                 k = gp%loc(2)
                 l = gp%loc(3)
                 patch_id = ghost_points(i)%ib_patch_id
+
+                ! Quadratic wall-normal fill: the probes and weights are built once per ghost point, before their first use below
+                wf%tier = 3
+                if (ib_wall_quad) then
+                    call s_wall_fill(gp, wf)
+                    if (wf%tier == 1) nf1 = nf1 + 1
+                    if (wf%tier == 2) nf2 = nf2 + 1
+                    if (wf%tier == 3) nf3 = nf3 + 1
+                end if
 
                 ! Calculate physical location of GP
                 physical_loc = [x_cc(j), y_cc(k), 0._wp]
@@ -459,7 +513,15 @@ contains
                             ! unconverged solve), so the solve's cost does not grow with the shell depth.
                             surface_converged = .false.
                         else if (d > 0._wp) then
-                            call s_solve_surface(pres_IP, T_IP, patch_ib(patch_id)%Twall, d, Ys_IP, W_species, merge(1, &
+                            wg%quad = .false.; wg%a = 0._wp; wg%b = 0._wp
+                            if (ib_wall_quad) then
+                                call s_wall_normal_gradient(q_T_sf, gp, wg%a, wg%b, tier_wg)
+                                wg%quad = tier_wg < 3
+                                if (tier_wg == 1) ng1 = ng1 + 1
+                                if (tier_wg == 2) ng2 = ng2 + 1
+                                if (tier_wg == 3) ng3 = ng3 + 1
+                            end if
+                            call s_solve_surface(pres_IP, T_IP, patch_ib(patch_id)%Twall, d, wg, Ys_IP, W_species, merge(1, &
                                                  & patch_ib(patch_id)%thermal_bc, f_holds_twall(patch_ib(patch_id)%thermal_bc)), &
                                                  & Ys_s, T_s, mdot_s, surface_converged)
                             if (.not. surface_converged) n_not_converged = n_not_converged + 1
@@ -488,7 +550,7 @@ contains
                     if (record_surface) call s_record_gp_surface(i, gp, T_s, mdot_s, surface_converged)
 
                     call s_blend_ghost_state(theta, f_face_theta(q_prim_vf, gp, theta, T_IP, T_s), T_IP, T_s, Ys_IP, Ys_s, T_g, &
-                                             & Ys_g)
+                                             & Ys_g, q_T_sf, wf)
 
                     ! The advected ghost is wall gas at T_s, so no gas leaves the wall hotter or colder than it; conduction
                     ! sees the mirror T_g instead, through T_cond (s_ibm_set_conduction_temperature)
@@ -542,7 +604,8 @@ contains
                     & + real(ghost_points(i)%z_periodicity, wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
 
                 ! Calculate velocity of ghost cell
-                call s_compute_ghost_point_velocity(gp, patch_id, radial_vector, vel_IP, pres_IP, theta, v_stefan, vel_g)
+                call s_compute_ghost_point_velocity(gp, patch_id, radial_vector, vel_IP, pres_IP, theta, v_stefan, vel_g, &
+                                                    & q_prim_vf, wf)
 
                 ! Set momentum
                 vel_sum_g = 0._wp
@@ -734,6 +797,8 @@ contains
 
         n_surface_not_converged = n_surface_not_converged + n_not_converged
         n_surface_ill_posed = n_surface_ill_posed + n_ill_posed
+        n_grad_tier = n_grad_tier + [ng1, ng2, ng3]
+        n_fill_tier = n_fill_tier + [nf1, nf2, nf3]
 
     end subroutine s_ibm_correct_state
 
@@ -759,10 +824,17 @@ contains
     !! reached the surface-balance tolerance, i.e. the surface chemistry was actually applied everywhere it was asked for.
     impure subroutine s_report_ibm_surface
 
-        integer :: n_not_converged_glb, n_ill_posed_glb
+        integer               :: n_not_converged_glb, n_ill_posed_glb
+        integer, dimension(3) :: gt, ft  !< Global tier tallies
+        integer               :: q
 
         call s_mpi_reduce_int_sum(n_surface_not_converged, n_not_converged_glb)
         call s_mpi_reduce_int_sum(n_surface_ill_posed, n_ill_posed_glb)
+        ! Every rank reduces before the root-only printing: a collective after the early return below would deadlock rank 0
+        do q = 1, 3
+            call s_mpi_reduce_int_sum(n_grad_tier(q), gt(q))
+            call s_mpi_reduce_int_sum(n_fill_tier(q), ft(q))
+        end do
 
         if (proc_rank /= 0) return
 
@@ -777,6 +849,13 @@ contains
                 & ' ghost-point updates had a zero levelset distance, leaving the surface balance undefined; those points ' &
                 & // 'fell back to a chemically inert wall (Twall kept for thermal_bc = 1, zero temperature gradient for ' &
                 & // 'thermal_bc = 2). Check the immersed geometry against the grid.'
+        end if
+
+        if (ib_wall_quad) then
+            if (sum(ft) > 0) print '(A,3(F6.1,A))', ' [WALLFILL] ghost fill tiers: quadratic ', 1.e2_wp*ft(1)/sum(ft), &
+                & '%, linear ', 1.e2_wp*ft(2)/sum(ft), '%, caller treatment ', 1.e2_wp*ft(3)/sum(ft), '%'
+            if (sum(gt) > 0) print '(A,3(F6.1,A))', ' [WALLGRAD] wall gradient tiers: quadratic ', 1.e2_wp*gt(1)/sum(gt), &
+                & '%, linear ', 1.e2_wp*gt(2)/sum(gt), '%, one-sided ', 1.e2_wp*gt(3)/sum(gt), '%'
         end if
 
     end subroutine s_report_ibm_surface
@@ -1269,13 +1348,15 @@ contains
         real(wp), dimension(3, 3, 3) :: stencil_coeffs          !< Coefficients from the stencil's lower corner
         real(wp)                     :: fluid_w                 !< Weight carried by fluid cells (TSC)
         integer, dimension(3)        :: lo                      !< Lower corner of the stencil
+        integer, dimension(3)        :: ic                      !< Cell centring a TSC stencil
+        real(wp), dimension(3, 3)    :: wd                      !< 1D TSC weights per direction
         real(wp), dimension(3)       :: sample_loc              !< Weighted stencil centroid relative to the ghost point
         type(ghost_point)            :: gp
         integer                      :: q, i, j, k, ii, jj, kk  !< Grid indexes and iterators
         logical                      :: is_cell_center
 
         $:GPU_PARALLEL_LOOP(private='[q, i, j, k, ii, jj, kk, dist, buf, gp, interp_coeffs, eta, alpha, is_cell_center, &
-                            & stencil_coeffs, fluid_w, lo, sample_loc]', present='[ghost_points]')
+                            & stencil_coeffs, fluid_w, lo, ic, wd, sample_loc]', present='[ghost_points]')
         do q = 1, num_gps
             gp = ghost_points(q)
             if (.not. gp%ip_ok) then
@@ -1284,7 +1365,10 @@ contains
             end if
             stencil_coeffs = 0._wp
             if (ib_ip_interp == 2) then
-                call s_compute_tsc_coeffs(gp, lo, stencil_coeffs, fluid_w)
+                call s_tsc_weights(gp%ip_loc, ic, wd, fluid_w)
+                lo = ic - 1
+                if (p == 0) lo(3) = 0
+                stencil_coeffs = f_tsc_stencil(wd)
                 ghost_points(q)%interp_valid = fluid_w > 0._wp
             else
                 ! Get the interpolation points
@@ -1393,68 +1477,6 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
     end subroutine s_compute_interpolation_coeffs
-
-    !> Triangular-shaped-cloud (quadratic B-spline) weights of an image point on the 3x3(x3) stencil centred on the cell nearest to
-    !! it (Ezra, Peles & Kozak 2025, Int. J. Heat Mass Transf. 252:127314). The kernel is a partition of unity and smooth across
-    !! cell boundaries, so a wall gradient built from it converges one order faster than from inverse-distance or bilinear weights,
-    !! which are only continuous. The weights use the fractional position in the bracketing cell at integer offsets, which keeps the
-    !! partition of unity exactly on a stretched grid. Solid cells in the stencil carry the ghost values of the last correction
-    !! (staged, #1901); fluid_w is the weight on genuine fluid cells, zero for a point buried in a body.
-    subroutine s_compute_tsc_coeffs(gp, lo, coeffs, fluid_w)
-
-        $:GPU_ROUTINE(parallelism='[seq]')
-        type(ghost_point), intent(in)             :: gp
-        integer, dimension(3), intent(out)        :: lo  !< Lower corner of the stencil
-        real(wp), dimension(3, 3, 3), intent(out) :: coeffs
-        real(wp), intent(out)                     :: fluid_w
-        real(wp), dimension(3, 3)                 :: wd  !< 1D weights per direction
-        integer, dimension(3)                     :: ic  !< Cell centring the stencil
-        real(wp)                                  :: ds, frac
-        integer                                   :: dim, ii, jj, kk
-
-        ic = gp%ip_grid
-        wd = 0._wp
-        do dim = 1, merge(3, 2, p /= 0)
-            if (dim == 1) then
-                ds = x_cc(ic(1) + 1) - x_cc(ic(1)); frac = (gp%ip_loc(1) - x_cc(ic(1)))/ds
-            else if (dim == 2) then
-                ds = y_cc(ic(2) + 1) - y_cc(ic(2)); frac = (gp%ip_loc(2) - y_cc(ic(2)))/ds
-            else
-                ds = z_cc(ic(3) + 1) - z_cc(ic(3)); frac = (gp%ip_loc(3) - z_cc(ic(3)))/ds
-            end if
-            if (frac > 0.5_wp) then
-                ic(dim) = ic(dim) + 1
-                frac = frac - 1._wp
-            end if
-            wd(1, dim) = 0.5_wp*(1.5_wp - abs(frac + 1._wp))**2
-            wd(2, dim) = 0.75_wp - frac*frac
-            wd(3, dim) = 0.5_wp*(1.5_wp - abs(frac - 1._wp))**2
-        end do
-        if (p == 0) then
-            ic(3) = 0
-            wd(1, 3) = 1._wp  ! 2D: the consumer indexes this slot as k - k1 + 1 = 1
-        end if
-        ! The stencil reaches one cell further each way than inverse distance: keep it inside the allocated halo
-        ic(1) = min(max(ic(1), -buff_size + 1), m + buff_size - 1)
-        ic(2) = min(max(ic(2), -buff_size + 1), n + buff_size - 1)
-        if (p /= 0) ic(3) = min(max(ic(3), -buff_size + 1), p + buff_size - 1)
-        lo = ic - 1
-        if (p == 0) lo(3) = 0
-
-        coeffs = 0._wp
-        fluid_w = 0._wp
-        do ii = 1, 3
-            do jj = 1, 3
-                do kk = 1, merge(3, 1, p /= 0)
-                    coeffs(ii, jj, kk) = wd(ii, 1)*wd(jj, 2)*wd(kk, 3)
-                    if (ib_markers%sf(ic(1) + ii - 2, ic(2) + jj - 2, ic(3) + (kk - 2)*min(p, 1)) == 0) then
-                        fluid_w = fluid_w + coeffs(ii, jj, kk)
-                    end if
-                end do
-            end do
-        end do
-
-    end subroutine s_compute_tsc_coeffs
 
     !> Interpolate primitive variables to a ghost point's image point from the weights in gp%interp_coeffs (see
     !! s_compute_interpolation_coeffs)
@@ -1583,6 +1605,249 @@ contains
         end do
 
     end subroutine s_interpolate_image_point
+
+    !> Triangular-shaped-cloud (quadratic B-spline) weights of a point on the 3x3(x3) stencil centred on the cell nearest to it
+    !! (Ezra, Peles & Kozak 2025, Int. J. Heat Mass Transf. 252:127314), and the fraction of that weight carried by fluid cells. The
+    !! kernel is a partition of unity and smooth across cell boundaries, so an interpolated wall quantity converges one order faster
+    !! than from inverse-distance or bilinear weights, which are only continuous. The weights use the fractional position in the
+    !! bracketing cell at integer offsets, which keeps the partition of unity exactly on a stretched grid. The stencil is kept
+    !! inside the halo. Solid cells in it carry the ghost values of the last correction (staged, #1901); a point buried in a body
+    !! has no fluid weight.
+    subroutine s_tsc_weights(loc, ic, wd, fluid_frac)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+        real(wp), dimension(3), intent(in)     :: loc
+        integer, dimension(3), intent(out)     :: ic  !< Cell centring the stencil
+        real(wp), dimension(3, 3), intent(out) :: wd  !< 1D weights on ic - 1, ic, ic + 1, per direction
+        real(wp), intent(out)                  :: fluid_frac
+        real(wp)                               :: ds, frac, wsum, wfluid, buf
+        integer                                :: dim, ii, jj, kk
+
+        ic = 0
+        wd = 0._wp
+        do dim = 1, merge(3, 2, p /= 0)
+            if (dim == 1) then
+                ic(1) = max(min(floor((loc(1) - x_cc(0))/(x_cc(1) - x_cc(0))), m + buff_size - 2), -buff_size + 2)
+                ! the estimate assumes a uniform grid: one step brackets the point on a mildly stretched one
+                if (loc(1) < x_cc(ic(1))) ic(1) = max(ic(1) - 1, -buff_size + 2)
+                if (loc(1) >= x_cc(ic(1) + 1)) ic(1) = min(ic(1) + 1, m + buff_size - 2)
+                ds = x_cc(ic(1) + 1) - x_cc(ic(1)); frac = (loc(1) - x_cc(ic(1)))/ds
+            else if (dim == 2) then
+                ic(2) = max(min(floor((loc(2) - y_cc(0))/(y_cc(1) - y_cc(0))), n + buff_size - 2), -buff_size + 2)
+                if (loc(2) < y_cc(ic(2))) ic(2) = max(ic(2) - 1, -buff_size + 2)
+                if (loc(2) >= y_cc(ic(2) + 1)) ic(2) = min(ic(2) + 1, n + buff_size - 2)
+                ds = y_cc(ic(2) + 1) - y_cc(ic(2)); frac = (loc(2) - y_cc(ic(2)))/ds
+            else
+                ic(3) = max(min(floor((loc(3) - z_cc(0))/(z_cc(1) - z_cc(0))), p + buff_size - 2), -buff_size + 2)
+                if (loc(3) < z_cc(ic(3))) ic(3) = max(ic(3) - 1, -buff_size + 2)
+                if (loc(3) >= z_cc(ic(3) + 1)) ic(3) = min(ic(3) + 1, p + buff_size - 2)
+                ds = z_cc(ic(3) + 1) - z_cc(ic(3)); frac = (loc(3) - z_cc(ic(3)))/ds
+            end if
+            if (frac > 0.5_wp) then
+                ic(dim) = ic(dim) + 1
+                frac = frac - 1._wp
+            end if
+            wd(1, dim) = 0.5_wp*(1.5_wp - abs(frac + 1._wp))**2
+            wd(2, dim) = 0.75_wp - frac*frac
+            wd(3, dim) = 0.5_wp*(1.5_wp - abs(frac - 1._wp))**2
+        end do
+        if (p == 0) wd(1, 3) = 1._wp  ! 2D: the consumers index this slot as k - k1 + 1 = 1
+
+        wsum = 0._wp; wfluid = 0._wp
+        do ii = 1, 3
+            do jj = 1, 3
+                do kk = 1, merge(3, 1, p /= 0)
+                    buf = wd(ii, 1)*wd(jj, 2)*wd(kk, 3)
+                    wsum = wsum + buf
+                    if (ib_markers%sf(ic(1) + ii - 2, ic(2) + jj - 2, ic(3) + (kk - 2)*min(p, 1)) == 0) wfluid = wfluid + buf
+                end do
+            end do
+        end do
+        fluid_frac = wfluid/wsum
+
+    end subroutine s_tsc_weights
+
+    !> Tensor product of the 1D TSC weights: the coefficient on each cell of the 3x3x3 stencil.
+    function f_tsc_stencil(wd) result(c)
+
+        $:GPU_ROUTINE(function_name='f_tsc_stencil', parallelism='[seq]', cray_inline=True)
+        real(wp), dimension(3, 3), intent(in) :: wd
+        real(wp), dimension(3, 3, 3)          :: c
+        integer                               :: ii, jj, kk
+
+        do ii = 1, 3
+            do jj = 1, 3
+                do kk = 1, 3
+                    c(ii, jj, kk) = wd(ii, 1)*wd(jj, 2)*wd(kk, 3)
+                end do
+            end do
+        end do
+
+    end function f_tsc_stencil
+
+    !> Apply TSC weights from s_tsc_weights to one field.
+    function f_tsc_apply(sf, ic, wd) result(val)
+
+        $:GPU_ROUTINE(function_name='f_tsc_apply', parallelism='[seq]', cray_inline=True)
+        type(scalar_field), intent(in)        :: sf
+        integer, dimension(3), intent(in)     :: ic
+        real(wp), dimension(3, 3), intent(in) :: wd
+        real(wp)                              :: val
+        integer                               :: ii, jj, kk
+
+        val = 0._wp
+        do ii = 1, 3
+            do jj = 1, 3
+                do kk = 1, merge(3, 1, p /= 0)
+                    val = val + wd(ii, 1)*wd(jj, 2)*wd(kk, 3)*sf%sf(ic(1) + ii - 2, ic(2) + jj - 2, ic(3) + (kk - 2)*min(p, 1))
+                end do
+            end do
+        end do
+
+    end function f_tsc_apply
+
+    !> Ghost value from the quadratic wall-normal profile, bounded by the linear mirror (minmod). The two extrapolations agree
+    !! exactly for a linear profile, so this limits only the curvature correction, and to the magnitude the linear mirror already
+    !! produces. Unlimited, the quadratic amplifies that correction with ghost depth and the run fails with unphysical near-wall
+    !! states, the positivity risk the literature attaches to higher-order ghost fills (Seshadri & De 2019/2021; Tan & Shu 2010).
+    function f_quad_fill(phi_w, phi_1, phi_2, lw, llin) result(phi_g)
+
+        $:GPU_ROUTINE(function_name='f_quad_fill', parallelism='[seq]', cray_inline=True)
+        real(wp), intent(in)               :: phi_w, phi_1, phi_2
+        real(wp), dimension(3), intent(in) :: lw
+        real(wp), dimension(2), intent(in) :: llin
+        real(wp)                           :: phi_g, d_quad, d_lin
+
+        d_quad = lw(1)*phi_w + lw(2)*phi_1 + lw(3)*phi_2 - phi_w
+        d_lin = llin(1)*phi_w + llin(2)*phi_1 - phi_w
+        if (d_quad*d_lin <= 0._wp) then
+            phi_g = phi_w + d_lin  ! opposite signs: the curvature term has reversed the extrapolation
+        else if (abs(d_quad) <= abs(d_lin)) then
+            phi_g = phi_w + d_quad
+        else
+            phi_g = phi_w + d_lin
+        end if
+
+    end function f_quad_fill
+
+    !> Cell scale of a ghost point: the geometric mean of the cell widths.
+    function f_cell_scale(gp) result(h)
+
+        $:GPU_ROUTINE(function_name='f_cell_scale', parallelism='[seq]', cray_inline=True)
+        type(ghost_point), intent(in) :: gp
+        real(wp)                      :: h, dV
+
+        dV = dx(gp%loc(1))*dy(gp%loc(2))
+        if (p > 0) dV = dV*dz(gp%loc(3))
+        h = dV**(1._wp/real(num_dims, wp))
+
+    end function f_cell_scale
+
+    !> TSC stencils of the two probes at wall distances s1 and 2 s1 along the surface normal from a ghost point's wall foot, and the
+    !! fluid fraction of each.
+    subroutine s_wall_probes(gp, s1, ic1, wd1, f1, ic2, wd2, f2)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+        type(ghost_point), intent(in)          :: gp
+        real(wp), intent(in)                   :: s1
+        integer, dimension(3), intent(out)     :: ic1, ic2
+        real(wp), dimension(3, 3), intent(out) :: wd1, wd2
+        real(wp), intent(out)                  :: f1, f2
+        real(wp), dimension(3)                 :: norm, wall_loc
+
+        norm = gp%levelset_norm/max(sqrt(sum(gp%levelset_norm**2)), sgm_eps)
+        wall_loc = 0._wp
+        wall_loc(1) = x_cc(gp%loc(1)); wall_loc(2) = y_cc(gp%loc(2))
+        if (p > 0) wall_loc(3) = z_cc(gp%loc(3))
+        wall_loc = wall_loc + abs(real(gp%levelset, kind=wp))*norm
+        call s_tsc_weights(wall_loc + s1*norm, ic1, wd1, f1)
+        call s_tsc_weights(wall_loc + 2._wp*s1*norm, ic2, wd2, f2)
+
+    end subroutine s_wall_probes
+
+    !> Lagrange weights that extrapolate a quadratic wall-normal profile back to a ghost point, with the wall at s = 0, probes at s1
+    !! and s2 = 2 s1 and the ghost at s = -d (d = |levelset|):
+    !!
+    !!     phi_g = L0 phi_w + L1 phi_1 + L2 phi_2
+    !!     L0 = (d + s1)(d + s2)/(s1 s2),  L1 = -d (d + s2)/(s1 (s2 - s1)),  L2 = d (d + s1)/(s2 (s2 - s1))
+    !!
+    !! L0 + L1 + L2 = 1, and at d = 0 they collapse to (1, 0, 0), so the surface value is still enforced exactly on the surface; the
+    !! fill is linear in phi_w. This is what the flow solve consumes: its order is the order of the boundary condition and hence of
+    !! the wall shear, the drag and the wall heat flux. Fixed probes at a fixed multiple of the spacing keep the fit conditioned for a
+    !! ghost almost on the surface, but a ghost can sit 3h inside the body and then d/s1 = 3 and the weights reach (10, -15, 6);
+    !! s1 = max(h, d) caps them at (3, -3, 1) at any depth and leaves shallow ghosts on fixed probes.
+    !!
+    !! Degradation is explicit: tier 1 uses both probes; tier 2 is the linear mirror where the outer probe has too little fluid
+    !! around it (a narrow inter-particle gap, a rim, a neighbouring body); tier 3 leaves the caller's own treatment. The tier mix
+    !! is reported, so a second-order claim is never made for a surface that did not earn it.
+    subroutine s_wall_fill(gp, wf)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+        type(ghost_point), intent(in) :: gp
+        type(wall_fill), intent(out)  :: wf
+        real(wp), parameter           :: FLUID_FRAC_MIN = 0.5_wp  !< A probe needs this much fluid weight to be used
+        real(wp)                      :: d, s1, s2, f1, f2
+
+        wf%tier = 3
+        wf%lw = [1._wp, 0._wp, 0._wp]
+        wf%ic1 = 0; wf%ic2 = 0; wf%wd1 = 0._wp; wf%wd2 = 0._wp
+
+        d = abs(real(gp%levelset, kind=wp))
+        s1 = max(f_cell_scale(gp), d)
+        s2 = 2._wp*s1
+        call s_wall_probes(gp, s1, wf%ic1, wf%wd1, f1, wf%ic2, wf%wd2, f2)
+
+        wf%llin = [1._wp + d/s1, -d/s1]  ! the linear mirror, which also bounds the quadratic
+        if (f1 < FLUID_FRAC_MIN) return
+        if (f2 < FLUID_FRAC_MIN) then
+            wf%lw = [wf%llin(1), wf%llin(2), 0._wp]
+            wf%tier = 2
+            return
+        end if
+        wf%lw = [(d + s1)*(d + s2)/(s1*s2), -d*(d + s2)/(s1*(s2 - s1)), d*(d + s1)/(s2*(s2 - s1))]
+        wf%tier = 1
+
+    end subroutine s_wall_fill
+
+    !> Wall-normal gradient of a scalar at a ghost point's wall foot, as the coefficients of dphi/dn|_w = a - b*phi_w: the wall
+    !! value is the Newton unknown of the surface balance and the fit is linear in it. Two probes at h and 2h give the quadratic
+    !! gradient dphi/dn|_w = [s2^2 (phi_1 - phi_w) - s1^2 (phi_2 - phi_w)] / [s1 s2 (s2 - s1)], second order where the one-probe
+    !! difference (phi_IP - phi_w)/d it replaces is first. Raising the profile degree alone does not help: the truncation is O(s1)
+    !! and the interpolation error O(h^2)/s1 is also O(h), so the interpolation must reach O(h^3) too, which TSC does (Ezra, Peles &
+    !! Kozak 2025; Jost & Glockner 2021; Yousefzadeh & Battiato 2019). Tier 1 uses both probes, tier 2 the one-probe linear
+    !! gradient, tier 3 reports failure so the caller keeps its one-sided difference.
+    subroutine s_wall_normal_gradient(sf, gp, a_coef, b_coef, tier)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+        type(scalar_field), intent(in) :: sf
+        type(ghost_point), intent(in)  :: gp
+        real(wp), intent(out)          :: a_coef, b_coef
+        integer, intent(out)           :: tier
+        real(wp), parameter            :: FLUID_FRAC_MIN = 0.5_wp
+        real(wp)                       :: s1, s2, phi1, phi2, f1, f2
+        integer, dimension(3)          :: ic1, ic2
+        real(wp), dimension(3, 3)      :: wd1, wd2
+
+        a_coef = 0._wp
+        b_coef = 0._wp
+        tier = 3
+        s1 = f_cell_scale(gp)
+        s2 = 2._wp*s1
+        call s_wall_probes(gp, s1, ic1, wd1, f1, ic2, wd2, f2)
+        if (f1 < FLUID_FRAC_MIN) return
+        phi1 = f_tsc_apply(sf, ic1, wd1)
+        if (f2 < FLUID_FRAC_MIN) then
+            a_coef = phi1/s1
+            b_coef = 1._wp/s1
+            tier = 2
+            return
+        end if
+        phi2 = f_tsc_apply(sf, ic2, wd2)
+        a_coef = (s2*s2*phi1 - s1*s1*phi2)/(s1*s2*(s2 - s1))
+        b_coef = (s1 + s2)/(s1*s2)
+        tier = 1
+
+    end subroutine s_wall_normal_gradient
 
     !> Resets the current indexes of immersed boundaries and replaces them after updating
     !> the position of each moving immersed boundary
@@ -2554,14 +2819,15 @@ contains
 
     !> Surface energy residual: gas-side conduction balances heterogeneous reaction heat. Radiation and solid-side conduction are
     !! omitted.
-    subroutine s_surface_energy_residual(pres, T_IP, T_s, d, Ys_s, R_energy)
+    subroutine s_surface_energy_residual(pres, T_IP, T_s, d, wg, Ys_s, R_energy)
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
-        real(wp), intent(in)  :: pres, T_IP, T_s, d
-        real(wp), intent(in)  :: Ys_s(num_species)
-        real(wp), intent(out) :: R_energy
-        real(wp)              :: mw_s, rho_s, k_s, q_rxn
+        real(wp), intent(in)        :: pres, T_IP, T_s, d
+        type(wall_grad), intent(in) :: wg
+        real(wp), intent(in)        :: Ys_s(num_species)
+        real(wp), intent(out)       :: R_energy
+        real(wp)                    :: mw_s, rho_s, k_s, q_rxn
 
         call get_mixture_molecular_weight(Ys_s, mw_s)
         rho_s = pres*mw_s/(gas_constant*T_s)
@@ -2569,24 +2835,28 @@ contains
         call get_mixture_thermal_conductivity_mixavg(T_s, Ys_s, k_s)
         call get_surface_reaction_heat_flux(rho_s, T_s, Ys_s, q_rxn)
 
-        R_energy = k_s*(T_s - T_IP)/d - q_rxn
+        if (wg%quad) then
+            R_energy = k_s*(wg%b*T_s - wg%a) - q_rxn
+        else
+            R_energy = k_s*(T_s - T_IP)/d - q_rxn
+        end if
 
     end subroutine s_surface_energy_residual
 
     !> Assemble the Newton residual for Ns species, with temperature appended only when it is solved. k_bath selects which species
     !! balance the sum constraint displaces; see s_solve_surface for why it must be the most abundant one.
-    subroutine s_surface_residual(pres, T_IP, T_s, d, Ys_IP, Ys_s, W_species, k_bath, solve_temperature, flux_scale, &
+    subroutine s_surface_residual(pres, T_IP, T_s, d, wg, Ys_IP, Ys_s, W_species, k_bath, solve_temperature, flux_scale, &
                                   & energy_scale, R, R_species, omega_s, mdot_s)
 
         $:GPU_ROUTINE(parallelism='[seq]')
-
-        real(wp), intent(in)  :: pres, T_IP, T_s, d, flux_scale, energy_scale
-        real(wp), intent(in)  :: Ys_IP(num_species), Ys_s(num_species), W_species(num_species)
-        integer, intent(in)   :: k_bath
-        logical, intent(in)   :: solve_temperature
-        real(wp), intent(out) :: R(num_species + 1), R_species(num_species), omega_s(num_species), mdot_s
-        real(wp)              :: R_energy
-        integer               :: k
+        type(wall_grad), intent(in) :: wg  !< dT/dn|_w = wg%a - wg%b*T_s where wg%quad, else the one-sided difference
+        real(wp), intent(in)        :: pres, T_IP, T_s, d, flux_scale, energy_scale
+        real(wp), intent(in)        :: Ys_IP(num_species), Ys_s(num_species), W_species(num_species)
+        integer, intent(in)         :: k_bath
+        logical, intent(in)         :: solve_temperature
+        real(wp), intent(out)       :: R(num_species + 1), R_species(num_species), omega_s(num_species), mdot_s
+        real(wp)                    :: R_energy
+        integer                     :: k
 
         call s_surface_species_residual(pres, T_s, d, Ys_IP, Ys_s, W_species, R_species, omega_s, mdot_s)
 
@@ -2597,7 +2867,7 @@ contains
         R(k_bath) = sum(Ys_s) - 1._wp
 
         if (solve_temperature) then
-            call s_surface_energy_residual(pres, T_IP, T_s, d, Ys_s, R_energy)
+            call s_surface_energy_residual(pres, T_IP, T_s, d, wg, Ys_s, R_energy)
             R(num_species + 1) = R_energy/energy_scale
         end if
 
@@ -2687,15 +2957,21 @@ contains
     !! 270:106134, 2024) trace the same cold-wall, large-gradient regime in ablation to ghost-cell mass conservation error
     !! that surfaces as spurious blowing, and resolve it only by moving to a flux-based cut-cell boundary -- a different
     !! discretization from this one, not a tuning of it.
-    subroutine s_blend_ghost_state(theta_max, theta_T_max, T_IP, T_s, Ys_IP, Ys_s, T_g, Ys_g)
+    subroutine s_blend_ghost_state(theta_max, theta_T_max, T_IP, T_s, Ys_IP, Ys_s, T_g, Ys_g, q_T_sf, wf)
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
-        real(wp), intent(in)  :: theta_max    !< Mirror weight the geometry allows: ghost over sample wall distance
-        real(wp), intent(in)  :: theta_T_max  !< Temperature's cap, from f_face_theta
-        real(wp), intent(in)  :: T_IP, T_s
-        real(wp), intent(in)  :: Ys_IP(num_species), Ys_s(num_species)
-        real(wp), intent(out) :: T_g, Ys_g(num_species)
+        !> Quadratic wall-normal fill of the ghost temperature where the fill reached tier 1. The ghost temperature is what the wall
+        !! conduction and the near-wall energy flux see, so its order sets the order of the wall heat flux and hence of Nu. The
+        !! thermodynamic window is imposed on the result rather than by limiting a mirror weight, so the quadratic acts wherever it
+        !! stays admissible.
+        type(scalar_field), intent(in) :: q_T_sf
+        type(wall_fill), intent(in)    :: wf
+        real(wp), intent(in)           :: theta_max    !< Mirror weight the geometry allows: ghost over sample wall distance
+        real(wp), intent(in)           :: theta_T_max  !< Temperature's cap, from f_face_theta
+        real(wp), intent(in)           :: T_IP, T_s
+        real(wp), intent(in)           :: Ys_IP(num_species), Ys_s(num_species)
+        real(wp), intent(out)          :: T_g, Ys_g(num_species)
         ! Stop short of the admissibility boundary rather than landing exactly on it, so that a mass fraction driven to the
         ! limit stays strictly positive instead of becoming a hard zero that roundoff can push negative.
         real(wp), parameter :: blend_safety = 0.9_wp
@@ -2712,7 +2988,12 @@ contains
         if (T_s > T_IP) theta_T = min(theta_T, blend_safety*(T_surface_max - T_s)/(T_s - T_IP))
         theta_T = max(theta_T, 0._wp)
 
-        T_g = T_s + theta_T*(T_s - T_IP)
+        if (wf%tier == 1) then
+            T_g = f_quad_fill(T_s, f_tsc_apply(q_T_sf, wf%ic1, wf%wd1), f_tsc_apply(q_T_sf, wf%ic2, wf%wd2), wf%lw, wf%llin)
+            T_g = min(max(T_g, T_surface_min), T_surface_max)
+        else
+            T_g = T_s + theta_T*(T_s - T_IP)
+        end if
 
         call s_pick_bath_species(Ys_s, k_bath)
         Ys_g(k_bath) = Ys_s(k_bath)
@@ -2767,17 +3048,18 @@ contains
     end subroutine s_pick_bath_species
 
     !> Newton solve for a reacting surface. thermal_bc=0: zero-normal-gradient T; 1: prescribed T; 2: energy balance.
-    subroutine s_solve_surface(pres, T_IP, T_wall, d, Ys_IP, W_species, thermal_bc, Ys_s, T_s, mdot_s, converged)
+    subroutine s_solve_surface(pres, T_IP, T_wall, d, wg, Ys_IP, W_species, thermal_bc, Ys_s, T_s, mdot_s, converged)
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
-        real(wp), intent(in)  :: pres, T_IP, T_wall, d
-        real(wp), intent(in)  :: Ys_IP(num_species), W_species(num_species)
-        integer, intent(in)   :: thermal_bc
-        real(wp), intent(out) :: Ys_s(num_species), T_s, mdot_s
-        logical, intent(out)  :: converged
-        integer, parameter    :: max_iter = 30, max_backtrack = 20
-        real(wp), parameter   :: fd_eps_Y = 1.e-7_wp, fd_eps_T = 1.e-6_wp
+        real(wp), intent(in)        :: pres, T_IP, T_wall, d
+        type(wall_grad), intent(in) :: wg  !< see s_surface_residual
+        real(wp), intent(in)        :: Ys_IP(num_species), W_species(num_species)
+        integer, intent(in)         :: thermal_bc
+        real(wp), intent(out)       :: Ys_s(num_species), T_s, mdot_s
+        logical, intent(out)        :: converged
+        integer, parameter          :: max_iter = 30, max_backtrack = 20
+        real(wp), parameter         :: fd_eps_Y = 1.e-7_wp, fd_eps_T = 1.e-6_wp
         ! The Jacobian is a forward difference, so the Newton update carries O(sqrt(epsilon)) noise and the iteration turns
         ! linear near the root. The residual itself is evaluated exactly, so a tighter tolerance is not unreachable, but it is
         ! reached by stalling rather than converging -- which the caller then reports as a failed surface. Cantera's solveSP
@@ -2822,12 +3104,12 @@ contains
         flux_scale = max(maxval(abs(R_species)), 1.e-12_wp)
         energy_scale = 1._wp
         if (solve_temperature) then
-            call s_surface_energy_residual(pres, T_IP, T_s, d, Ys_s, R_energy)
+            call s_surface_energy_residual(pres, T_IP, T_s, d, wg, Ys_s, R_energy)
             energy_scale = max(abs(R_energy), 1._wp)
         end if
 
-        call s_surface_residual(pres, T_IP, T_s, d, Ys_IP, Ys_s, W_species, k_bath, solve_temperature, flux_scale, energy_scale, &
-                                & R, R_species, omega_s, mdot_s)
+        call s_surface_residual(pres, T_IP, T_s, d, wg, Ys_IP, Ys_s, W_species, k_bath, solve_temperature, flux_scale, &
+                                & energy_scale, R, R_species, omega_s, mdot_s)
         norm_R = maxval(abs(R(1:nsolve)))
         if (norm_R < tol) then
             converged = .true.
@@ -2842,8 +3124,8 @@ contains
                 if (Ys_s(j) + dx > 1._wp) dx = -dx
                 Ys_pert(j) = Ys_pert(j) + dx
 
-                call s_surface_residual(pres, T_IP, T_pert, d, Ys_IP, Ys_pert, W_species, k_bath, solve_temperature, flux_scale, &
-                                        & energy_scale, R_pert, R_species_pert, omega_pert, mdot_pert)
+                call s_surface_residual(pres, T_IP, T_pert, d, wg, Ys_IP, Ys_pert, W_species, k_bath, solve_temperature, &
+                                        & flux_scale, energy_scale, R_pert, R_species_pert, omega_pert, mdot_pert)
                 A(1:nsolve,j) = (R_pert(1:nsolve) - R(1:nsolve))/dx
             end do
 
@@ -2856,8 +3138,8 @@ contains
                     T_pert = T_s + dx
                 end if
 
-                call s_surface_residual(pres, T_IP, T_pert, d, Ys_IP, Ys_pert, W_species, k_bath, solve_temperature, flux_scale, &
-                                        & energy_scale, R_pert, R_species_pert, omega_pert, mdot_pert)
+                call s_surface_residual(pres, T_IP, T_pert, d, wg, Ys_IP, Ys_pert, W_species, k_bath, solve_temperature, &
+                                        & flux_scale, energy_scale, R_pert, R_species_pert, omega_pert, mdot_pert)
                 A(1:nsolve,nsolve) = (R_pert(1:nsolve) - R(1:nsolve))/dx
             end if
 
@@ -2881,7 +3163,7 @@ contains
                 where (Ys_trial < 0._wp) Ys_trial = 0._wp
                 where (Ys_trial > 1._wp) Ys_trial = 1._wp
 
-                call s_surface_residual(pres, T_IP, T_trial, d, Ys_IP, Ys_trial, W_species, k_bath, solve_temperature, &
+                call s_surface_residual(pres, T_IP, T_trial, d, wg, Ys_IP, Ys_trial, W_species, k_bath, solve_temperature, &
                                         & flux_scale, energy_scale, R_trial, R_species_trial, omega_trial, mdot_trial)
                 norm_trial = maxval(abs(R_trial(1:nsolve)))
                 if (norm_trial < norm_R) then
@@ -2906,7 +3188,7 @@ contains
             k_bath_prev = k_bath
             call s_pick_bath_species(Ys_s, k_bath)
             if (k_bath /= k_bath_prev) then
-                call s_surface_residual(pres, T_IP, T_s, d, Ys_IP, Ys_s, W_species, k_bath, solve_temperature, flux_scale, &
+                call s_surface_residual(pres, T_IP, T_s, d, wg, Ys_IP, Ys_s, W_species, k_bath, solve_temperature, flux_scale, &
                                         & energy_scale, R, R_species, omega_s, mdot_s)
                 norm_R = maxval(abs(R(1:nsolve)))
             end if

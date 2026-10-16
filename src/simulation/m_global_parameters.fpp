@@ -110,9 +110,12 @@ module m_global_parameters
     integer  :: ib_ip_width  !< Cells per direction in the image-point interpolation stencil: 2 (inverse distance) or 3 (TSC)
     real(wp) :: ib_ip_dmin   !< ib_ip_min_dist
     $:GPU_DECLARE(create='[ib_ip_width, ib_ip_dmin]')
-    !> The interpolation reads solid cells in its stencil (TSC), so the ghost cells must keep the values of the last correction
+    !> The interpolation (TSC, or the quadratic wall probes) reads solid cells in its stencil, so ghost cells keep the values of the
+    !! last correction
     logical :: ib_keep_ghost
     $:GPU_DECLARE(create='[ib_keep_ghost]')
+    logical :: ib_wall_quad  !< ib_wall_order == 2: two-probe quadratic wall-normal ghost fill and wall gradient
+    $:GPU_DECLARE(create='[ib_wall_quad]')
     $:GPU_DECLARE(create='[hypo_nc_mode]')
 
     logical               :: bc_io
@@ -525,6 +528,7 @@ contains
         ! Immersed Boundaries (sim-specific extras)
         ib_neighborhood_radius = 0
         ib_ip_interp = 1
+        ib_wall_order = 1
         ib_ip_min_dist = 0._wp
         collision_model = 0
         collision_temporal_resolution = 0
@@ -1001,8 +1005,10 @@ contains
         ib_ip_width = merge(3, 2, ib_ip_interp == 2)
         ib_ip_dmin = ib_ip_min_dist
         $:GPU_UPDATE(device='[ib_ip_width, ib_ip_dmin]')
-        ib_keep_ghost = ib .and. ib_ip_interp == 2
+        ib_keep_ghost = ib .and. (ib_ip_interp == 2 .or. ib_wall_order == 2)
         $:GPU_UPDATE(device='[ib_keep_ghost]')
+        ib_wall_quad = ib .and. ib_wall_order == 2
+        $:GPU_UPDATE(device='[ib_wall_quad]')
 
         ! Configuring Coordinate Direction Indexes
         if (bubbles_euler) then

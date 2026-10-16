@@ -571,7 +571,7 @@ contains
                 end if
 
                 ! update the ghost fluid properties point values based on IB state
-                call s_ibm_correct_state(q_cons_ts(1)%vf, q_prim_vf, pb_ts(1)%sf, mv_ts(1)%sf)
+                call s_ibm_correct_state(q_cons_ts(1)%vf, q_prim_vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
             end if
 
             if (cont_damage) call s_enforce_cont_damage_bounds(q_cons_ts(1)%vf)
