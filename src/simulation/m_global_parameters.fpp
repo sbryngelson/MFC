@@ -107,9 +107,8 @@ module m_global_parameters
     $:GPU_DECLARE(create='[shear_stress, bulk_stress]')
     logical :: ib_smooth_contact  !< ib .and. viscous .and. weno_Re_flux: blend the tangential interface velocity across s_S = 0
     $:GPU_DECLARE(create='[ib_smooth_contact]')
-    integer  :: ib_ip_width  !< Cells per direction in the image-point interpolation stencil: 2 (inverse distance) or 3 (TSC)
-    real(wp) :: ib_ip_dmin   !< ib_ip_min_dist
-    $:GPU_DECLARE(create='[ib_ip_width, ib_ip_dmin]')
+    integer :: ib_ip_width  !< Cells per direction in the image-point interpolation stencil: 2 (inverse distance) or 3 (TSC)
+    $:GPU_DECLARE(create='[ib_ip_width]')
     !> The interpolation (TSC, or the quadratic wall probes) reads solid cells in its stencil, so ghost cells keep the values of the
     !! last correction
     logical :: ib_keep_ghost
@@ -529,7 +528,6 @@ contains
         ib_neighborhood_radius = 0
         ib_ip_interp = 1
         ib_wall_order = 1
-        ib_ip_min_dist = 0._wp
         collision_model = 0
         collision_temporal_resolution = 0
         coefficient_of_restitution = dflt_real
@@ -541,6 +539,8 @@ contains
         ib_heat_wrt = .false.
         ib_force_stride = 1
         many_ib_patch_parallelism = .false.
+        ib_second_order_vel = .false.
+        ib_ip_min_dist = 0._wp
 
         ! Bubble modeling (sim-specific)
         bubble_model = 1
@@ -1003,8 +1003,7 @@ contains
         ib_smooth_contact = ib .and. viscous .and. weno_Re_flux
         $:GPU_UPDATE(device='[ib_smooth_contact]')
         ib_ip_width = merge(3, 2, ib_ip_interp == 2)
-        ib_ip_dmin = ib_ip_min_dist
-        $:GPU_UPDATE(device='[ib_ip_width, ib_ip_dmin]')
+        $:GPU_UPDATE(device='[ib_ip_width]')
         ib_keep_ghost = ib .and. (ib_ip_interp == 2 .or. ib_wall_order == 2)
         $:GPU_UPDATE(device='[ib_keep_ghost]')
         ib_wall_quad = ib .and. ib_wall_order == 2

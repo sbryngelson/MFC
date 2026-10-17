@@ -135,6 +135,7 @@ contains
         @:ACC_SETUP_SFs(corrected_gps)
 
         $:GPU_ENTER_DATA(copyin='[num_gps]')
+        $:GPU_UPDATE(device='[ib_second_order_vel, ib_ip_min_dist]')
 
         if (collision_model > 0) call s_initialize_collisions_module()
 
@@ -266,7 +267,7 @@ contains
         real(wp), intent(in)          :: rho, pres_IP
         real(wp), intent(out)         :: pres_GP
 
-        pres_GP = pres_IP/min(max(1._wp - 2._wp*abs(gp%levelset) &
+        pres_GP = pres_IP/min(max(1._wp - (abs(gp%levelset) + gp%ip_dist) &
                               & *rho/pres_IP*dot_product(patch_ib(gp_patch_id)%force/patch_ib(gp_patch_id)%mass, &
                               & gp%levelset_norm), 5.e-1_wp), 2._wp)
 
@@ -1083,7 +1084,8 @@ contains
     !> Compute the image points for each ghost point
     impure subroutine s_compute_image_points()
 
-        real(wp)                        :: dist, h_n
+        real(wp)                        :: dist
+        real(wp)                        :: min_cell_width
         real(wp), dimension(3)          :: norm
         real(wp), dimension(3)          :: physical_loc
         real(wp)                        :: temp_loc
@@ -1099,8 +1101,8 @@ contains
 
         bounds_error = .false.
 
-        $:GPU_PARALLEL_LOOP(private='[q, gp, i, j, k, physical_loc, patch_id, dist, h_n, norm, dim, bound, dir, index, temp_loc, &
-                            & s_cc]', copy='[bounds_error]', present='[ghost_points]')
+        $:GPU_PARALLEL_LOOP(private='[q, gp, i, j, k, physical_loc, patch_id, dist, min_cell_width, norm, dim, bound, dir, index, &
+                            & temp_loc, s_cc]', copy='[bounds_error]', present='[ghost_points]')
         do q = 1, num_gps
             gp = ghost_points(q)
             i = gp%loc(1)
@@ -1118,15 +1120,14 @@ contains
             patch_id = gp%ib_patch_id
             dist = abs(real(gp%levelset, kind=wp))
             norm(:) = gp%levelset_norm
-            ! The image point sits at twice the ghost point's wall distance, or at least ib_ip_dmin cell widths (measured along the
-            ! normal) off the wall so its interpolation stencil clears the body (ib_ip_min_dist).
-            h_n = dist
-            if (ib_ip_dmin > 0._wp) then
-                h_n = (dx(i)*norm(1))**2 + (dy(j)*norm(2))**2
-                if (p > 0) h_n = h_n + (dz(k)*norm(3))**2
-                h_n = max(dist, ib_ip_dmin*sqrt(h_n))
+            ghost_points(q)%ip_dist = dist
+            ! keep the image point stencil off the wall
+            if (ib_second_order_vel) then
+                min_cell_width = min(dx(i), dy(j))
+                if (p > 0) min_cell_width = min(min_cell_width, dz(k))
+                ghost_points(q)%ip_dist = max(dist, ib_ip_min_dist*min_cell_width)
             end if
-            ghost_points(q)%ip_loc(:) = physical_loc(:) + (dist + h_n)*norm(:)
+            ghost_points(q)%ip_loc(:) = physical_loc(:) + (dist + ghost_points(q)%ip_dist)*norm(:)
 
             ! Find the closest grid point to the image point
             do dim = 1, num_dims

@@ -1309,6 +1309,14 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                     )
                 )
                 cases.append(define_case_d(stack, f"Circle{suffix}", {"patch_ib(1)%geometry": 2, "n": 49}))
+                if viscous and not slip:
+                    cases.append(
+                        define_case_d(
+                            stack,
+                            "Circle -> second order vel",
+                            {"patch_ib(1)%geometry": 2, "n": 49, "ib_second_order_vel": "T", "ib_ip_min_dist": 1.5},
+                        )
+                    )
                 if six_eqn_model:
                     cases.append(
                         define_case_d(
@@ -1334,7 +1342,7 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                 # Image-point interpolation options; every case above runs the default (inverse distance, image point at twice the
                 # wall distance, one-probe mirror). Min-dist is only run inviscid.
                 shape, geom = ("Sphere", {"patch_ib(1)%z_centroid": 0.5, "patch_ib(1)%geometry": 8}) if len(dimInfo[0]) == 3 else ("Circle", {"patch_ib(1)%geometry": 2, "n": 49})
-                for label, opts in (("ib_ip_interp=2", {"ib_ip_interp": 2}), ("ib_ip_min_dist", {"ib_ip_min_dist": 1.5}), ("ib_wall_order=2", {"ib_wall_order": 2})):
+                for label, opts in (("ib_ip_interp=2", {"ib_ip_interp": 2}), ("ib_ip_min_dist", {"ib_second_order_vel": "T", "ib_ip_min_dist": 1.5}), ("ib_wall_order=2", {"ib_wall_order": 2})):
                     if not (viscous and "min_dist" in label):
                         # weno_Re_flux = T selects the viscous IB path whose contact velocity is smoothed (ib_smooth_contact); without it a
                         # CPU and a GPU run differ at 1e-10 through the sign of the contact speed at fluid/ghost faces
@@ -3448,6 +3456,8 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                 "3D_ibm_neighborhood_radius",
                 # A resolution-dependent validation case; the airfoil patch is already covered by 2D_ibm_airfoil.
                 "2D_ibm_airfoil_surface_pressure",
+                # Same airfoil deck; second-order IB velocities are covered by "Circle -> second order vel".
+                "2D_ibm_second_order_airfoil",
                 # Same as 3D_ibm_pitchup_plate above: the 25-cell cap shrinks the grid until the body is
                 # thinner than a cell, no cell passes the interior test, ib_markers is identically zero and
                 # the golden is the immersed boundary's own absence. Measured body width at the capped grid:
