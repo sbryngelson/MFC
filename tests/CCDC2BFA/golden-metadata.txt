@@ -1,10 +1,10 @@
-This file was created on 2026-10-16 06:29:34.700995.
+This file was created on 2026-10-16 17:28:32.211110.
 
 mfc.sh:
 
     Invocation: test --generate -o CCDC2BFA -j 4 -- -c tamd
     Lock:       mpi=Yes & gpu=No & debug=No & reldebug=No & gcov=No & unified=No & single=No & mixed=No & fastmath=No
-    Git:        03fb98973d32ebb125dd1701cb9fa2de6630f927 on ib-interp-options (dirty)
+    Git:        d72f3fbb81cac553320038ccf6c0c34511252ca5 on ib-interp-options (dirty)
 
 simulation:
 
@@ -129,7 +129,7 @@ CPU:
     CPU MHz:             3700.000
     CPU max MHz:         3700.0000
     CPU min MHz:         1500.0000
-    BogoMIPS:            7400.54
+    BogoMIPS:            7399.66
     Virtualization:      AMD-V
     L1d cache:           32K
     L1i cache:           32K

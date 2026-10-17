@@ -110,6 +110,9 @@ module m_global_parameters
     integer  :: ib_ip_width  !< Cells per direction in the image-point interpolation stencil: 2 (inverse distance) or 3 (TSC)
     real(wp) :: ib_ip_dmin   !< ib_ip_min_dist
     $:GPU_DECLARE(create='[ib_ip_width, ib_ip_dmin]')
+    !> The interpolation reads solid cells in its stencil (TSC), so the ghost cells must keep the values of the last correction
+    logical :: ib_keep_ghost
+    $:GPU_DECLARE(create='[ib_keep_ghost]')
     $:GPU_DECLARE(create='[hypo_nc_mode]')
 
     logical               :: bc_io
@@ -998,6 +1001,8 @@ contains
         ib_ip_width = merge(3, 2, ib_ip_interp == 2)
         ib_ip_dmin = ib_ip_min_dist
         $:GPU_UPDATE(device='[ib_ip_width, ib_ip_dmin]')
+        ib_keep_ghost = ib .and. ib_ip_interp == 2
+        $:GPU_UPDATE(device='[ib_keep_ghost]')
 
         ! Configuring Coordinate Direction Indexes
         if (bubbles_euler) then

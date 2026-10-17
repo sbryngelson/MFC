@@ -334,7 +334,10 @@ contains
         real(wp)               :: buf, buf_prim
         type(ghost_point)      :: gp
 
-        ! set the Moving IBM interior conservative variables
+        ! set the Moving IBM interior conservative variables. A solid cell that is a ghost keeps the value of the last correction
+        ! when the interpolation reads solid cells (ib_keep_ghost): resetting it to the body velocity, and without chemistry to a
+        ! pressure of 1 Pa, would feed those values into the image-point state. Inverse-distance weights drop solid cells, so they
+        ! never see it.
         $:GPU_PARALLEL_LOOP(private='[i, j, k, patch_id, rho, patch_id_temp]', collapse=3)
         do l = 0, p
             do k = 0, n
@@ -343,7 +346,7 @@ contains
                     if (patch_id /= 0) then
                         call s_decode_patch_periodicity(patch_id, patch_id_temp)
                         call s_get_neighborhood_idx(patch_id_temp, patch_id)
-                        if (patch_id > 0) then
+                        if (patch_id > 0 .and. .not. (ib_keep_ghost .and. corrected_gps%sf(j, k, l) /= 0)) then
                             ! skip pressure correction with chemistry to prevent unphysical pressure
                             if (.not. chemistry) q_prim_vf(eqn_idx%E)%sf(j, k, l) = 1._wp
                             rho = 0._wp

@@ -1336,7 +1336,16 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                 shape, geom = ("Sphere", {"patch_ib(1)%z_centroid": 0.5, "patch_ib(1)%geometry": 8}) if len(dimInfo[0]) == 3 else ("Circle", {"patch_ib(1)%geometry": 2, "n": 49})
                 for label, opts in (("ib_ip_interp=2", {"ib_ip_interp": 2}), ("ib_ip_min_dist", {"ib_ip_min_dist": 1.5})):
                     if not (viscous and "min_dist" in label):
-                        cases.append(define_case_d(stack, f"{shape} -> {label}", {**geom, **opts}))
+                        # weno_Re_flux = T selects the viscous IB path whose contact velocity is smoothed (ib_smooth_contact); without it a
+                        # CPU and a GPU run differ at 1e-10 through the sign of the contact speed at fluid/ghost faces
+                        cases.append(define_case_d(stack, f"{shape} -> {label}", {**geom, **opts, **({"weno_Re_flux": "T"} if viscous else {})}))
+                    if label == "ib_ip_interp=2" and not viscous:
+                        # A uniform quiescent state at a realistic pressure: the exact solution is the initial state, so any change is
+                        # an error. The other cases run at p = 1, where a solid cell reset to 1 Pa is invisible.
+                        quiescent = {"dt": 1.0e-6}  # the fixed step of the other cases would be a CFL of about 9 at this sound speed
+                        for i in (1, 2, 3):
+                            quiescent.update({f"patch_icpp({i})%pres": 1.0e5, f"patch_icpp({i})%alpha_rho(1)": 1.2, f"patch_icpp({i})%vel(1)": 0.0})
+                        cases.append(define_case_d(stack, f"{shape} -> {label} quiescent", {**geom, **opts, **quiescent}))
 
             stack.pop()
 
