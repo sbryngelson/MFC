@@ -256,8 +256,9 @@ contains
     end subroutine s_ibm_setup
 
     !> Pressure correction for a moving IB, accounting for the acceleration of the wall point: the body's translational acceleration
-    !! (two-way coupled only) plus the centripetal term omega x (omega x r_w). Clamped both ways: the linearization it comes from
-    !! holds only while the correction is order one, and an unbounded one drives the ghost state to vacuum.
+    !! (force/mass for two-way coupling, else the stage-differenced one) plus alpha x r_w and omega x (omega x r_w). Clamped both
+    !! ways: the linearization it comes from holds only while the correction is order one, and an unbounded one drives the ghost
+    !! state to vacuum.
     subroutine s_compute_ghost_point_pressure(gp, gp_patch_id, radial_vector, rho, pres_IP, pres_GP)
 
         $:GPU_ROUTINE(parallelism='[seq]')
@@ -267,14 +268,15 @@ contains
         real(wp), dimension(3), intent(in) :: radial_vector
         real(wp), intent(in)               :: rho, pres_IP
         real(wp), intent(out)              :: pres_GP
-        real(wp), dimension(3)             :: accel, w_x_r, w_x_w_x_r
+        real(wp), dimension(3)             :: accel, r_w, w_x_r, w_x_w_x_r
 
-        accel = 0._wp
+        accel = patch_ib(gp_patch_id)%accel
         if (patch_ib(gp_patch_id)%moving_ibm > 1) accel = patch_ib(gp_patch_id)%force/patch_ib(gp_patch_id)%mass
-        call s_cross_product(patch_ib(gp_patch_id)%angular_vel, radial_vector + abs(real(gp%levelset, kind=wp))*gp%levelset_norm, &
-                             & w_x_r)
+        r_w = radial_vector + abs(real(gp%levelset, kind=wp))*gp%levelset_norm
+        call s_cross_product(patch_ib(gp_patch_id)%angular_vel, r_w, w_x_r)
         call s_cross_product(patch_ib(gp_patch_id)%angular_vel, w_x_r, w_x_w_x_r)
-        accel = accel + w_x_w_x_r
+        call s_cross_product(patch_ib(gp_patch_id)%angular_accel, r_w, w_x_r)
+        accel = accel + w_x_w_x_r + w_x_r
 
         pres_GP = pres_IP/min(max(1._wp - (abs(gp%levelset) + gp%ip_dist)*rho/pres_IP*dot_product(accel, gp%levelset_norm), &
                               & 5.e-1_wp), 2._wp)
