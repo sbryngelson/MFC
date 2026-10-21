@@ -395,7 +395,9 @@ contains
             ! Tangential speed from conservation of total enthalpy between the image point and the ghost; where there is no real
             ! solution, or no tangential flow to scale, the tangential velocity is copied
             ut2_g = ut2 + dot_product(vel_IP - vel_w, norm)**2 + 2._wp*dh - un_g**2
-            if (dh /= 0._wp .and. ut2 > sgm_eps .and. ut2_g > 0._wp) u_rel = u_rel*sqrt(ut2_g/ut2)
+            ! The correction adjusts an existing tangential speed; it is bounded so a nearly stagnant image point is not given a
+            ! large velocity
+            if (dh /= 0._wp .and. ut2 > sgm_eps .and. ut2_g > 0._wp) u_rel = u_rel*min(max(sqrt(ut2_g/ut2), 0.5_wp), 2._wp)
             vel_GP = vel_w + un_g*norm + u_rel - vel_IP
         end if
         vel_GP = vel_IP + vel_GP
