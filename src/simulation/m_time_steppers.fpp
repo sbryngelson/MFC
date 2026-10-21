@@ -889,7 +889,7 @@ contains
     subroutine s_propagate_immersed_boundaries(s, t_step)
 
         integer, intent(in)    :: s, t_step
-        integer                :: i
+        integer                :: i, d
         integer                :: gbl_id  ! used for analytic ib patch motion
         real(wp)               :: t_stage  ! time of the state produced by RK stage s (used by prescribed kinematics)
         real(wp), dimension(3) :: vel_new, angular_new
@@ -907,12 +907,14 @@ contains
             if (time_stepper == time_stepper_rk3 .and. s == 2) t_stage = (t_step + 0.5_wp)*dt
         end if
 
-        $:GPU_PARALLEL_LOOP(private='[i, gbl_id, vel_new, angular_new]', copyin='[s, t_stage]')
+        $:GPU_PARALLEL_LOOP(private='[i, d, gbl_id, vel_new, angular_new]', copyin='[s, t_stage]')
         do i = 1, num_ibs
             if (s == 1) then
-                patch_ib(i)%step_vel = patch_ib(i)%vel
-                patch_ib(i)%step_angular_vel = patch_ib(i)%angular_vel
-                patch_ib(i)%step_angles = patch_ib(i)%angles
+                do d = 1, 3  ! component stores into patch_ib on the device (see s_update_ib_rotation_matrix)
+                    patch_ib(i)%step_vel(d) = patch_ib(i)%vel(d)
+                    patch_ib(i)%step_angular_vel(d) = patch_ib(i)%angular_vel(d)
+                    patch_ib(i)%step_angles(d) = patch_ib(i)%angles(d)
+                end do
                 patch_ib(i)%step_x_centroid = patch_ib(i)%x_centroid
                 patch_ib(i)%step_y_centroid = patch_ib(i)%y_centroid
                 patch_ib(i)%step_z_centroid = patch_ib(i)%z_centroid
@@ -939,8 +941,10 @@ contains
                     end if
 
                     ! Update the angle and position from the current-stage velocities, before they are overwritten
-                    patch_ib(i)%angles = (rk_coef(s, 1)*patch_ib(i)%angles + rk_coef(s, 2)*patch_ib(i)%step_angles + rk_coef(s, &
-                             & 3)*patch_ib(i)%angular_vel*dt)/rk_coef(s, 4)
+                    do d = 1, 3
+                        patch_ib(i)%angles(d) = (rk_coef(s, 1)*patch_ib(i)%angles(d) + rk_coef(s, &
+                                 & 2)*patch_ib(i)%step_angles(d) + rk_coef(s, 3)*patch_ib(i)%angular_vel(d)*dt)/rk_coef(s, 4)
+                    end do
                     patch_ib(i)%x_centroid = (rk_coef(s, 1)*patch_ib(i)%x_centroid + rk_coef(s, &
                              & 2)*patch_ib(i)%step_x_centroid + rk_coef(s, 3)*patch_ib(i)%vel(1)*dt)/rk_coef(s, 4)
                     patch_ib(i)%y_centroid = (rk_coef(s, 1)*patch_ib(i)%y_centroid + rk_coef(s, &
@@ -948,8 +952,10 @@ contains
                     patch_ib(i)%z_centroid = (rk_coef(s, 1)*patch_ib(i)%z_centroid + rk_coef(s, &
                              & 2)*patch_ib(i)%step_z_centroid + rk_coef(s, 3)*patch_ib(i)%vel(3)*dt)/rk_coef(s, 4)
 
-                    patch_ib(i)%vel = vel_new
-                    patch_ib(i)%angular_vel = angular_new
+                    do d = 1, 3
+                        patch_ib(i)%vel(d) = vel_new(d)
+                        patch_ib(i)%angular_vel(d) = angular_new(d)
+                    end do
 
                     ! plug in analytic velocities for 1-way coupling, if it exists
                     if (patch_ib(i)%moving_ibm == 1) then

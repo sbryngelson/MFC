@@ -469,7 +469,9 @@ contains
 
         integer, intent(in)          :: patch_id
         real(wp), dimension(3, 3, 3) :: rotation
+        real(wp), dimension(3, 3)    :: rxy, r
         real(wp)                     :: angle
+        integer                      :: a1, b1
 
         ! construct the x, y, and z rotation matrices
 
@@ -484,10 +486,6 @@ contains
             rotation(2, 1,:) = [cos(angle), 0._wp, sin(angle)]
             rotation(2, 2,:) = [0._wp, 1._wp, 0._wp]
             rotation(2, 3,:) = [-sin(angle), 0._wp, cos(angle)]
-
-            ! apply the y rotation to the x rotation
-            patch_ib(patch_id)%rotation_matrix(:,:) = matmul(rotation(1,:,:), rotation(2,:,:))
-            patch_ib(patch_id)%rotation_matrix_inverse(:,:) = matmul(transpose(rotation(2,:,:)), transpose(rotation(1,:,:)))
         end if
 
         ! z component first, since it applies in 2D and 3D
@@ -496,16 +494,27 @@ contains
         rotation(3, 2,:) = [sin(angle), cos(angle), 0._wp]
         rotation(3, 3,:) = [0._wp, 0._wp, 1._wp]
 
+        ! R = Rx Ry Rz in 3D, Rz in 2D; the inverse of a rotation is its transpose. Built locally and stored element by element: an
+        ! array-valued store into a patch_ib element on the device is intermittently overwritten (see s_store_rotated_normal).
+        r = rotation(3,:,:)
         if (num_dims == 3) then
-            ! apply the z rotation to the xy rotation in 3D
-            patch_ib(patch_id)%rotation_matrix(:,:) = matmul(patch_ib(patch_id)%rotation_matrix(:,:), rotation(3,:,:))
-            patch_ib(patch_id)%rotation_matrix_inverse(:,:) = matmul(transpose(rotation(3,:,:)), &
-                     & patch_ib(patch_id)%rotation_matrix_inverse(:,:))
-        else
-            ! write out only the z rotation in 2D
-            patch_ib(patch_id)%rotation_matrix(:,:) = rotation(3,:,:)
-            patch_ib(patch_id)%rotation_matrix_inverse(:,:) = transpose(rotation(3,:,:))
+            do a1 = 1, 3
+                do b1 = 1, 3
+                    rxy(a1, b1) = sum(rotation(1, a1,:)*rotation(2,:,b1))
+                end do
+            end do
+            do a1 = 1, 3
+                do b1 = 1, 3
+                    r(a1, b1) = sum(rxy(a1,:)*rotation(3,:,b1))
+                end do
+            end do
         end if
+        do a1 = 1, 3
+            do b1 = 1, 3
+                patch_ib(patch_id)%rotation_matrix(a1, b1) = r(a1, b1)
+                patch_ib(patch_id)%rotation_matrix_inverse(a1, b1) = r(b1, a1)
+            end do
+        end do
 
     end subroutine s_update_ib_rotation_matrix
 

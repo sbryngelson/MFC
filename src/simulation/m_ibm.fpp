@@ -1935,6 +1935,7 @@ contains
         real(wp), intent(in)   :: t
         real(wp)               :: tau, amp, damp, omega, phi, theta, phid, thetad, arg_phi, arg_th, t_p, a_s
         real(wp), dimension(3) :: r, c, w, v
+        integer                :: d
 
         tau = t - patch_ib(i)%kin_t0
         omega = 2._wp*pi*patch_ib(i)%kin_freq
@@ -1991,8 +1992,10 @@ contains
         patch_ib(i)%x_centroid = patch_ib(i)%kin_hinge(1) + c(1)
         patch_ib(i)%y_centroid = patch_ib(i)%kin_hinge(2) + c(2)
         patch_ib(i)%z_centroid = patch_ib(i)%kin_hinge(3) + c(3)
-        patch_ib(i)%vel = v
-        patch_ib(i)%angular_vel = w
+        do d = 1, 3  ! component stores into patch_ib on the device (see s_update_ib_rotation_matrix)
+            patch_ib(i)%vel(d) = v(d)
+            patch_ib(i)%angular_vel(d) = w(d)
+        end do
 
     end subroutine s_prescribed_kinematics
 
