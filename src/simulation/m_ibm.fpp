@@ -1297,7 +1297,9 @@ contains
                             count = count + 1
                             local_idx = count
                             $:END_GPU_ATOMIC_CAPTURE()
-                            ghost_points(local_idx)%loc = [i, j, k]
+                            ghost_points(local_idx)%loc(1) = i
+                            ghost_points(local_idx)%loc(2) = j
+                            ghost_points(local_idx)%loc(3) = k
                             ghost_points(local_idx)%T_cond = 0._wp
                             ghost_points(local_idx)%layer = lay
                             ghost_points(local_idx)%ip_ok = .true.
@@ -1446,8 +1448,14 @@ contains
 
             ! An image point buried in a neighboring IB gets no weights at all: its ghost point is
             ! averaged from its own neighbors instead, in s_ibm_correct_state.
-            ghost_points(q)%interp_coeffs = stencil_coeffs
-            ghost_points(q)%ip_stencil = lo
+            do kk = 1, 3
+                do jj = 1, 3
+                    do ii = 1, 3
+                        ghost_points(q)%interp_coeffs(ii, jj, kk) = stencil_coeffs(ii, jj, kk)
+                    end do
+                end do
+                ghost_points(q)%ip_stencil(kk) = lo(kk)
+            end do
 
             ! Wall distance of the weighted stencil centroid, which is where the image-point value is
             ! actually sampled: inverse-distance weights over a partly solid stencil sit farther out
