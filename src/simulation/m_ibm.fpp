@@ -340,7 +340,8 @@ contains
     !> Ghost velocity mirrored through the wall about u_w (body velocity at the wall point plus the normal transpiration v_n:
     !! blowing, Stefan flow): u_g = u_w + theta (u_w - u_IP), theta = |levelset|/(sample wall distance), puts u_w on the wall. A
     !! slip wall mirrors only the normal part and keeps the image point's tangential velocity.
-    subroutine s_compute_ghost_point_velocity(gp, gp_patch_id, radial_vector, vel_IP, pres_IP, theta, v_n, vel_GP, q_prim_vf, wf)
+    subroutine s_compute_ghost_point_velocity(gp, gp_patch_id, radial_vector, vel_IP, pres_IP, theta, v_n, vel_GP, q_prim_vf, wf, &
+        & dh)
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
@@ -354,10 +355,15 @@ contains
         !! order.
         type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
         type(wall_fill), intent(in)                         :: wf
-        real(wp), dimension(3)                              :: vel_q
-        integer                                             :: cmp
-        real(wp), dimension(3)                              :: norm, vel_w
-        real(wp)                                            :: v_blow_eff
+        !> h_IP - h_GP of the slip ghost fill (specific enthalpy at the image point minus at the ghost): the total enthalpy is held
+        !! across the wall, which sets the tangential speed (curvature-corrected symmetry technique). Zero where that does not
+        !! apply.
+        real(wp), intent(in)   :: dh
+        real(wp), dimension(3) :: vel_q
+        integer                :: cmp
+        real(wp), dimension(3) :: norm, vel_w, u_rel
+        real(wp)               :: un_g, ut2, ut2_g
+        real(wp)               :: v_blow_eff
 
         ! A zero normal (ghost at a circle's centre or on a flat face) leaves norm = 0 rather than 0/0
         norm = gp%levelset_norm/max(sqrt(sum(gp%levelset_norm**2)), sgm_eps)
@@ -381,7 +387,17 @@ contains
         else
             vel_GP = (1._wp + theta)*(vel_w - vel_IP)
         end if
-        if (gp%slip) vel_GP = dot_product(vel_GP, norm)*norm
+        if (gp%slip) then
+            un_g = dot_product(vel_IP + vel_GP, norm) - dot_product(vel_w, norm)  ! ghost velocity relative to the wall, normal part
+            u_rel = vel_IP - vel_w
+            u_rel = u_rel - dot_product(u_rel, norm)*norm  ! image-point velocity relative to the wall, tangential part
+            ut2 = sum(u_rel**2)
+            ! Tangential speed from conservation of total enthalpy between the image point and the ghost; where there is no real
+            ! solution, or no tangential flow to scale, the tangential velocity is copied
+            ut2_g = ut2 + dot_product(vel_IP - vel_w, norm)**2 + 2._wp*dh - un_g**2
+            if (dh /= 0._wp .and. ut2 > sgm_eps .and. ut2_g > 0._wp) u_rel = u_rel*sqrt(ut2_g/ut2)
+            vel_GP = vel_w + un_g*norm + u_rel - vel_IP
+        end if
         vel_GP = vel_IP + vel_GP
 
     end subroutine s_compute_ghost_point_velocity
@@ -424,6 +440,8 @@ contains
         real(wp) :: alpha_q, alpha_rho_q, e_q
         real(wp) :: T_IP, mw_IP, e_IP  !< Image-point temperature, mixture MW, and mass-specific internal energy (chemistry)
         real(wp) :: T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta
+        real(wp) :: h_IP, dh_ccst  !< Enthalpy at the image point, and its excess over the slip ghost (CCST)
+        logical :: use_ccst
         logical :: surface_converged
         integer :: n_not_converged, n_ill_posed  !< Per-call reacting-surface failure tallies (see the module-level counters)
         integer :: ng1, ng2, ng3, nf1, nf2, nf3  !< Per-call wall-gradient and wall-fill tier tallies
@@ -489,9 +507,10 @@ contains
             $:GPU_PARALLEL_LOOP(private='[i, physical_loc, dyn_pres, alpha_rho_IP, alpha_IP, alpha_rho_GP, pres_IP, pres_GP, &
                                 & vel_IP, vel_g, r_IP, v_IP, pb_IP, mv_IP, nmom_IP, presb_IP, massv_IP, rho, gamma, pi_inf, Re_K, &
                                 & G_K, Gs, gp, radial_vector, j, k, l, q, qv_K, c_IP, nbub, patch_id, Ys_IP, W_species, T_IP, &
-                                & mw_IP, e_IP, Ys_g, Ys_s, T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta, &
-                                & surface_converged, vel_sum_g, E_ghost, alpha_q, alpha_rho_q, e_q, wf, wg, tier_wg]', &
-                                & reduction='[[n_not_converged, n_ill_posed, ng1, ng2, ng3, nf1, nf2, nf3]]', reductionOp='[+]', present='[ghost_points]')
+                                & mw_IP, e_IP, Ys_g, Ys_s, T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta, h_IP, &
+                                & dh_ccst, use_ccst, surface_converged, vel_sum_g, E_ghost, alpha_q, alpha_rho_q, e_q, wf, wg, &
+                                & tier_wg]', reduction='[[n_not_converged, n_ill_posed, ng1, ng2, ng3, nf1, nf2, nf3]]', &
+                                & reductionOp='[+]', present='[ghost_points]')
             do i = 1, num_gps
                 if (record_surface) gp_surf(:,i) = 0._wp
                 ghost_points(i)%T_cond = 0._wp
@@ -639,10 +658,16 @@ contains
                     & + real(ghost_points(i)%z_periodicity, wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
 
                 ! set the pressure and density
+                dh_ccst = 0._wp
+                use_ccst = .false.
                 if (patch_ib(patch_id)%moving_ibm == 0 .and. .not. gp%slip) then
                     pres_GP = pres_IP
                     alpha_rho_GP = alpha_rho_IP
                 else
+                    ! Curvature-corrected symmetry technique on a slip wall: the ghost density follows the isentrope and the total
+                    ! enthalpy is conserved across the wall, which sets the tangential speed in s_compute_ghost_point_velocity
+                    use_ccst = gp%slip .and. .not. chemistry .and. model_eqns == 2 .and. .not. bubbles_euler
+                    h_IP = ((gamma + 1._wp)*pres_IP + pi_inf + qv_K)/rho
                     call s_compute_ghost_point_pressure(gp, patch_id, radial_vector, vel_IP, rho, pres_IP, pres_GP)
 
                     ! The adiabatic wall condition T_GP = T_IP the correction is derived from also
@@ -651,9 +676,15 @@ contains
                     ! fractions are untouched, so only rho and qv move with it.
                     $:GPU_LOOP(parallelism='[seq]')
                     do q = 1, num_fluids
-                        alpha_rho_GP(q) = alpha_rho_IP(q)*(pres_GP + isentrope_B(q))/(pres_IP + isentrope_B(q))
+                        if (use_ccst) then
+                            alpha_rho_GP(q) = alpha_rho_IP(q)*((pres_GP + isentrope_B(q))/(pres_IP + isentrope_B(q))) &
+                                         & **(1._wp/isentrope_n(q))
+                        else
+                            alpha_rho_GP(q) = alpha_rho_IP(q)*(pres_GP + isentrope_B(q))/(pres_IP + isentrope_B(q))
+                        end if
                     end do
                     call s_compute_mixture_coefficients(alpha_rho_GP, alpha_IP, rho, gamma, pi_inf, qv_K)
+                    if (use_ccst) dh_ccst = h_IP - ((gamma + 1._wp)*pres_GP + pi_inf + qv_K)/rho
                 end if
                 gp_prim_new(eqn_idx%E, i) = pres_GP
 
@@ -666,7 +697,7 @@ contains
 
                 ! Calculate velocity of ghost cell
                 call s_compute_ghost_point_velocity(gp, patch_id, radial_vector, vel_IP, pres_IP, theta, v_stefan, vel_g, &
-                                                    & q_prim_vf, wf)
+                                                    & q_prim_vf, wf, dh_ccst)
 
                 ! Set momentum
                 vel_sum_g = 0._wp
