@@ -1597,6 +1597,22 @@ contains
                 lo = ic - 1
                 if (p == 0) lo(3) = 0
                 stencil_coeffs = f_tsc_stencil(wd)
+                ! An injecting body's ghost cells hold the imposed fuel state, not a mirror of the gas, so they must not feed its
+                ! own image point: weight the fluid cells only, as the inverse-distance stencil does
+                if (patch_ib(gp%ib_patch_id)%inj_species > 0) then
+                    buf = 0._wp
+                    do kk = 1, merge(3, 1, p /= 0)
+                        do jj = 1, 3
+                            do ii = 1, 3
+                                if (ib_markers%sf(lo(1) + ii - 1, lo(2) + jj - 1, lo(3) + kk - 1) /= 0) stencil_coeffs(ii, jj, &
+                                    & kk) = 0._wp
+                                buf = buf + stencil_coeffs(ii, jj, kk)
+                            end do
+                        end do
+                    end do
+                    if (buf > 0._wp) stencil_coeffs = stencil_coeffs/buf
+                    fluid_w = buf
+                end if
                 ghost_points(q)%interp_valid = fluid_w > 0._wp
             else
                 ! Get the interpolation points
