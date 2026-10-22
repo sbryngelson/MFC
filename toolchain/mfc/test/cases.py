@@ -1343,15 +1343,20 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                     cases.append(define_case_d(stack, "Circle -> weno_Re_flux", {"patch_ib(1)%geometry": 2, "n": 49, "weno_Re_flux": "T"}))
 
             if not slip and num_fluids == 1 and len(dimInfo[0]) >= 2:
-                # Image-point interpolation options; every case above runs the default (inverse distance, image point at twice the
-                # wall distance, one-probe mirror). Min-dist is only run inviscid.
+                # Image-point interpolation options; every case above runs the default (TSC image points, one-probe mirror). The
+                # previous inverse-distance default, the quadratic wall treatment and min-dist are kept as explicit cases. Min-dist is only run inviscid.
                 shape, geom = ("Sphere", {"patch_ib(1)%z_centroid": 0.5, "patch_ib(1)%geometry": 8}) if len(dimInfo[0]) == 3 else ("Circle", {"patch_ib(1)%geometry": 2, "n": 49})
-                for label, opts in (("ib_ip_interp=2", {"ib_ip_interp": 2}), ("ib_ip_min_dist", {"ib_second_order_vel": "T", "ib_ip_min_dist": 1.5}), ("ib_wall_order=2", {"ib_wall_order": 2})):
-                    if not (viscous and "min_dist" in label):
+                for label, opts in (
+                    ("default", {}),
+                    ("ib_ip_interp=1", {"ib_ip_interp": 1}),
+                    ("ib_wall_order=2", {"ib_wall_order": 2}),
+                    ("ib_ip_min_dist", {"ib_second_order_vel": "T", "ib_ip_min_dist": 1.5}),
+                ):
+                    if label != "default" and not (viscous and "min_dist" in label):
                         # weno_Re_flux = T selects the viscous IB path whose contact velocity is smoothed (ib_smooth_contact); without it a
                         # CPU and a GPU run differ at 1e-10 through the sign of the contact speed at fluid/ghost faces
                         cases.append(define_case_d(stack, f"{shape} -> {label}", {**geom, **opts, **({"weno_Re_flux": "T"} if viscous else {})}))
-                    if label in ("ib_ip_interp=2", "ib_wall_order=2") and not viscous:
+                    if label in ("default", "ib_ip_interp=1", "ib_wall_order=2") and not viscous:
                         # A uniform quiescent state at a realistic pressure: the exact solution is the initial state, so any change is
                         # an error. The other cases run at p = 1, where a solid cell reset to 1 Pa is invisible.
                         quiescent = {"dt": 1.0e-6}  # the fixed step of the other cases would be a CFL of about 9 at this sound speed

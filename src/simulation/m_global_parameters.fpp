@@ -526,7 +526,7 @@ contains
 
         ! Immersed Boundaries (sim-specific extras)
         ib_neighborhood_radius = 0
-        ib_ip_interp = 1
+        ib_ip_interp = 2
         ib_wall_order = 1
         ib_mass_relax = 0
         collision_model = 0
