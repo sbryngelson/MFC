@@ -1411,6 +1411,7 @@ _nv(
 _nv(_PRE_POST, "num_fluids", "weno_order", "recon_type", "muscl_order", "mhd", "nb", "igr", "igr_order", "sigR")
 _nv(_ALL, "reactive_burn", "rburn")
 _nv(_PRE_SIM, "ib_airfoil")
+_nv(_PRE_SIM, "weno_Re_flux")  # sets the IB halo (f_ib_halo), which pre_process must match
 _nv(_PRE_SIM, "stl_models", "num_stl_models")
 _nv(
     _SIM,
@@ -1425,7 +1426,6 @@ _nv(
     "wenoz_q",
     "mp_weno",
     "weno_avg",
-    "weno_Re_flux",
     "null_weights",
     "muscl_eps",
     "int_comp",

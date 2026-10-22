@@ -122,6 +122,7 @@ contains
         ! IB flags, parallel I/O flags, fft_wrt)
 
         call s_assign_common_defaults
+        weno_Re_flux = .false.
 
         ! Boundary conditions (bc_x/y/z are per-target declarations, not visible in common)
         bc_x%beg = dflt_int; bc_x%end = dflt_int
@@ -559,7 +560,8 @@ contains
         if (bubbles_lagrange) fd_number = max(1, fd_order/2)
 
         call s_configure_coordinate_bounds(recon_type, weno_polyn, muscl_polyn, igr_order, buff_size, idwint, idwbuff, viscous, &
-                                           & bubbles_lagrange, m, n, p, num_dims, igr, ib, fd_number)
+                                           & bubbles_lagrange, m, n, p, num_dims, igr, ib, fd_number, &
+                                           & ib_halo=f_ib_halo(recon_type, weno_polyn, muscl_polyn, igr, viscous, weno_Re_flux, ib))
 
 #ifdef MFC_MPI
         if (qbmm .and. .not. polytropic) then

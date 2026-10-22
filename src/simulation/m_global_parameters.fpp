@@ -998,7 +998,8 @@ contains
         $:GPU_UPDATE(device='[gp_layers]')
 
         call s_configure_coordinate_bounds(recon_type, weno_polyn, muscl_polyn, igr_order, buff_size, idwint, idwbuff, viscous, &
-                                           & bubbles_lagrange, m, n, p, num_dims, igr, ib, fd_number, ib_halo=2*gp_layers + 2)
+                                           & bubbles_lagrange, m, n, p, num_dims, igr, ib, fd_number, &
+                                           & ib_halo=f_ib_halo(recon_type, weno_polyn, muscl_polyn, igr, viscous, weno_Re_flux, ib))
         $:GPU_UPDATE(device='[idwint, idwbuff]')
         ib_smooth_contact = ib .and. viscous .and. weno_Re_flux
         $:GPU_UPDATE(device='[ib_smooth_contact]')

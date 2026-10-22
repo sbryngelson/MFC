@@ -9,13 +9,13 @@ module m_helper_basic
 
     use m_derived_types
     use m_precision_select
-    use m_constants, only: recon_type_weno, recon_type_muscl
+    use m_constants, only: recon_type_weno, recon_type_muscl, gp_layers_full
 
     implicit none
 
     private
-    public :: f_approx_equal, f_approx_in_array, f_is_default, f_all_default, f_is_integer, s_configure_coordinate_bounds, &
-        & f_ghost_point_layers, s_update_cell_bounds, f_save_index
+    public :: f_approx_equal, f_ib_halo, f_approx_in_array, f_is_default, f_all_default, f_is_integer, &
+        & s_configure_coordinate_bounds, f_ghost_point_layers, s_update_cell_bounds, f_save_index
 
 contains
 
@@ -141,6 +141,17 @@ contains
         layers = max(min_layers, 2*(polyn + 1))
 
     end function f_ghost_point_layers
+
+    !> Halo an IB case needs: the image point of a ghost cell lies twice its depth away, so a shell of depth g needs 2 g + 2 cells.
+    !! pre_process and simulation must agree on it, since the boundary files carry the halo.
+    pure integer function f_ib_halo(recon_type, weno_polyn, muscl_polyn, igr, viscous, weno_Re_flux, ib) result(halo)
+
+        integer, intent(in) :: recon_type, weno_polyn, muscl_polyn
+        logical, intent(in) :: igr, viscous, weno_Re_flux, ib
+
+        halo = 2*f_ghost_point_layers(gp_layers_full, recon_type, weno_polyn, muscl_polyn, igr, viscous, weno_Re_flux, ib) + 2
+
+    end function f_ib_halo
 
     !> Compute ghost-cell buffer size and set interior/buffered coordinate index bounds.
     subroutine s_configure_coordinate_bounds(recon_type, weno_polyn, muscl_polyn, igr_order, buff_size, idwint, idwbuff, viscous, &
