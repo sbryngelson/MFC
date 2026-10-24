@@ -32,7 +32,7 @@ module m_ibm
         & s_find_num_ghost_points, s_compute_ghost_point_pressure, s_compute_ghost_point_velocity
     ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, s_report_ibm_surface, &
         & s_write_ib_surface, s_update_ib_temperatures, s_conserve_ib_mass, s_accumulate_ib_face_fluxes, &
-        & s_ibm_set_conduction_temperature
+        & s_ibm_set_conduction_temperature, s_ibm_restore_conduction_temperature
 
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
@@ -465,7 +465,7 @@ contains
                                 & reduction='[[n_not_converged, n_ill_posed, ng1, ng2, ng3, nf1, nf2, nf3]]', reductionOp='[+]', present='[ghost_points]')
             do i = 1, num_gps
                 if (record_surface) gp_surf(:,i) = 0._wp
-                ghost_points(i)%T_cond = 0._wp
+                ghost_points(i)%T_cond = T_cond_unset
                 gp = ghost_points(i)
                 if (.not. gp%interp_valid) cycle
                 j = gp%loc(1)
@@ -834,8 +834,11 @@ contains
 
     end subroutine s_ibm_correct_state
 
-    !> Give the wall conduction the mirrored ghost temperature from s_ibm_correct_state in place of the wall-gas temperature the
-    !! ghost state carries. Call after the conservative-to-primitive conversion, before the halo exchange.
+    !> Give the wall conduction gradient the mirrored ghost temperature from s_ibm_correct_state in place of the wall-gas
+    !! temperature the ghost state carries. Only the face difference may read it: the mirror of a cold wall in hot gas lies far
+    !! below 0 K, so properties at the ghost are evaluated at its own state (s_compute_chemistry_diffusion_flux, ib_marks) and
+    !! s_ibm_restore_conduction_temperature puts the ghost's own temperature back once the fluxes are formed. Call after the
+    !! conservative-to-primitive conversion, before the halo exchange.
     subroutine s_ibm_set_conduction_temperature(q_T_sf)
 
         type(scalar_field), intent(inout) :: q_T_sf
@@ -844,13 +847,32 @@ contains
         if (num_gps == 0) return
         $:GPU_PARALLEL_LOOP(private='[i]', present='[ghost_points]')
         do i = 1, num_gps
-            if (ghost_points(i)%T_cond > 0._wp) then
+            if (ghost_points(i)%T_cond > T_cond_unset) then
+                ghost_points(i)%T_save = q_T_sf%sf(ghost_points(i)%loc(1), ghost_points(i)%loc(2), ghost_points(i)%loc(3))
                 q_T_sf%sf(ghost_points(i)%loc(1), ghost_points(i)%loc(2), ghost_points(i)%loc(3)) = ghost_points(i)%T_cond
             end if
         end do
         $:END_GPU_PARALLEL_LOOP()
 
     end subroutine s_ibm_set_conduction_temperature
+
+    !> Undo s_ibm_set_conduction_temperature on this rank's ghosts, so the reaction source and the split chemistry substep see each
+    !! ghost's own temperature
+    subroutine s_ibm_restore_conduction_temperature(q_T_sf)
+
+        type(scalar_field), intent(inout) :: q_T_sf
+        integer                           :: i
+
+        if (num_gps == 0) return
+        $:GPU_PARALLEL_LOOP(private='[i]', present='[ghost_points]')
+        do i = 1, num_gps
+            if (ghost_points(i)%T_cond > T_cond_unset) then
+                q_T_sf%sf(ghost_points(i)%loc(1), ghost_points(i)%loc(2), ghost_points(i)%loc(3)) = ghost_points(i)%T_save
+            end if
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_ibm_restore_conduction_temperature
 
     !> One line at the end of a run if the reacting surface ever failed to solve. Silence means every ghost point on every step
     !! reached the surface-balance tolerance, i.e. the surface chemistry was actually applied everywhere it was asked for.
@@ -1502,7 +1524,7 @@ contains
                             ghost_points(local_idx)%loc(1) = i
                             ghost_points(local_idx)%loc(2) = j
                             ghost_points(local_idx)%loc(3) = k
-                            ghost_points(local_idx)%T_cond = 0._wp
+                            ghost_points(local_idx)%T_cond = T_cond_unset
                             ghost_points(local_idx)%layer = lay
                             ghost_points(local_idx)%ip_ok = .true.
                             encoded_patch_id = ib_markers%sf(i, j, k)
@@ -3214,14 +3236,10 @@ contains
         real(wp)            :: theta_T, theta_Y
         integer             :: k, k_bath
 
-        ! Temperature is held inside the window the thermodynamic model is fitted over, not merely above zero. Positivity alone
-        ! is too weak: a 300 K wall in 1500 K gas admits theta = 0.225, and the 30 K ghost temperature that follows is positive
-        ! but evaluates the NASA polynomials far below their T_low. Both ends are constrained, since a hot wall extrapolates
-        ! the other way. T_s itself can sit outside the window only if the case prescribed a Twall there; theta = 0 then hands
-        ! back exactly that value rather than quietly substituting a different wall temperature.
+        ! T_g only carries the conduction gradient across the wall faces (s_ibm_set_conduction_temperature); no property is
+        ! evaluated at it, so it is not held inside the thermodynamic window. Capping it there (a 300 K wall in 1500 K gas
+        ! allowed theta 0.075) removed a third to a half of the heat a cold particle takes up during ignition.
         theta_T = theta_T_max
-        if (T_s < T_IP) theta_T = min(theta_T, blend_safety*(T_s - T_surface_min)/(T_IP - T_s))
-        if (T_s > T_IP) theta_T = min(theta_T, blend_safety*(T_surface_max - T_s)/(T_s - T_IP))
         theta_T = max(theta_T, 0._wp)
 
         if (wf%tier == 1) then
