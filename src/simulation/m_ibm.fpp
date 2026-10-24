@@ -3136,7 +3136,9 @@ contains
     !! wall) and the cell (b in front) must not reach the wall beyond T_s: T_g - T_s <= (a/b)(T_s - T_n) on the mirror's side, and
     !! T_g = T_s once the cell is past T_s. The image point sits about a cell out, so without this an under-resolved layer leaves
     !! the mirror set by the second gas cell and drives the first past the wall temperature. A resolved, convex profile puts the
-    !! mirror inside the bound, so it leaves the mirror untouched there.
+    !! mirror inside the bound, so it leaves the mirror untouched there. A cell closer than a quarter of its spacing to the wall
+    !! plane is left out: its temperature is within noise of T_s, and the bound, whose slope there is a/b, then switched theta
+    !! between 0 and 1 from step to step and kept a steady conduction annulus from converging.
     function f_face_theta(q_prim_vf, gp, theta_max, T_IP, T_s) result(theta)
 
         $:GPU_ROUTINE(parallelism='[seq]')
@@ -3174,9 +3176,9 @@ contains
                 T_n = q_prim_vf(eqn_idx%E)%sf(c(1), c(2), c(3))*mw_n*q_prim_vf(eqn_idx%adv%beg)%sf(c(1), c(2), &
                                 & c(3))/(q_prim_vf(eqn_idx%cont%beg)%sf(c(1), c(2), c(3))*gas_constant)
                 r = (T_s - T_n)/(T_s - T_IP)
-                ! Wall distance of the neighbor from the ghost's tangent plane; at an edge it can come out <= 0 for a cell
-                ! just outside the curved wall, which then only gets the past-T_s condition
+                ! Wall distance of the neighbor from the ghost's tangent plane (it can come out <= 0 at an edge)
                 b = h*nrm(dir) - a
+                if (b < 0.25_wp*abs(h)) cycle
                 if (r <= 0._wp) then
                     theta = 0._wp
                 else if (b > 0._wp) then
