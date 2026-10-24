@@ -31,7 +31,8 @@ module m_ibm
     private :: s_compute_image_points, s_compute_interpolation_coeffs, s_interpolate_image_point, s_find_ghost_points, &
         & s_find_num_ghost_points, s_compute_ghost_point_pressure, s_compute_ghost_point_velocity
     ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, s_report_ibm_surface, &
-        & s_write_ib_surface, s_update_ib_temperatures, s_accumulate_ib_face_fluxes, s_ibm_set_conduction_temperature
+        & s_write_ib_surface, s_update_ib_temperatures, s_conserve_ib_mass, s_accumulate_ib_face_fluxes, &
+        & s_ibm_set_conduction_temperature
 
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
@@ -55,6 +56,8 @@ module m_ibm
     $:GPU_DECLARE(create='[corrected_gps]')
     type(integer_field) :: ib_markers_prev  !< Markers at the last s_update_ib_temperatures (moving bodies with ib_exchange)
     $:GPU_DECLARE(create='[ib_markers_prev]')
+    type(integer_field) :: ib_shell  !< ib_mass_relax: global IB id of each fluid cell within ib_shell_width cells of it, else 0
+    $:GPU_DECLARE(create='[ib_shell]')
 
     !> Quadratic wall-normal fill of one ghost point: two probes along the surface normal, with TSC weights, and the Lagrange
     !! weights that extrapolate the profile through them back to the ghost (see s_wall_fill).
@@ -91,7 +94,7 @@ module m_ibm
     !> gp_surf is filled when it is written (ib_surface_wrt) or integrated (lumped_ib, ib_heat_wrt).
     logical         :: record_surface
     logical, public :: lumped_ib    !< Some IB has thermal_bc = 3
-    logical, public :: ib_exchange  !< ib_heat is accumulated: lumped_ib or ib_heat_wrt
+    logical, public :: ib_exchange  !< ib_heat is accumulated: lumped_ib, ib_heat_wrt or ib_mass_relax
     $:GPU_DECLARE(create='[record_surface]')
 
     !> Per global IB, for the thermal_bc = 3 update and ib_heat_wrt: (1) surface area and (4) gasification rate, from gp_surf; (2)
@@ -100,7 +103,12 @@ module m_ibm
     real(wp), allocatable, dimension(:,:) :: ib_heat
     $:GPU_DECLARE(create='[ib_heat]')
 
-    integer :: num_gps  !< Number of ghost points
+    !> ib_mass_relax, per global IB: (1) mass the gas gained from the body beyond its gasification and not yet returned, (2) the
+    !! share of it removed this step; ib_shell_mass(1, :): gas mass of the body's shell.
+    real(wp), allocatable, dimension(:,:) :: ib_mass_res, ib_shell_mass
+    $:GPU_DECLARE(create='[ib_mass_res, ib_shell_mass]')
+    integer, parameter :: ib_shell_width = 2
+    integer            :: num_gps  !< Number of ghost points
 #if defined(MFC_OpenACC)
     $:GPU_DECLARE(create='[num_gps]')
 #elif defined(MFC_OpenMP)
@@ -233,18 +241,25 @@ contains
         ! body must still take part in its allreduce.
         call s_mpi_allreduce_integer_sum(int(count(patch_ib(1:num_ibs)%thermal_bc == 3), 8), n_lumped)
         lumped_ib = n_lumped > 0
-        record_surface = ib_surface_wrt .or. lumped_ib .or. ib_heat_wrt
+        record_surface = ib_surface_wrt .or. lumped_ib .or. ib_heat_wrt .or. ib_mass_relax > 0
         $:GPU_UPDATE(device='[record_surface]')
         if (record_surface) then
             @:ALLOCATE(gp_surf(ib_surf_nvars, 1:max_num_gps))
             gp_surf = 0._wp
             $:GPU_UPDATE(device='[gp_surf]')
         end if
-        ib_exchange = lumped_ib .or. ib_heat_wrt
+        ib_exchange = lumped_ib .or. ib_heat_wrt .or. ib_mass_relax > 0
         if (ib_exchange) then
             @:ALLOCATE(ib_heat(4, num_gbl_ibs))
             ib_heat = 0._wp
             $:GPU_UPDATE(device='[ib_heat]')
+        end if
+        if (ib_mass_relax > 0) then
+            @:ALLOCATE(ib_mass_res(2, num_gbl_ibs), ib_shell_mass(1, num_gbl_ibs))
+            ib_mass_res = 0._wp
+            $:GPU_UPDATE(device='[ib_mass_res]')
+            @:ALLOCATE(ib_shell%sf(0:m, 0:n, 0:p))
+            @:ACC_SETUP_SFs(ib_shell)
         end if
         if (ib_exchange .and. moving_immersed_boundary_flag) then
             @:ALLOCATE(ib_markers_prev%sf(0:m, 0:n, 0:p))
@@ -1081,6 +1096,17 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
+        ! ib_mass_relax: the gas should gain exactly the gasified mass; bank the rest and release 1/ib_mass_relax of the bank
+        if (ib_mass_relax > 0) then
+            $:GPU_PARALLEL_LOOP(private='[g]', copyin='[dt_step]')
+            do g = 1, num_gbl_ibs
+                ib_mass_res(1, g) = ib_mass_res(1, g) + (ib_heat(3, g) - ib_heat(4, g))*dt_step
+                ib_mass_res(2, g) = ib_mass_res(1, g)/real(ib_mass_relax, wp)
+                ib_mass_res(1, g) = ib_mass_res(1, g) - ib_mass_res(2, g)
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        end if
+
         ! The next step accumulates afresh
         $:GPU_PARALLEL_LOOP(private='[g]')
         do g = 1, num_gbl_ibs
@@ -1090,6 +1116,91 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
     end subroutine s_update_ib_temperatures
+
+    !> ib_mass_relax: take this step's release of each body's bank (s_update_ib_temperatures) out of the gas within ib_shell_width
+    !! cells of the body, scaling the partial densities, momentum, energy and species of those cells by one factor (velocity,
+    !! temperature and composition kept). The ghost-cell treatment does not conserve mass at a moving or gasifying wall (face fluxes
+    !! into overwritten ghost cells against cells changing side); this returns the gas to exactly the gasified mass, lagged by about
+    !! ib_mass_relax steps.
+    subroutine s_conserve_ib_mass(q_cons_vf)
+
+        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
+        real(wp)                                               :: rho, vol, f
+        integer                                                :: i, j, k, l, jj, kk, ll, wz, mk, ib_tmp, ib_id, g, xp, yp, zp
+
+        wz = 0
+        if (num_dims == 3) wz = ib_shell_width
+        $:GPU_PARALLEL_LOOP(private='[g]')
+        do g = 1, num_gbl_ibs
+            ib_shell_mass(1, g) = 0._wp
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+        ! Shell membership from the markers, which carry the halo, so a cell next to another rank's body is found too
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, l, jj, kk, ll, mk, ib_tmp, ib_id, g, xp, yp, zp, rho, vol]', collapse=3, &
+                            & copyin='[wz]')
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    g = 0
+                    if (ib_markers%sf(j, k, l) == 0) then
+                        mk = 0
+                        do ll = -wz, wz
+                            do kk = -ib_shell_width, ib_shell_width
+                                do jj = -ib_shell_width, ib_shell_width
+                                    if (mk == 0) mk = ib_markers%sf(j + jj, k + kk, l + ll)
+                                end do
+                            end do
+                        end do
+                        if (mk /= 0) then
+                            call s_decode_patch_periodicity(mk, ib_tmp, xp, yp, zp)
+                            call s_get_neighborhood_idx(ib_tmp, ib_id)
+                            if (ib_id > 0) g = patch_ib(ib_id)%gbl_patch_id
+                        end if
+                    end if
+                    ib_shell%sf(j, k, l) = g
+                    if (g > 0) then
+                        rho = 0._wp
+                        do i = eqn_idx%cont%beg, eqn_idx%cont%end
+                            rho = rho + q_cons_vf(i)%sf(j, k, l)
+                        end do
+                        vol = dx(j)*dy(k)
+                        if (num_dims == 3) vol = vol*dz(l)
+                        $:GPU_ATOMIC(atomic='update')
+                        ib_shell_mass(1, g) = ib_shell_mass(1, g) + rho*vol
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+        $:GPU_UPDATE(host='[ib_shell_mass]')
+        call s_mpi_allreduce_vectors_sum(ib_shell_mass, ib_shell_mass, 1, num_gbl_ibs)
+        $:GPU_UPDATE(device='[ib_shell_mass]')
+
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, l, g, f]', collapse=3)
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    g = ib_shell%sf(j, k, l)
+                    if (g > 0) then
+                        if (ib_shell_mass(1, g) > 0._wp) then
+                            f = 1._wp - ib_mass_res(2, g)/ib_shell_mass(1, g)
+                            do i = eqn_idx%cont%beg, eqn_idx%E
+                                q_cons_vf(i)%sf(j, k, l) = f*q_cons_vf(i)%sf(j, k, l)
+                            end do
+                            if (chemistry) then
+                                do i = eqn_idx%species%beg, eqn_idx%species%end
+                                    q_cons_vf(i)%sf(j, k, l) = f*q_cons_vf(i)%sf(j, k, l)
+                                end do
+                            end if
+                        end if
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_conserve_ib_mass
 
     !> Moving bodies: the body-frame energy E' = E - rho u.V_b + rho |V_b|^2/2 and the mass of each cell a body covered (+) or
     !! uncovered (-) this step, as rates into ib_heat(2) and out of ib_heat(3). The grid faces do not move with the wall, so the
@@ -2101,7 +2212,7 @@ contains
 
         if (num_ibs == 0) return
         do_ft = moving_immersed_boundary_flag .or. ib_state_wrt
-        all_ibs = ib_heat_wrt
+        all_ibs = ib_heat_wrt .or. ib_mass_relax > 0
 
         if (do_ft .and. idir == 1) then
             $:GPU_PARALLEL_LOOP(private='[i, l]', collapse=2)
@@ -2879,6 +2990,10 @@ contains
         end if
         if (allocated(ib_heat)) then
             @:DEALLOCATE(ib_heat)
+        end if
+        if (allocated(ib_mass_res)) then
+            @:DEALLOCATE(ib_mass_res, ib_shell_mass)
+            @:DEALLOCATE(ib_shell%sf)
         end if
         if (collision_model > 0) call s_finalize_collisions_module()
 #ifdef MFC_MPI

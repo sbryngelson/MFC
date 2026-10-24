@@ -528,6 +528,7 @@ contains
         ib_neighborhood_radius = 0
         ib_ip_interp = 1
         ib_wall_order = 1
+        ib_mass_relax = 0
         collision_model = 0
         collision_temporal_resolution = 0
         coefficient_of_restitution = dflt_real
