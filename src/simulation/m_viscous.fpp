@@ -23,7 +23,7 @@ module m_viscous
     use m_hb_function
 
     private; public s_get_viscous, s_compute_viscous_stress_cylindrical_boundary, s_initialize_viscous_module, &
-        & s_reconstruct_cell_boundary_values_visc_deriv, s_finalize_viscous_module
+        & s_reconstruct_cell_boundary_values_visc_deriv, s_compact_ib_viscous_gradients, s_finalize_viscous_module
 
     type(int_bounds_info) :: iv
     type(int_bounds_info) :: is1_viscous, is2_viscous, is3_viscous
@@ -31,6 +31,9 @@ module m_viscous
 
     real(wp), allocatable, dimension(:,:) :: Res_viscous
     $:GPU_DECLARE(create='[Res_viscous]')
+
+    !> Faces within this many cells of an immersed-boundary cell take the compact velocity gradient (s_compact_ib_viscous_gradients)
+    integer, parameter :: ib_visc_band = 2
 
 contains
 
@@ -1123,6 +1126,101 @@ contains
     end subroutine s_compute_fd_gradient
 
     !> Finalize the viscous module
+    !> weno_Re_flux with immersed boundaries: on the faces of direction id within ib_visc_band cells of a body cell, the velocity
+    !! gradient is the compact one of the weno_Re_flux = F path (normal difference across the face, mean of the two cells' central
+    !! tangential differences). The ghost values extend the flow only one layer deep: the mirror leaves a kink at the wall and the
+    !! deeper layers come from distant image points. The wide WENO stencils carried that into the fluid faces next to the wall,
+    !! where the wall shear then stalled near 1 % (Taylor-Couette, 20 and 30 cells per radius); the compact stencil converges. The
+    !! face j+1/2 (along id) is read by the viscous flux from dqR(j) and dqL(j+1), so both are set.
+    subroutine s_compact_ib_viscous_gradients(q_prim_vf, markers, id, dqL_x, dqR_x, dqL_y, dqR_y, dqL_z, dqR_z)
+
+        type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
+        type(integer_field), intent(in) :: markers
+        integer, intent(in) :: id
+        type(scalar_field), dimension(eqn_idx%mom%beg:eqn_idx%mom%end), intent(inout) :: dqL_x, dqR_x, dqL_y, dqR_y, dqL_z, dqR_z
+        integer :: i, j, k, l, a, b, c, jn, kn, ln, ja, kb, lc, wz
+        logical :: near
+        real(wp) :: g
+
+        ja = 0; kb = 0; lc = 0
+        if (id == 1) ja = 1
+        if (id == 2) kb = 1
+        if (id == 3) lc = 1
+        wz = 0
+        if (p > 0) wz = ib_visc_band
+
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, a, b, c, jn, kn, ln, near, g]', copyin='[ja, kb, lc, wz]')
+        do l = -lc, p
+            do k = -kb, n
+                do j = -ja, m
+                    jn = j + ja; kn = k + kb; ln = l + lc
+                    near = .false.
+                    do c = -wz, wz + lc*min(wz, 1)
+                        do b = -ib_visc_band*min(n, 1), (ib_visc_band + kb)*min(n, 1)
+                            do a = -ib_visc_band, ib_visc_band + ja
+                                if (markers%sf(j + a, k + b, l + c) /= 0) near = .true.
+                            end do
+                        end do
+                    end do
+                    if (near) then
+                        $:GPU_LOOP(parallelism='[seq]')
+                        do i = eqn_idx%mom%beg, eqn_idx%mom%end
+                            if (id == 1) then
+                                g = (q_prim_vf(i)%sf(jn, kn, ln) - q_prim_vf(i)%sf(j, k, l))/(x_cc(jn) - x_cc(j))
+                            else
+                                g = 0.5_wp*(f_cdiff(q_prim_vf(i), j, k, l, 1) + f_cdiff(q_prim_vf(i), jn, kn, ln, 1))
+                            end if
+                            dqR_x(i)%sf(j, k, l) = g
+                            dqL_x(i)%sf(jn, kn, ln) = g
+                            if (n > 0) then
+                                if (id == 2) then
+                                    g = (q_prim_vf(i)%sf(jn, kn, ln) - q_prim_vf(i)%sf(j, k, l))/(y_cc(kn) - y_cc(k))
+                                else
+                                    g = 0.5_wp*(f_cdiff(q_prim_vf(i), j, k, l, 2) + f_cdiff(q_prim_vf(i), jn, kn, ln, 2))
+                                end if
+                                dqR_y(i)%sf(j, k, l) = g
+                                dqL_y(i)%sf(jn, kn, ln) = g
+                            end if
+                            if (p > 0) then
+                                if (id == 3) then
+                                    g = (q_prim_vf(i)%sf(jn, kn, ln) - q_prim_vf(i)%sf(j, k, l))/(z_cc(ln) - z_cc(l))
+                                else
+                                    g = 0.5_wp*(f_cdiff(q_prim_vf(i), j, k, l, 3) + f_cdiff(q_prim_vf(i), jn, kn, ln, 3))
+                                end if
+                                dqR_z(i)%sf(j, k, l) = g
+                                dqL_z(i)%sf(jn, kn, ln) = g
+                            end if
+                        end do
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_compact_ib_viscous_gradients
+
+    !> Cell-centred derivative along dir, the mean of the backward and forward differences (as the weno_Re_flux = F path)
+    function f_cdiff(q, j, k, l, dir) result(d)
+
+        $:GPU_ROUTINE(function_name='f_cdiff', parallelism='[seq]', cray_inline=True)
+
+        type(scalar_field), intent(in) :: q
+        integer, intent(in)            :: j, k, l, dir
+        real(wp)                       :: d
+
+        if (dir == 1) then
+            d = 0.5_wp*((q%sf(j + 1, k, l) - q%sf(j, k, l))/(x_cc(j + 1) - x_cc(j)) + (q%sf(j, k, l) - q%sf(j - 1, k, &
+                        & l))/(x_cc(j) - x_cc(j - 1)))
+        else if (dir == 2) then
+            d = 0.5_wp*((q%sf(j, k + 1, l) - q%sf(j, k, l))/(y_cc(k + 1) - y_cc(k)) + (q%sf(j, k, l) - q%sf(j, k - 1, &
+                        & l))/(y_cc(k) - y_cc(k - 1)))
+        else
+            d = 0.5_wp*((q%sf(j, k, l + 1) - q%sf(j, k, l))/(z_cc(l + 1) - z_cc(l)) + (q%sf(j, k, l) - q%sf(j, k, &
+                        & l - 1))/(z_cc(l) - z_cc(l - 1)))
+        end if
+
+    end function f_cdiff
+
     impure subroutine s_finalize_viscous_module()
 
         @:DEALLOCATE(Res_viscous)
