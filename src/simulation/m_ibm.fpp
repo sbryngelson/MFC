@@ -53,6 +53,8 @@ module m_ibm
     !! neighbors, and never over each other.
     type(integer_field) :: corrected_gps
     $:GPU_DECLARE(create='[corrected_gps]')
+    type(integer_field) :: ib_markers_prev  !< Markers at the last s_update_ib_temperatures (moving bodies with ib_exchange)
+    $:GPU_DECLARE(create='[ib_markers_prev]')
 
     !> Quadratic wall-normal fill of one ghost point: two probes along the surface normal, with TSC weights, and the Lagrange
     !! weights that extrapolate the profile through them back to the ghost (see s_wall_fill).
@@ -243,6 +245,12 @@ contains
             @:ALLOCATE(ib_heat(4, num_gbl_ibs))
             ib_heat = 0._wp
             $:GPU_UPDATE(device='[ib_heat]')
+        end if
+        if (ib_exchange .and. moving_immersed_boundary_flag) then
+            @:ALLOCATE(ib_markers_prev%sf(0:m, 0:n, 0:p))
+            @:ACC_SETUP_SFs(ib_markers_prev)
+            ib_markers_prev%sf(0:m,0:n,0:p) = ib_markers%sf(0:m,0:n,0:p)
+            $:GPU_UPDATE(device='[ib_markers_prev%sf]')
         end if
         ! Ghost-cell IBM, Tseng & Ferziger JCP (2003), Mittal & Iaccarino ARFM (2005)
         call s_find_ghost_points()
@@ -1019,13 +1027,14 @@ contains
     !! is consistent. The step is explicit: the body's thermal time m c_s/(h A) is many orders of magnitude longer than a flow step.
     !! For D/ib_heat.dat every body also keeps its gasification rate, face mass out and fluid heat in, Q_in (+ the c_s term for
     !! thermal_bc = 3), in patch_ib%mdot, %mdot_face and %qdot.
-    impure subroutine s_update_ib_temperatures(dt_step)
+    impure subroutine s_update_ib_temperatures(dt_step, q_cons_vf)
 
         real(wp), intent(in) :: dt_step
-        real(wp), parameter  :: sigma_sb = 5.670374419e-8_wp  !< Stefan-Boltzmann constant [W/m^2/K^4]
-        real(wp), parameter  :: T_ref = 298.15_wp
-        real(wp)             :: q_in
-        integer              :: i, g
+        type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
+        real(wp), parameter :: sigma_sb = 5.670374419e-8_wp  !< Stefan-Boltzmann constant [W/m^2/K^4]
+        real(wp), parameter :: T_ref = 298.15_wp
+        real(wp) :: q_in
+        integer :: i, g
 
         ! Area and gasification rate from the surface records of the last stage
 
@@ -1048,6 +1057,7 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
         end if
+        if (moving_immersed_boundary_flag) call s_add_swept_cells(q_cons_vf, dt_step)
         $:GPU_UPDATE(host='[ib_heat]')
         call s_mpi_allreduce_vectors_sum(ib_heat, ib_heat, 4, num_gbl_ibs)
         $:GPU_UPDATE(device='[ib_heat]')
@@ -1080,6 +1090,79 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
     end subroutine s_update_ib_temperatures
+
+    !> Moving bodies: the body-frame energy E' = E - rho u.V_b + rho |V_b|^2/2 and the mass of each cell a body covered (+) or
+    !! uncovered (-) this step, as rates into ib_heat(2) and out of ib_heat(3). The grid faces do not move with the wall, so the
+    !! face fluxes alone miss the gas swept between face and wall (validation3/ib_moving_mass/repro.py). A cell passing directly
+    !! from one body to another is not counted.
+    subroutine s_add_swept_cells(q_cons_vf, dt_step)
+
+        type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
+        real(wp), intent(in)                                :: dt_step
+        real(wp), dimension(3)                              :: r, vb, box_len
+        real(wp)                                            :: rho, e_b, vol
+        integer                                             :: i, j, k, l, mk, sgn, ib_tmp, ib_id, g, xp, yp, zp
+
+        box_len = [glb_bounds(1)%end - glb_bounds(1)%beg, glb_bounds(2)%end - glb_bounds(2)%beg, 0._wp]
+        if (num_dims == 3) box_len(3) = glb_bounds(3)%end - glb_bounds(3)%beg
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, l, mk, sgn, ib_tmp, ib_id, g, xp, yp, zp, r, vb, rho, e_b, vol]', collapse=3, &
+                            & copyin='[dt_step, box_len]')
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    if ((ib_markers_prev%sf(j, k, l) == 0) .neqv. (ib_markers%sf(j, k, l) == 0)) then
+                        sgn = merge(1, -1, ib_markers%sf(j, k, l) /= 0)
+                        mk = merge(ib_markers%sf(j, k, l), ib_markers_prev%sf(j, k, l), sgn == 1)
+                        call s_decode_patch_periodicity(mk, ib_tmp, xp, yp, zp)
+                        call s_get_neighborhood_idx(ib_tmp, ib_id)
+                        if (ib_id > 0) then
+                            ! Lever arm to the centroid, minimum image (a body may have just been wrapped)
+                            r(1) = x_cc(j) - patch_ib(ib_id)%x_centroid
+                            r(2) = y_cc(k) - patch_ib(ib_id)%y_centroid
+                            r(3) = 0._wp
+                            if (num_dims == 3) r(3) = z_cc(l) - patch_ib(ib_id)%z_centroid
+                            do i = 1, 3
+                                if (box_len(i) > 0._wp) r(i) = r(i) - box_len(i)*anint(r(i)/box_len(i))
+                            end do
+                            vb(1) = patch_ib(ib_id)%vel(1) + patch_ib(ib_id)%angular_vel(2)*r(3) - patch_ib(ib_id)%angular_vel(3) &
+                               & *r(2)
+                            vb(2) = patch_ib(ib_id)%vel(2) + patch_ib(ib_id)%angular_vel(3)*r(1) - patch_ib(ib_id)%angular_vel(1) &
+                               & *r(3)
+                            vb(3) = patch_ib(ib_id)%vel(3) + patch_ib(ib_id)%angular_vel(1)*r(2) - patch_ib(ib_id)%angular_vel(2) &
+                               & *r(1)
+                            rho = 0._wp
+                            do i = eqn_idx%cont%beg, eqn_idx%cont%end
+                                rho = rho + q_cons_vf(i)%sf(j, k, l)
+                            end do
+                            e_b = q_cons_vf(eqn_idx%E)%sf(j, k, l) + 0.5_wp*rho*(vb(1)**2 + vb(2)**2 + vb(3)**2)
+                            do i = 1, num_dims
+                                e_b = e_b - q_cons_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)*vb(i)
+                            end do
+                            vol = dx(j)*dy(k)
+                            if (num_dims == 3) vol = vol*dz(l)
+                            g = patch_ib(ib_id)%gbl_patch_id
+                            $:GPU_ATOMIC(atomic='update')
+                            ib_heat(2, g) = ib_heat(2, g) + real(sgn, wp)*e_b*vol/dt_step
+                            $:GPU_ATOMIC(atomic='update')
+                            ib_heat(3, g) = ib_heat(3, g) - real(sgn, wp)*rho*vol/dt_step
+                        end if
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+        $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3)
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    ib_markers_prev%sf(j, k, l) = ib_markers%sf(j, k, l)
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_add_swept_cells
 
     !> Compute the image points for each ghost point
     impure subroutine s_compute_image_points()
@@ -2010,11 +2093,11 @@ contains
         integer, intent(in)                                 :: idir, stage
         type(scalar_field), dimension(sys_size), intent(in) :: flux_vf, flux_src_vf
         real(wp), dimension(3), parameter                   :: w_rk3 = [1._wp/6._wp, 1._wp/6._wp, 2._wp/3._wp]
-        real(wp), dimension(3)                              :: f, r, tq
-        real(wp)                                            :: area, w, f_E, f_m
+        real(wp), dimension(3)                              :: f, r, tq, vb
+        real(wp)                                            :: area, w, f_E, f_m, f_mom
         integer                                             :: i, j, k, l, jn, kn, ln, cell(3), side, ib_id, ib_tmp, xp, yp, zp, g
         integer                                             :: j0, k0, l0
-        logical                                             :: has_src, has_src_E, do_ft, all_ibs
+        logical                                             :: has_src, has_src_E, do_ft, all_ibs, moving
 
         if (num_ibs == 0) return
         do_ft = moving_immersed_boundary_flag .or. ib_state_wrt
@@ -2043,7 +2126,7 @@ contains
 
         ! Face (j, k, l) lies between that cell and the next one along idir
         $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, jn, kn, ln, cell, side, ib_id, ib_tmp, xp, yp, zp, g, area, f, r, &
-                            & tq, f_E, f_m]', copyin='[has_src, has_src_E, do_ft, all_ibs, w, idir, j0, k0, l0]')
+                            & tq, f_E, f_m, vb, f_mom, moving]', copyin='[has_src, has_src_E, do_ft, all_ibs, w, idir, j0, k0, l0]')
         do l = l0, p
             do k = k0, n
                 do j = j0, m
@@ -2068,7 +2151,8 @@ contains
                             if (idir == 2) area = dx(j)
                             if (idir == 3) area = dx(j)*dy(k)
                             if (num_dims == 3 .and. idir /= 3) area = area*dz(l)
-                            if (do_ft) then
+                            moving = patch_ib(ib_id)%moving_ibm > 0
+                            if (do_ft .or. moving) then
                                 ! Lever arm: face centre minus the centroid of the body's periodic image
                                 r = 0._wp
                                 r(1) = merge(x_cb(j), x_cc(j), idir == 1) - (patch_ib(ib_id)%x_centroid + real(xp, &
@@ -2078,6 +2162,8 @@ contains
                                 if (num_dims == 3) r(3) = merge(z_cb(l), z_cc(l), &
                                     & idir == 3) - (patch_ib(ib_id)%z_centroid + real(zp, &
                                     & wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
+                            end if
+                            if (do_ft) then
                                 f = 0._wp
                                 do i = 1, num_dims
                                     f(i) = flux_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)
@@ -2102,6 +2188,23 @@ contains
                                 do i = eqn_idx%cont%beg, eqn_idx%cont%end
                                     f_m = f_m + flux_vf(i)%sf(j, k, l)
                                 end do
+                                if (moving) then
+                                    ! Energy flux in the body frame, f_E - V_b.f_mom + |V_b|^2 f_m/2 (V_b = V + omega x r at the
+                                    ! face): the lab flux also carries the wall's pressure/viscous work and the swept gas energy,
+                                    ! which are not heat into the body
+                                    vb(1) = patch_ib(ib_id)%vel(1) + patch_ib(ib_id)%angular_vel(2)*r(3) &
+                                       & - patch_ib(ib_id)%angular_vel(3)*r(2)
+                                    vb(2) = patch_ib(ib_id)%vel(2) + patch_ib(ib_id)%angular_vel(3)*r(1) &
+                                       & - patch_ib(ib_id)%angular_vel(1)*r(3)
+                                    vb(3) = patch_ib(ib_id)%vel(3) + patch_ib(ib_id)%angular_vel(1)*r(2) &
+                                       & - patch_ib(ib_id)%angular_vel(2)*r(1)
+                                    do i = 1, num_dims
+                                        f_mom = flux_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)
+                                        if (has_src) f_mom = f_mom + flux_src_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)
+                                        f_E = f_E - vb(i)*f_mom
+                                    end do
+                                    f_E = f_E + 0.5_wp*(vb(1)**2 + vb(2)**2 + vb(3)**2)*f_m
+                                end if
                                 g = patch_ib(ib_id)%gbl_patch_id
                                 $:GPU_ATOMIC(atomic='update')
                                 ib_heat(2, g) = ib_heat(2, g) + real(side, wp)*w*area*f_E
@@ -2754,6 +2857,9 @@ contains
 
         @:DEALLOCATE(ib_markers%sf)
         @:DEALLOCATE(corrected_gps%sf)
+        if (ib_exchange .and. moving_immersed_boundary_flag) then
+            @:DEALLOCATE(ib_markers_prev%sf)
+        end if
         @:DEALLOCATE(ib_face_ft)
         do i = 1, num_ib_airfoils_max
             if (allocated(ib_airfoil_grids(i)%upper)) then
