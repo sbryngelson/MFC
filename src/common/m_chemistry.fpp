@@ -363,7 +363,7 @@ contains
         real(wp), dimension(${NUM_SPECIES}$) :: mass_diffusivities_mixavg_Cell, dXk_dxi, h_l, h_r, h_k
         real(wp), dimension(${NUM_SPECIES}$) :: Mass_Diffu_Flux, dYk_dxi
         real(wp) :: Mass_Diffu_Energy
-        real(wp) :: MW_L, MW_R, MW_cell, T_L, T_R, P_L, P_R, rho_L, rho_R, rho_cell, rho_Vic
+        real(wp) :: MW_L, MW_R, MW_cell, T_L, T_R, P_L, P_R, rho_L, rho_R, rho_cell, rho_Vic, Tp_L, Tp_R
         real(wp) :: lambda_L, lambda_R, lambda_Cell, dT_dxi, grid_spacing
         real(wp) :: Cp_L, Cp_R
         real(wp) :: diffusivity_L, diffusivity_R, diffusivity_cell
@@ -386,7 +386,7 @@ contains
                                     & mass_diffusivities_mixavg1, mass_diffusivities_mixavg2, mass_diffusivities_mixavg_Cell, &
                                     & h_l, h_r, Xs_cell, h_k, dXk_dxi, Mass_Diffu_Flux, Mass_Diffu_Energy, MW_L, MW_R, MW_cell, &
                                     & T_L, T_R, P_L, P_R, rho_L, rho_R, rho_cell, rho_Vic, lambda_L, lambda_R, lambda_Cell, &
-                                    & dT_dxi, grid_spacing]', copyin='[offsets]')
+                                    & dT_dxi, grid_spacing, Tp_L, Tp_R]', copyin='[offsets]')
                 do z = isc3%beg, isc3%end
                     do y = isc2%beg, isc2%end
                         do x = isc1%beg, isc1%end
@@ -412,22 +412,31 @@ contains
                             P_L = q_prim_qp(eqn_idx%E)%sf(x, y, z)
                             P_R = q_prim_qp(eqn_idx%E)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
 
+                            ! q_T_sf carries the gradient: at an IB ghost it holds the mirrored conduction temperature (m_ibm),
+                            ! which can lie far outside the thermodynamic fits. The properties use each cell's own state
+                            ! temperature p W/(rho R), equal to q_T_sf to round-off in the gas.
                             T_L = q_T_sf%sf(x, y, z)
                             T_R = q_T_sf%sf(x + offsets(1), y + offsets(2), z + offsets(3))
                             dT_dxi = (T_R - T_L)/grid_spacing
+                            rho_L = 0._wp; rho_R = 0._wp
+                            $:GPU_LOOP(parallelism='[seq]')
+                            do i = eqn_idx%cont%beg, eqn_idx%cont%end
+                                rho_L = rho_L + q_prim_qp(i)%sf(x, y, z)
+                                rho_R = rho_R + q_prim_qp(i)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
+                            end do
+                            call get_mixture_molecular_weight(Ys_L, MW_L)
+                            call get_mixture_molecular_weight(Ys_R, MW_R)
+                            Tp_L = P_L*MW_L/(rho_L*gas_constant)
+                            Tp_R = P_R*MW_R/(rho_R*gas_constant)
 
                             ! Transport state and species enthalpies [J/kg] of each side
-                            call get_mixavg_transport_state(P_L, T_L, Ys_L, MW_L, Xs_L, mass_diffusivities_mixavg1, lambda_L)
-                            call get_mixavg_transport_state(P_R, T_R, Ys_R, MW_R, Xs_R, mass_diffusivities_mixavg2, lambda_R)
+                            call get_mixavg_transport_state(P_L, Tp_L, Ys_L, MW_L, Xs_L, mass_diffusivities_mixavg1, lambda_L)
+                            call get_mixavg_transport_state(P_R, Tp_R, Ys_R, MW_R, Xs_R, mass_diffusivities_mixavg2, lambda_R)
                             MW_cell = 0.5_wp*(MW_L + MW_R)
-
-                            ! Density from (p, T, Y), as q_T_sf can hold an IB ghost's conduction temperature (m_ibm)
-                            rho_L = P_L*MW_L/(gas_constant*T_L)
-                            rho_R = P_R*MW_R/(gas_constant*T_R)
                             rho_cell = 0.5_wp*(rho_L + rho_R)
 
-                            call get_species_enthalpies_mass(T_L, h_l)
-                            call get_species_enthalpies_mass(T_R, h_r)
+                            call get_species_enthalpies_mass(Tp_L, h_l)
+                            call get_species_enthalpies_mass(Tp_R, h_r)
 
                             ! Calculate species properties and gradients
                             $:GPU_LOOP(parallelism='[seq]')
@@ -502,7 +511,7 @@ contains
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[x, y, z, i, eqn, Ys_L, Ys_R, Ys_cell, dYk_dxi, Mass_Diffu_Flux, &
                                     & grid_spacing, MW_L, MW_R, MW_cell, P_L, P_R, rho_L, rho_R, rho_cell, T_L, T_R, Cp_L, Cp_R, &
                                     & hmix_L, hmix_R, dh_dxi, lambda_L, lambda_R, lambda_Cell, diffusivity_L, diffusivity_R, &
-                                    & diffusivity_cell, Mass_Diffu_Energy]', copyin='[offsets]')
+                                    & diffusivity_cell, Mass_Diffu_Energy, Tp_L, Tp_R]', copyin='[offsets]')
                 do z = isc3%beg, isc3%end
                     do y = isc2%beg, isc2%end
                         do x = isc1%beg, isc1%end
@@ -533,23 +542,29 @@ contains
                             P_L = q_prim_qp(eqn_idx%E)%sf(x, y, z)
                             P_R = q_prim_qp(eqn_idx%E)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
 
+                            ! As in model 1: q_T_sf carries the gradient (an IB ghost's mirrored conduction temperature), the
+                            ! properties use each cell's own state temperature, and the enthalpy is continued linearly from it
                             T_L = q_T_sf%sf(x, y, z)
                             T_R = q_T_sf%sf(x + offsets(1), y + offsets(2), z + offsets(3))
-
-                            ! Density from (p, T, Y), as q_T_sf can hold an IB ghost's conduction temperature (m_ibm)
-                            rho_L = P_L*MW_L/(gas_constant*T_L)
-                            rho_R = P_R*MW_R/(gas_constant*T_R)
+                            rho_L = 0._wp; rho_R = 0._wp
+                            $:GPU_LOOP(parallelism='[seq]')
+                            do i = eqn_idx%cont%beg, eqn_idx%cont%end
+                                rho_L = rho_L + q_prim_qp(i)%sf(x, y, z)
+                                rho_R = rho_R + q_prim_qp(i)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
+                            end do
+                            Tp_L = P_L*MW_L/(rho_L*gas_constant)
+                            Tp_R = P_R*MW_R/(rho_R*gas_constant)
                             rho_cell = 0.5_wp*(rho_L + rho_R)
 
-                            call get_mixture_specific_heat_cp_mass(T_L, Ys_L, Cp_L)
-                            call get_mixture_specific_heat_cp_mass(T_R, Ys_R, Cp_R)
-                            call get_mixture_enthalpy_mass(T_L, Ys_L, hmix_L)
-                            call get_mixture_enthalpy_mass(T_R, Ys_R, hmix_R)
-                            dh_dxi = (hmix_R - hmix_L)/grid_spacing
+                            call get_mixture_specific_heat_cp_mass(Tp_L, Ys_L, Cp_L)
+                            call get_mixture_specific_heat_cp_mass(Tp_R, Ys_R, Cp_R)
+                            call get_mixture_enthalpy_mass(Tp_L, Ys_L, hmix_L)
+                            call get_mixture_enthalpy_mass(Tp_R, Ys_R, hmix_R)
+                            dh_dxi = (hmix_R + Cp_R*(T_R - Tp_R) - hmix_L - Cp_L*(T_L - Tp_L))/grid_spacing
 
                             ! Get transport properties
-                            call get_mixture_thermal_conductivity_mixavg(T_L, Ys_L, lambda_L)
-                            call get_mixture_thermal_conductivity_mixavg(T_R, Ys_R, lambda_R)
+                            call get_mixture_thermal_conductivity_mixavg(Tp_L, Ys_L, lambda_L)
+                            call get_mixture_thermal_conductivity_mixavg(Tp_R, Ys_R, lambda_R)
 
                             ! Calculate species properties and gradients
                             $:GPU_LOOP(parallelism='[seq]')

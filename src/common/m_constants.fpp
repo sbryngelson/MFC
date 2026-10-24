@@ -56,7 +56,8 @@ module m_constants
     !> Depth of the ghost shell that is filled from an image point (and, on a reacting surface, the surface Newton solve). Inviscid
     !! reconstruction reaches this far into a body from a fluid-adjacent face; see f_ghost_point_layers for the deeper shell the
     !! viscous stencils need.
-    integer, parameter :: gp_layers_full = 3
+    integer, parameter  :: gp_layers_full = 3
+    real(wp), parameter :: T_cond_unset = -huge(1._wp)  !< ghost_point%T_cond of a ghost whose conduction uses its own T
     !> color function gradient magnitude at which to apply the surface tension fluxes
     real(wp), parameter :: capillary_cutoff = 1.e-6
     !> Spatial support width of acoustic source, used in s_source_spatial

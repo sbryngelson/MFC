@@ -832,6 +832,9 @@ contains
             call s_compute_hypoelastic_rhs_iface(q_prim_qp%vf, rhs_vf, nc_iface_vel_n)
             call nvtxEndRange
         end if
+        ! The face fluxes are formed: the ghosts' own temperatures back for the reaction source and the split chemistry
+        if (ib .and. chemistry) call s_ibm_restore_conduction_temperature(q_T_sf)
+
         if (ib) then
             $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=3)
             do l = 0, p

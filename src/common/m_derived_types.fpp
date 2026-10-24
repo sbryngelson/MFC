@@ -535,18 +535,19 @@ module m_derived_types
 
     !> Ghost Point for Immersed Boundaries
     type ghost_point
-        integer, dimension(3)        :: loc            !< Physical location of the ghost point
-        real(wp), dimension(3)       :: ip_loc         !< Physical location of the image point
-        integer, dimension(3)        :: ip_grid        !< Top left grid point of IP
-        integer, dimension(3)        :: ip_stencil     !< Lower corner of the interpolation stencil (ib_ip_width cells wide)
+        integer, dimension(3) :: loc  !< Physical location of the ghost point
+        real(wp), dimension(3) :: ip_loc  !< Physical location of the image point
+        integer, dimension(3) :: ip_grid  !< Top left grid point of IP
+        integer, dimension(3) :: ip_stencil  !< Lower corner of the interpolation stencil (ib_ip_width cells wide)
         real(wp), dimension(3, 3, 3) :: interp_coeffs  !< Interpolation coefficients of the image point, from ip_stencil
-        logical                      :: interp_valid   !< .false. if every image point stencil cell lies inside an IB
-        real(wp)                     :: ip_dist        !< Wall distance of the point the interpolation weights sample
-        real(wp)                     :: T_cond         !< Ghost temperature the wall conduction sees (chemistry); 0 = its own
-        integer                      :: ib_patch_id    !< ID of the IB Patch the ghost point is part of
-        real(wp)                     :: levelset
-        real(wp), dimension(1:3)     :: levelset_norm
-        logical                      :: slip
+        logical :: interp_valid  !< .false. if every image point stencil cell lies inside an IB
+        real(wp) :: ip_dist  !< Wall distance of the point the interpolation weights sample
+        real(wp) :: T_cond  !< Ghost temperature the wall conduction gradient sees (chemistry); below T_cond_unset = its own
+        real(wp) :: T_save  !< The ghost's own temperature while T_cond stands in for it
+        integer :: ib_patch_id  !< ID of the IB Patch the ghost point is part of
+        real(wp) :: levelset
+        real(wp), dimension(1:3) :: levelset_norm
+        logical :: slip
         !> Shell layer: 1 .. gp_layers_full is the box (Chebyshev) distance to the nearest fluid cell and is filled from an image
         !! point; gp_layers_full + 1 is a deeper cell kept current only for the viscous stencils.
         integer :: layer
