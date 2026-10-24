@@ -623,6 +623,7 @@ contains
                 call s_compute_ib_forces()
             end if
             if (ib_exchange) call s_update_ib_temperatures(dt, q_cons_ts(1)%vf)
+            if (ib_mass_relax > 0) call s_conserve_ib_mass(q_cons_ts(1)%vf)
         end if
 
         ! Adaptive dt: final stage

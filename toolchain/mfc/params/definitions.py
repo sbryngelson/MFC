@@ -391,6 +391,7 @@ CONSTRAINTS = {
     "ib_neighborhood_radius": {"min": 0},
     "ib_ip_interp": {"min": 1, "max": 2},
     "ib_wall_order": {"min": 1, "max": 2},
+    "ib_mass_relax": {"min": 0},
     "ib_ip_min_dist": {"min": 0},
     "num_source": {"min": 1},
     "num_probes": {"min": 1},
@@ -692,6 +693,7 @@ def _load():
     _r("ib_neighborhood_radius", INT, {"ib"})
     _r("ib_ip_interp", INT, {"ib"})
     _r("ib_wall_order", INT, {"ib"})
+    _r("ib_mass_relax", INT, {"ib"})
     _r("ib_ip_min_dist", REAL, {"ib"})
     _r("ib", LOG, {"ib"})
     _r("collision_model", INT, {"ib"})
@@ -1491,6 +1493,7 @@ _nv(
     "ib_neighborhood_radius",
     "ib_ip_interp",
     "ib_wall_order",
+    "ib_mass_relax",
     "ib_ip_min_dist",
     "many_ib_patch_parallelism",
     "ib_second_order_vel",
