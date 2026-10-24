@@ -1435,6 +1435,29 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                     },
                 )
             )
+            # ib_mass_relax: the gas a moving body creates through its faces is banked and taken out of the cells within two cells of
+            # it. The circle moves 0.125 dx and every cell centre stays 0.066 dx or more from its surface, so no cell crosses it and
+            # only the face-flux part of the account is exercised.
+            cases.append(
+                define_case_d(
+                    stack,
+                    "IBM -> Moving Circle -> ib_mass_relax",
+                    {
+                        "ib": "T",
+                        "num_ibs": 1,
+                        "fd_order": 2,
+                        "n": 49,
+                        "ib_mass_relax": 5,
+                        "patch_ib(1)%geometry": 2,
+                        "patch_ib(1)%x_centroid": 0.508,
+                        "patch_ib(1)%y_centroid": 0.51,
+                        "patch_ib(1)%radius": 0.175,
+                        "patch_ib(1)%slip": "F",
+                        "patch_ib(1)%moving_ibm": 1,
+                        "patch_ib(1)%vel(1)": 0.1,
+                    },
+                )
+            )
 
         if len(dimInfo[0]) == 2 and not viscous:
             cases.append(
