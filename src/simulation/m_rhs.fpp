@@ -121,6 +121,8 @@ module m_rhs
     !> @}
     $:GPU_DECLARE(create='[alf_sum]')
 
+    !> Stand-in for ib_markers in s_compute_chemistry_diffusion_flux when there is no immersed boundary (never read)
+    type(integer_field)                       :: no_marks
     real(wp), allocatable, dimension(:,:,:)   :: blkmod1, blkmod2, alpha1, alpha2, Kterm
     real(wp), allocatable, dimension(:,:,:,:) :: qL_rsx_vf, qR_rsx_vf
     real(wp), allocatable, dimension(:,:,:,:) :: dqL_rsx_vf, dqR_rsx_vf
@@ -146,6 +148,11 @@ contains
 
         $:GPU_ENTER_DATA(copyin='[idwbuff]')
         $:GPU_UPDATE(device='[idwbuff]')
+
+        if (chemistry .and. .not. ib) then
+            @:ALLOCATE(no_marks%sf(0:0, 0:0, 0:0))
+            @:ACC_SETUP_SFs(no_marks)
+        end if
 
         @:ALLOCATE(q_cons_qp%vf(1:sys_size))
         @:ALLOCATE(q_prim_qp%vf(1:sys_size))
@@ -728,7 +735,13 @@ contains
                     ! RHS for diffusion
                     if (chemistry .and. chem_params%diffusion) then
                         call nvtxStartRange("RHS-CHEM-DIFFUSION")
-                        call s_compute_chemistry_diffusion_flux(id, q_prim_qp%vf, flux_src_n(id)%vf, irx, iry, irz, q_T_sf)
+                        if (ib) then
+                            call s_compute_chemistry_diffusion_flux(id, q_prim_qp%vf, flux_src_n(id)%vf, irx, iry, irz, q_T_sf, &
+                                                                    & ib_markers, .true.)
+                        else
+                            call s_compute_chemistry_diffusion_flux(id, q_prim_qp%vf, flux_src_n(id)%vf, irx, iry, irz, q_T_sf, &
+                                                                    & no_marks, .false.)
+                        end if
                         call nvtxEndRange
                     end if
 
@@ -2225,6 +2238,10 @@ contains
     impure subroutine s_finalize_rhs_module
 
         integer :: i, j, l
+
+        if (allocated(no_marks%sf)) then
+            @:DEALLOCATE(no_marks%sf)
+        end if
 
         if (.not. igr) then
             do j = eqn_idx%cont%beg, eqn_idx%cont%end

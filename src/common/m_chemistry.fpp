@@ -351,25 +351,28 @@ contains
     end function f_qss_alpha
 
     !> Compute species mass diffusion fluxes at cell interfaces using mixture-averaged diffusivities.
-    subroutine s_compute_chemistry_diffusion_flux(idir, q_prim_qp, flux_src_vf, irx, iry, irz, q_T_sf)
+    subroutine s_compute_chemistry_diffusion_flux(idir, q_prim_qp, flux_src_vf, irx, iry, irz, q_T_sf, ib_marks, use_marks)
 
-        type(scalar_field), dimension(sys_size), intent(in) :: q_prim_qp
+        type(scalar_field), dimension(sys_size), intent(in)    :: q_prim_qp
         type(scalar_field), dimension(sys_size), intent(inout) :: flux_src_vf
-        type(int_bounds_info), intent(in) :: irx, iry, irz
-        integer, intent(in) :: idir
-        type(scalar_field), intent(in) :: q_T_sf
+        type(int_bounds_info), intent(in)                      :: irx, iry, irz
+        integer, intent(in)                                    :: idir
+        type(scalar_field), intent(in)                         :: q_T_sf
+        !> Immersed-body cells (use_marks): q_T_sf holds their conduction temperature, the properties use their own state
+        type(integer_field), intent(in)      :: ib_marks
+        logical, intent(in)                  :: use_marks
         real(wp), dimension(${NUM_SPECIES}$) :: Xs_L, Xs_R, Xs_cell, Ys_L, Ys_R, Ys_cell
         real(wp), dimension(${NUM_SPECIES}$) :: mass_diffusivities_mixavg1, mass_diffusivities_mixavg2
         real(wp), dimension(${NUM_SPECIES}$) :: mass_diffusivities_mixavg_Cell, dXk_dxi, h_l, h_r, h_k
         real(wp), dimension(${NUM_SPECIES}$) :: Mass_Diffu_Flux, dYk_dxi
-        real(wp) :: Mass_Diffu_Energy
-        real(wp) :: MW_L, MW_R, MW_cell, T_L, T_R, P_L, P_R, rho_L, rho_R, rho_cell, rho_Vic, Tp_L, Tp_R
-        real(wp) :: lambda_L, lambda_R, lambda_Cell, dT_dxi, grid_spacing
-        real(wp) :: Cp_L, Cp_R
-        real(wp) :: diffusivity_L, diffusivity_R, diffusivity_cell
-        real(wp) :: hmix_L, hmix_R, dh_dxi
-        integer :: x, y, z, i, n, eqn
-        integer, dimension(3) :: offsets
+        real(wp)                             :: Mass_Diffu_Energy
+        real(wp)                             :: MW_L, MW_R, MW_cell, T_L, T_R, P_L, P_R, rho_L, rho_R, rho_cell, rho_Vic, Tp_L, Tp_R
+        real(wp)                             :: lambda_L, lambda_R, lambda_Cell, dT_dxi, grid_spacing
+        real(wp)                             :: Cp_L, Cp_R
+        real(wp)                             :: diffusivity_L, diffusivity_R, diffusivity_cell
+        real(wp)                             :: hmix_L, hmix_R, dh_dxi
+        integer                              :: x, y, z, i, n, eqn
+        integer, dimension(3)                :: offsets
 
         isc1 = irx; isc2 = iry; isc3 = irz
 
@@ -412,22 +415,19 @@ contains
                             P_L = q_prim_qp(eqn_idx%E)%sf(x, y, z)
                             P_R = q_prim_qp(eqn_idx%E)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
 
-                            ! q_T_sf carries the gradient: at an IB ghost it holds the mirrored conduction temperature (m_ibm),
-                            ! which can lie far outside the thermodynamic fits. The properties use each cell's own state
-                            ! temperature p W/(rho R), equal to q_T_sf to round-off in the gas.
+                            ! q_T_sf carries the gradient: at an IB body cell it holds the mirrored conduction temperature
+                            ! (m_ibm), which can lie far outside the thermodynamic fits, so there the properties use the cell's
+                            ! own state temperature p W/(rho R)
                             T_L = q_T_sf%sf(x, y, z)
                             T_R = q_T_sf%sf(x + offsets(1), y + offsets(2), z + offsets(3))
                             dT_dxi = (T_R - T_L)/grid_spacing
-                            rho_L = 0._wp; rho_R = 0._wp
-                            $:GPU_LOOP(parallelism='[seq]')
-                            do i = eqn_idx%cont%beg, eqn_idx%cont%end
-                                rho_L = rho_L + q_prim_qp(i)%sf(x, y, z)
-                                rho_R = rho_R + q_prim_qp(i)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
-                            end do
                             call get_mixture_molecular_weight(Ys_L, MW_L)
                             call get_mixture_molecular_weight(Ys_R, MW_R)
-                            Tp_L = P_L*MW_L/(rho_L*gas_constant)
-                            Tp_R = P_R*MW_R/(rho_R*gas_constant)
+                            Tp_L = f_property_temperature(T_L, P_L, MW_L, q_prim_qp, x, y, z, ib_marks, use_marks)
+                            Tp_R = f_property_temperature(T_R, P_R, MW_R, q_prim_qp, x + offsets(1), y + offsets(2), &
+                                                          & z + offsets(3), ib_marks, use_marks)
+                            rho_L = P_L*MW_L/(gas_constant*Tp_L)
+                            rho_R = P_R*MW_R/(gas_constant*Tp_R)
 
                             ! Transport state and species enthalpies [J/kg] of each side
                             call get_mixavg_transport_state(P_L, Tp_L, Ys_L, MW_L, Xs_L, mass_diffusivities_mixavg1, lambda_L)
@@ -542,18 +542,15 @@ contains
                             P_L = q_prim_qp(eqn_idx%E)%sf(x, y, z)
                             P_R = q_prim_qp(eqn_idx%E)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
 
-                            ! As in model 1: q_T_sf carries the gradient (an IB ghost's mirrored conduction temperature), the
-                            ! properties use each cell's own state temperature, and the enthalpy is continued linearly from it
+                            ! As in model 1: q_T_sf carries the gradient, an IB body cell's properties use its own state, and its
+                            ! enthalpy is continued linearly from there
                             T_L = q_T_sf%sf(x, y, z)
                             T_R = q_T_sf%sf(x + offsets(1), y + offsets(2), z + offsets(3))
-                            rho_L = 0._wp; rho_R = 0._wp
-                            $:GPU_LOOP(parallelism='[seq]')
-                            do i = eqn_idx%cont%beg, eqn_idx%cont%end
-                                rho_L = rho_L + q_prim_qp(i)%sf(x, y, z)
-                                rho_R = rho_R + q_prim_qp(i)%sf(x + offsets(1), y + offsets(2), z + offsets(3))
-                            end do
-                            Tp_L = P_L*MW_L/(rho_L*gas_constant)
-                            Tp_R = P_R*MW_R/(rho_R*gas_constant)
+                            Tp_L = f_property_temperature(T_L, P_L, MW_L, q_prim_qp, x, y, z, ib_marks, use_marks)
+                            Tp_R = f_property_temperature(T_R, P_R, MW_R, q_prim_qp, x + offsets(1), y + offsets(2), &
+                                                          & z + offsets(3), ib_marks, use_marks)
+                            rho_L = P_L*MW_L/(gas_constant*Tp_L)
+                            rho_R = P_R*MW_R/(gas_constant*Tp_R)
                             rho_cell = 0.5_wp*(rho_L + rho_R)
 
                             call get_mixture_specific_heat_cp_mass(Tp_L, Ys_L, Cp_L)
@@ -606,5 +603,30 @@ contains
         end if
 
     end subroutine s_compute_chemistry_diffusion_flux
+
+    !> Temperature the diffusion properties of cell (x, y, z) are evaluated at: q_T_sf's value T, except in an immersed-body cell,
+    !! where T is the conduction temperature (m_ibm) and the cell's own state temperature p W/(rho R) is used
+    function f_property_temperature(T, P, MW, q_prim_qp, x, y, z, ib_marks, use_marks) result(Tp)
+
+        $:GPU_ROUTINE(function_name='f_property_temperature', parallelism='[seq]', cray_inline=True)
+
+        real(wp), intent(in)                                :: T, P, MW
+        type(scalar_field), dimension(sys_size), intent(in) :: q_prim_qp
+        integer, intent(in)                                 :: x, y, z
+        type(integer_field), intent(in)                     :: ib_marks
+        logical, intent(in)                                 :: use_marks
+        real(wp)                                            :: Tp, rho
+        integer                                             :: i
+
+        Tp = T
+        if (.not. use_marks) return
+        if (ib_marks%sf(x, y, z) == 0) return
+        rho = 0._wp
+        do i = eqn_idx%cont%beg, eqn_idx%cont%end
+            rho = rho + q_prim_qp(i)%sf(x, y, z)
+        end do
+        Tp = P*MW/(rho*gas_constant)
+
+    end function f_property_temperature
 
 end module m_chemistry
