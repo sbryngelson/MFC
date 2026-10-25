@@ -550,7 +550,7 @@ contains
                 ! Quadratic wall-normal fill: the probes and weights are built once per ghost point, before their first use below
                 wf%tier = 3
                 if (ib_wall_quad) then
-                    call s_wall_fill(gp, wf)
+                    call s_wall_fill(ib_markers, gp, wf)
                     if (wf%tier == 1) nf1 = nf1 + 1
                     if (wf%tier == 2) nf2 = nf2 + 1
                     if (wf%tier == 3) nf3 = nf3 + 1
@@ -621,7 +621,7 @@ contains
                         else if (d > 0._wp) then
                             wg%quad = .false.; wg%a = 0._wp; wg%b = 0._wp
                             if (ib_wall_quad) then
-                                call s_wall_normal_gradient(q_T_sf, gp, wg%a, wg%b, tier_wg)
+                                call s_wall_normal_gradient(ib_markers, q_T_sf, gp, wg%a, wg%b, tier_wg)
                                 wg%quad = tier_wg < 3
                                 if (tier_wg == 1) ng1 = ng1 + 1
                                 if (tier_wg == 2) ng2 = ng2 + 1
@@ -655,8 +655,8 @@ contains
 
                     if (record_surface) call s_record_gp_surface(i, gp, T_s, mdot_s, surface_converged)
 
-                    call s_blend_ghost_state(theta, f_face_theta(q_prim_vf, gp, theta, T_IP, T_s), T_IP, T_s, Ys_IP, Ys_s, T_g, &
-                                             & Ys_g, q_T_sf, wf)
+                    call s_blend_ghost_state(theta, f_face_theta(q_prim_vf, ib_markers, gp, theta, T_IP, T_s), T_IP, T_s, Ys_IP, &
+                                             & Ys_s, T_g, Ys_g, q_T_sf, wf)
 
                     ! A moving wall's lab-frame faces advect the ghost into the fluid, where the flux stencils sample it at the
                     ! ghost centre: there it carries the mirror T_g, as conduction does (T_cond), since wall gas at T_s cut the
@@ -1522,21 +1522,22 @@ contains
     !! initialised with. Those stencils run one coordinate direction at a time, so the cells that matter form a cross, and a
     !! cell is deep when a fluid cell lies within a Manhattan distance of gp_layers. A box of that radius would swallow all of a
     !! small body: the inscribed radius of a cube of half-width 6 is 6/sqrt(3) of a sphere's radius in cells.
-    function f_ghost_layer(i, j, k) result(layer)
+    function f_ghost_layer(markers, i, j, k) result(layer)
 
         $:GPU_ROUTINE(function_name='f_ghost_layer', parallelism='[seq]', cray_inline=True)
-        integer, intent(in) :: i, j, k
-        integer             :: layer, di, dj, dk, dk_max, rem_j, rem_k, cheb
+        type(integer_field), intent(in) :: markers  !< ib_markers, passed so the device routine reads the caller's present copy
+        integer, intent(in)             :: i, j, k
+        integer                         :: layer, di, dj, dk, dk_max, rem_j, rem_k, cheb
 
         layer = 0
-        if (ib_markers%sf(i, j, k) == 0) return
+        if (markers%sf(i, j, k) == 0) return
 
         dk_max = merge(gp_layers_full, 0, p > 0)
         cheb = gp_layers_full + 1
         do di = -gp_layers_full, gp_layers_full
             do dj = -gp_layers_full, gp_layers_full
                 do dk = -dk_max, dk_max
-                    if (ib_markers%sf(i + di, j + dj, k + dk) == 0) cheb = min(cheb, max(abs(di), abs(dj), abs(dk)))
+                    if (markers%sf(i + di, j + dj, k + dk) == 0) cheb = min(cheb, max(abs(di), abs(dj), abs(dk)))
                 end do
             end do
         end do
@@ -1552,7 +1553,7 @@ contains
             do dj = -rem_j, rem_j
                 rem_k = min(rem_j - abs(dj), dk_max)
                 do dk = -rem_k, rem_k
-                    if (ib_markers%sf(i + di, j + dj, k + dk) == 0) then
+                    if (markers%sf(i + di, j + dj, k + dk) == 0) then
                         layer = gp_layers_full + 1
                         return
                     end if
@@ -1575,7 +1576,7 @@ contains
         do i = 0, m
             do j = 0, n
                 do k = 0, p
-                    if (f_ghost_layer(i, j, k) > 0) then
+                    if (f_ghost_layer(ib_markers, i, j, k) > 0) then
                         $:GPU_ATOMIC(atomic='update')
                         num_gps_local = num_gps_local + 1
                     end if
@@ -1605,7 +1606,7 @@ contains
             do j = 0, n
                 do k = 0, p
                     if (ib_markers%sf(i, j, k) /= 0) then
-                        lay = f_ghost_layer(i, j, k)
+                        lay = f_ghost_layer(ib_markers, i, j, k)
 
                         if (lay > 0) then
                             $:GPU_ATOMIC(atomic='capture')
@@ -1678,7 +1679,7 @@ contains
             end if
             stencil_coeffs = 0._wp
             if (ib_ip_interp == 2) then
-                call s_tsc_weights(gp%ip_loc, ic, wd, fluid_w)
+                call s_tsc_weights(ib_markers, gp%ip_loc, ic, wd, fluid_w)
                 lo = ic - 1
                 if (p == 0) lo(3) = 0
                 stencil_coeffs = f_tsc_stencil(wd)
@@ -1948,15 +1949,16 @@ contains
     !! bracketing cell at integer offsets, which keeps the partition of unity exactly on a stretched grid. The stencil is kept
     !! inside the halo. Solid cells in it carry the ghost values of the last correction (staged, #1901); a point buried in a body
     !! has no fluid weight.
-    subroutine s_tsc_weights(loc, ic, wd, fluid_frac)
+    subroutine s_tsc_weights(markers, loc, ic, wd, fluid_frac)
 
         $:GPU_ROUTINE(parallelism='[seq]')
-        real(wp), dimension(3), intent(in)     :: loc
-        integer, dimension(3), intent(out)     :: ic  !< Cell centring the stencil
+        type(integer_field), intent(in) :: markers    !< ib_markers, passed so the device routine reads the caller's present copy
+        real(wp), dimension(3), intent(in) :: loc
+        integer, dimension(3), intent(out) :: ic      !< Cell centring the stencil
         real(wp), dimension(3, 3), intent(out) :: wd  !< 1D weights on ic - 1, ic, ic + 1, per direction
-        real(wp), intent(out)                  :: fluid_frac
-        real(wp)                               :: ds, frac, wsum, wfluid, buf
-        integer                                :: dim, ii, jj, kk
+        real(wp), intent(out) :: fluid_frac
+        real(wp) :: ds, frac, wsum, wfluid, buf
+        integer :: dim, ii, jj, kk
 
         ic = 0
         wd = 0._wp
@@ -1994,7 +1996,7 @@ contains
                 do kk = 1, merge(3, 1, p /= 0)
                     buf = wd(ii, 1)*wd(jj, 2)*wd(kk, 3)
                     wsum = wsum + buf
-                    if (ib_markers%sf(ic(1) + ii - 2, ic(2) + jj - 2, ic(3) + (kk - 2)*min(p, 1)) == 0) wfluid = wfluid + buf
+                    if (markers%sf(ic(1) + ii - 2, ic(2) + jj - 2, ic(3) + (kk - 2)*min(p, 1)) == 0) wfluid = wfluid + buf
                 end do
             end do
         end do
@@ -2080,23 +2082,24 @@ contains
 
     !> TSC stencils of the two probes at wall distances s1 and 2 s1 along the surface normal from a ghost point's wall foot, and the
     !! fluid fraction of each.
-    subroutine s_wall_probes(gp, s1, ic1, wd1, f1, ic2, wd2, f2)
+    subroutine s_wall_probes(markers, gp, s1, ic1, wd1, f1, ic2, wd2, f2)
 
         $:GPU_ROUTINE(parallelism='[seq]')
-        type(ghost_point), intent(in)          :: gp
-        real(wp), intent(in)                   :: s1
-        integer, dimension(3), intent(out)     :: ic1, ic2
+        type(integer_field), intent(in) :: markers  !< ib_markers, passed so the device routine reads the caller's present copy
+        type(ghost_point), intent(in) :: gp
+        real(wp), intent(in) :: s1
+        integer, dimension(3), intent(out) :: ic1, ic2
         real(wp), dimension(3, 3), intent(out) :: wd1, wd2
-        real(wp), intent(out)                  :: f1, f2
-        real(wp), dimension(3)                 :: norm, wall_loc
+        real(wp), intent(out) :: f1, f2
+        real(wp), dimension(3) :: norm, wall_loc
 
         norm = gp%levelset_norm/max(sqrt(sum(gp%levelset_norm**2)), sgm_eps)
         wall_loc = 0._wp
         wall_loc(1) = x_cc(gp%loc(1)); wall_loc(2) = y_cc(gp%loc(2))
         if (p > 0) wall_loc(3) = z_cc(gp%loc(3))
         wall_loc = wall_loc + abs(real(gp%levelset, kind=wp))*norm
-        call s_tsc_weights(wall_loc + s1*norm, ic1, wd1, f1)
-        call s_tsc_weights(wall_loc + 2._wp*s1*norm, ic2, wd2, f2)
+        call s_tsc_weights(markers, wall_loc + s1*norm, ic1, wd1, f1)
+        call s_tsc_weights(markers, wall_loc + 2._wp*s1*norm, ic2, wd2, f2)
 
     end subroutine s_wall_probes
 
@@ -2115,13 +2118,14 @@ contains
     !! Degradation is explicit: tier 1 uses both probes; tier 2 is the linear mirror where the outer probe has too little fluid
     !! around it (a narrow inter-particle gap, a rim, a neighbouring body); tier 3 leaves the caller's own treatment. The tier mix
     !! is reported, so a second-order claim is never made for a surface that did not earn it.
-    subroutine s_wall_fill(gp, wf)
+    subroutine s_wall_fill(markers, gp, wf)
 
         $:GPU_ROUTINE(parallelism='[seq]')
-        type(ghost_point), intent(in) :: gp
-        type(wall_fill), intent(out)  :: wf
-        real(wp), parameter           :: FLUID_FRAC_MIN = 0.5_wp  !< A probe needs this much fluid weight to be used
-        real(wp)                      :: d, s1, s2, f1, f2
+        type(integer_field), intent(in) :: markers  !< ib_markers, passed so the device routine reads the caller's present copy
+        type(ghost_point), intent(in)   :: gp
+        type(wall_fill), intent(out)    :: wf
+        real(wp), parameter             :: FLUID_FRAC_MIN = 0.5_wp  !< A probe needs this much fluid weight to be used
+        real(wp)                        :: d, s1, s2, f1, f2
 
         wf%tier = 3
         wf%lw = [1._wp, 0._wp, 0._wp]
@@ -2130,7 +2134,7 @@ contains
         d = abs(real(gp%levelset, kind=wp))
         s1 = max(f_cell_scale(gp), d)
         s2 = 2._wp*s1
-        call s_wall_probes(gp, s1, wf%ic1, wf%wd1, f1, wf%ic2, wf%wd2, f2)
+        call s_wall_probes(markers, gp, s1, wf%ic1, wf%wd1, f1, wf%ic2, wf%wd2, f2)
 
         wf%llin = [1._wp + d/s1, -d/s1]  ! the linear mirror, which also bounds the quadratic
         if (f1 < FLUID_FRAC_MIN) return
@@ -2151,24 +2155,25 @@ contains
     !! and the interpolation error O(h^2)/s1 is also O(h), so the interpolation must reach O(h^3) too, which TSC does (Ezra, Peles &
     !! Kozak 2025; Jost & Glockner 2021; Yousefzadeh & Battiato 2019). Tier 1 uses both probes, tier 2 the one-probe linear
     !! gradient, tier 3 reports failure so the caller keeps its one-sided difference.
-    subroutine s_wall_normal_gradient(sf, gp, a_coef, b_coef, tier)
+    subroutine s_wall_normal_gradient(markers, sf, gp, a_coef, b_coef, tier)
 
         $:GPU_ROUTINE(parallelism='[seq]')
-        type(scalar_field), intent(in) :: sf
-        type(ghost_point), intent(in)  :: gp
-        real(wp), intent(out)          :: a_coef, b_coef
-        integer, intent(out)           :: tier
-        real(wp), parameter            :: FLUID_FRAC_MIN = 0.5_wp
-        real(wp)                       :: s1, s2, phi1, phi2, f1, f2
-        integer, dimension(3)          :: ic1, ic2
-        real(wp), dimension(3, 3)      :: wd1, wd2
+        type(integer_field), intent(in) :: markers  !< ib_markers, passed so the device routine reads the caller's present copy
+        type(scalar_field), intent(in)  :: sf
+        type(ghost_point), intent(in)   :: gp
+        real(wp), intent(out)           :: a_coef, b_coef
+        integer, intent(out)            :: tier
+        real(wp), parameter             :: FLUID_FRAC_MIN = 0.5_wp
+        real(wp)                        :: s1, s2, phi1, phi2, f1, f2
+        integer, dimension(3)           :: ic1, ic2
+        real(wp), dimension(3, 3)       :: wd1, wd2
 
         a_coef = 0._wp
         b_coef = 0._wp
         tier = 3
         s1 = f_cell_scale(gp)
         s2 = 2._wp*s1
-        call s_wall_probes(gp, s1, ic1, wd1, f1, ic2, wd2, f2)
+        call s_wall_probes(markers, gp, s1, ic1, wd1, f1, ic2, wd2, f2)
         if (f1 < FLUID_FRAC_MIN) return
         phi1 = f_tsc_apply(sf, ic1, wd1)
         if (f2 < FLUID_FRAC_MIN) then
@@ -3246,18 +3251,19 @@ contains
     !! mirror inside the bound, so it leaves the mirror untouched there. A cell closer than a quarter of its spacing to the wall
     !! plane is left out: its temperature is within noise of T_s, and the bound, whose slope there is a/b, then switched theta
     !! between 0 and 1 from step to step and kept a steady conduction annulus from converging.
-    function f_face_theta(q_prim_vf, gp, theta_max, T_IP, T_s) result(theta)
+    function f_face_theta(q_prim_vf, markers, gp, theta_max, T_IP, T_s) result(theta)
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
-        type(ghost_point), intent(in)                       :: gp
-        real(wp), intent(in)                                :: theta_max, T_IP, T_s
-        real(wp)                                            :: theta, a, b, h, T_n, mw_n, r
-        real(wp), dimension(3)                              :: nrm
-        real(wp), dimension(${NUM_SPECIES}$)                :: Ys_n
-        integer, dimension(3)                               :: c
-        integer                                             :: dir, sgn, q
+        type(integer_field), intent(in) :: markers  !< ib_markers, passed so the device routine reads the caller's present copy
+        type(ghost_point), intent(in) :: gp
+        real(wp), intent(in) :: theta_max, T_IP, T_s
+        real(wp) :: theta, a, b, h, T_n, mw_n, r
+        real(wp), dimension(3) :: nrm
+        real(wp), dimension(${NUM_SPECIES}$) :: Ys_n
+        integer, dimension(3) :: c
+        integer :: dir, sgn, q
 
         theta = theta_max
         if (f_approx_equal(T_s, T_IP)) return
@@ -3267,7 +3273,7 @@ contains
             do sgn = -1, 1, 2
                 c = gp%loc
                 c(dir) = c(dir) + sgn
-                if (ib_markers%sf(c(1), c(2), c(3)) /= 0) cycle
+                if (markers%sf(c(1), c(2), c(3)) /= 0) cycle
                 select case (dir)
                 case (1)
                     h = x_cc(c(1)) - x_cc(gp%loc(1))
