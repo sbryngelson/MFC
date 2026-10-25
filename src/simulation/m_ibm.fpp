@@ -1325,7 +1325,7 @@ contains
 
     !> Moving bodies: the body-frame energy E' = E - rho u.V_b + rho |V_b|^2/2 and the mass of each cell a body covered (+) or
     !! uncovered (-) this step, as rates into ib_heat(2) and out of ib_heat(3). The grid faces do not move with the wall, so the
-    !! face fluxes alone miss the gas swept between face and wall (validation3/ib_moving_mass/repro.py). A cell passing directly
+    !! face fluxes alone miss the gas swept between face and wall (checked with a 2D replica of the scheme). A cell passing directly
     !! from one body to another is not counted.
     subroutine s_add_swept_cells(q_cons_vf, dt_step)
 
