@@ -392,7 +392,7 @@ CONSTRAINTS = {
     "ib_neighborhood_radius": {"min": 0},
     "ib_ip_interp": {"min": 1, "max": 2},
     "ib_wall_order": {"min": 1, "max": 2},
-    "ib_mass_relax": {"min": 0},
+    "ib_mass_relax": {"min": -1},
     "ib_ip_min_dist": {"min": 0},
     "num_source": {"min": 1},
     "num_probes": {"min": 1},

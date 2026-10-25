@@ -968,6 +968,16 @@ contains
                 call s_read_ib_restart_data(0)
             end if
             call s_build_ib_neighborhood()
+            ! ib_mass_relax = -1 (default): on where the ghost-cell treatment measurably creates or destroys gas (a moving,
+            ! slip or reacting body), off for fixed no-slip inert walls, and off with a blowing body, whose injected gas the
+            ! account (gasification only) would take back out
+            if (ib_mass_relax < 0) then
+                ib_mass_relax = 0
+                if ((moving_immersed_boundary_flag .or. any(patch_ib(1:num_ibs)%slip) &
+                    & .or. any(patch_ib(1:num_ibs)%surface_reaction /= 0)) .and. .not. (any(patch_ib(1:num_ibs)%v_blow > 0._wp) &
+                    & .or. any(patch_ib(1:num_ibs)%inj_species > 0)) .and. model_eqns == 2 .and. .not. igr &
+                    & .and. .not. bubbles_euler) ib_mass_relax = 30
+            end if
             call s_ibm_setup()
             if (t_step_start == 0 .or. (cfl_dt .and. n_start == 0)) call s_write_ib_data_file(0)
         end if
