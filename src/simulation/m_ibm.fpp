@@ -395,6 +395,7 @@ contains
         real(wp) :: alpha_q, alpha_rho_q, e_q
         real(wp) :: T_IP, mw_IP, e_IP  !< Image-point temperature, mixture MW, and mass-specific internal energy (chemistry)
         real(wp) :: T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta
+        real(wp) :: T_adv  !< Temperature of the advected ghost state: T_g inside the thermodynamic window
         logical :: surface_converged
         integer :: n_not_converged, n_ill_posed  !< Per-call reacting-surface failure tallies (see the module-level counters)
         integer :: ng1, ng2, ng3, nf1, nf2, nf3  !< Per-call wall-gradient and wall-fill tier tallies
@@ -460,7 +461,7 @@ contains
             $:GPU_PARALLEL_LOOP(private='[i, physical_loc, dyn_pres, alpha_rho_IP, alpha_IP, alpha_rho_GP, pres_IP, pres_GP, &
                                 & vel_IP, vel_g, r_IP, v_IP, pb_IP, mv_IP, nmom_IP, presb_IP, massv_IP, rho, gamma, pi_inf, Re_K, &
                                 & G_K, Gs, gp, radial_vector, j, k, l, q, qv_K, c_IP, nbub, patch_id, Ys_IP, W_species, T_IP, &
-                                & mw_IP, e_IP, Ys_g, Ys_s, T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta, &
+                                & mw_IP, e_IP, Ys_g, Ys_s, T_s, T_g, T_adv, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta, &
                                 & surface_converged, vel_sum_g, E_ghost, alpha_q, alpha_rho_q, e_q, wf, wg, tier_wg]', &
                                 & reduction='[[n_not_converged, n_ill_posed, ng1, ng2, ng3, nf1, nf2, nf3]]', reductionOp='[+]', present='[ghost_points]')
             do i = 1, num_gps
@@ -584,10 +585,12 @@ contains
                     call s_blend_ghost_state(theta, f_face_theta(q_prim_vf, gp, theta, T_IP, T_s), T_IP, T_s, Ys_IP, Ys_s, T_g, &
                                              & Ys_g, q_T_sf, wf)
 
-                    ! The advected ghost is wall gas at T_s, so no gas leaves the wall hotter or colder than it; conduction
-                    ! sees the mirror T_g instead, through T_cond (s_ibm_set_conduction_temperature)
+                    ! The advected ghost carries the mirror T_g, as conduction does (T_cond): the flux stencils sample it at the
+                    ! ghost centre, where wall gas at T_s is only first order. A moving wall's lab-frame faces advect the ghost into
+                    ! the fluid, so with T_s its heat flux fell short of the same body held fixed in the same relative flow.
+                    T_adv = min(max(T_g, T_surface_min), T_surface_max)
                     call get_mixture_molecular_weight(Ys_g, mw_g)
-                    alpha_rho_IP(1) = alpha_IP(1)*pres_IP*mw_g/(gas_constant*T_s)
+                    alpha_rho_IP(1) = alpha_IP(1)*pres_IP*mw_g/(gas_constant*T_adv)
                 end if
 
                 ! If in simulation, use acc mixture subroutines
@@ -666,7 +669,7 @@ contains
                     if (patch_ib(patch_id)%inj_species == 0 .and. (patch_ib(patch_id)%surface_reaction == 0 &
                         & .or. surface_converged)) then
 
-                        call get_mixture_energy_mass(T_s, Ys_g, e_IP)
+                        call get_mixture_energy_mass(T_adv, Ys_g, e_IP)
                         ghost_points(i)%T_cond = T_g
                         $:GPU_LOOP(parallelism='[seq]')
                         do q = 1, num_species
@@ -834,11 +837,11 @@ contains
 
     end subroutine s_ibm_correct_state
 
-    !> Give the wall conduction gradient the mirrored ghost temperature from s_ibm_correct_state in place of the wall-gas
-    !! temperature the ghost state carries. Only the face difference may read it: the mirror of a cold wall in hot gas lies far
-    !! below 0 K, so properties at the ghost are evaluated at its own state (s_compute_chemistry_diffusion_flux, ib_marks) and
-    !! s_ibm_restore_conduction_temperature puts the ghost's own temperature back once the fluxes are formed. Call after the
-    !! conservative-to-primitive conversion, before the halo exchange.
+    !> Give the wall conduction gradient the mirrored ghost temperature from s_ibm_correct_state in place of the temperature of the
+    !! ghost state, which holds the same mirror inside the thermodynamic window. Only the face difference may read it: the mirror of
+    !! a cold wall in hot gas lies far below 0 K, so properties at the ghost are evaluated at its own state
+    !! (s_compute_chemistry_diffusion_flux, ib_marks) and s_ibm_restore_conduction_temperature puts the ghost's own temperature back
+    !! once the fluxes are formed. Call after the conservative-to-primitive conversion, before the halo exchange.
     subroutine s_ibm_set_conduction_temperature(q_T_sf)
 
         type(scalar_field), intent(inout) :: q_T_sf
