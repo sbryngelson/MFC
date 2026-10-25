@@ -384,9 +384,10 @@ module m_derived_types
         !> Last step's gasification rate and face mass out [kg/s], and fluid heat in [W] (ib_heat_wrt; per unit depth in 2D)
         real(wp)                 :: mdot, mdot_face, qdot
         real(wp), dimension(1:3) :: vel
-        real(wp), dimension(1:3) :: step_vel          !< velocity array used to store intermediate steps in the time_stepper module
+        real(wp), dimension(1:3) :: step_vel  !< velocity array used to store intermediate steps in the time_stepper module
         real(wp), dimension(1:3) :: angular_vel
         real(wp), dimension(1:3) :: step_angular_vel  !< velocity array used to store intermediate steps in the time_stepper module
+        real(wp), dimension(1:3) :: accel, angular_accel  !< (vel - step_vel)/dt over the last RK stage; feeds the ghost pressure
         !> Prescribed kinematics (moving_ibm = 1 only): 0 = off; 1 = hinged flapping, roll about the lab x axis through the hinge
         !! and pitch about the body spanwise (y) axis through the hinge, R = Rx(phi) Ry(theta)
         integer :: kin_model
