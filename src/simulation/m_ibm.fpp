@@ -372,7 +372,7 @@ contains
         real(wp) :: alpha_q, alpha_rho_q, e_q
         real(wp) :: T_IP, mw_IP, e_IP  !< Image-point temperature, mixture MW, and mass-specific internal energy (chemistry)
         real(wp) :: T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta
-        real(wp) :: T_adv  !< Temperature of the advected ghost state: T_g inside the thermodynamic window
+        real(wp) :: T_adv  !< Temperature of the advected ghost: T_g in the thermodynamic window (moving wall), else T_s
         logical :: surface_converged
         integer :: n_not_converged, n_ill_posed  !< Per-call reacting-surface failure tallies (see the module-level counters)
         integer :: ng1, ng2, ng3, nf1, nf2, nf3  !< Per-call wall-gradient and wall-fill tier tallies
@@ -562,10 +562,13 @@ contains
                     call s_blend_ghost_state(theta, f_face_theta(q_prim_vf, gp, theta, T_IP, T_s), T_IP, T_s, Ys_IP, Ys_s, T_g, &
                                              & Ys_g, q_T_sf, wf)
 
-                    ! The advected ghost carries the mirror T_g, as conduction does (T_cond): the flux stencils sample it at the
-                    ! ghost centre, where wall gas at T_s is only first order. A moving wall's lab-frame faces advect the ghost into
-                    ! the fluid, so with T_s its heat flux fell short of the same body held fixed in the same relative flow.
-                    T_adv = min(max(T_g, T_surface_min), T_surface_max)
+                    ! A moving wall's lab-frame faces advect the ghost into the fluid, where the flux stencils sample it at the
+                    ! ghost centre: there it carries the mirror T_g, as conduction does (T_cond), since wall gas at T_s cut the
+                    ! heat flux of a translating body against the same body held fixed in the same relative flow. A fixed wall has
+                    ! no normal velocity, the ghost enters only through the numerical dissipation, and wall gas at T_s is kept:
+                    ! the mirror of a cold wall in hot gas leaves the window and slowed an unresolved heat-up transient.
+                    T_adv = T_s
+                    if (patch_ib(patch_id)%moving_ibm /= 0) T_adv = min(max(T_g, T_surface_min), T_surface_max)
                     call get_mixture_molecular_weight(Ys_g, mw_g)
                     alpha_rho_IP(1) = alpha_IP(1)*pres_IP*mw_g/(gas_constant*T_adv)
                 end if
