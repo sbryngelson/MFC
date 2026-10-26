@@ -32,7 +32,7 @@ module m_ibm
         & s_find_num_ghost_points, s_compute_ghost_point_pressure, s_compute_ghost_point_velocity
     ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, s_report_ibm_surface, &
         & s_write_ib_surface, s_update_ib_temperatures, s_conserve_ib_mass, s_accumulate_ib_face_fluxes, &
-        & s_ibm_set_conduction_temperature, s_ibm_restore_conduction_temperature
+        & s_ibm_set_conduction_temperature, s_ibm_restore_conduction_temperature, s_add_swept_cells
 
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
@@ -54,7 +54,7 @@ module m_ibm
     !! neighbors, and never over each other.
     type(integer_field) :: corrected_gps
     $:GPU_DECLARE(create='[corrected_gps]')
-    type(integer_field) :: ib_markers_prev  !< Markers at the last s_update_ib_temperatures (moving bodies with ib_exchange)
+    type(integer_field) :: ib_markers_prev  !< Markers at the last placement (moving bodies with ib_exchange)
     $:GPU_DECLARE(create='[ib_markers_prev]')
     type(integer_field) :: ib_shell  !< ib_mass_relax: global IB id of each fluid cell within ib_shell_width cells of it, else 0
     $:GPU_DECLARE(create='[ib_shell]')
@@ -1193,7 +1193,6 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
         end if
-        if (moving_immersed_boundary_flag) call s_add_swept_cells(q_cons_vf, dt_step)
         $:GPU_UPDATE(host='[ib_heat]')
         call s_mpi_allreduce_vectors_sum(ib_heat, ib_heat, 4, num_gbl_ibs)
         $:GPU_UPDATE(device='[ib_heat]')
@@ -1324,21 +1323,25 @@ contains
     end subroutine s_conserve_ib_mass
 
     !> Moving bodies: the body-frame energy E' = E - rho u.V_b + rho |V_b|^2/2 and the mass of each cell a body covered (+) or
-    !! uncovered (-) this step, as rates into ib_heat(2) and out of ib_heat(3). The grid faces do not move with the wall, so the
-    !! face fluxes alone miss the gas swept between face and wall (checked with a 2D replica of the scheme). A cell passing directly
-    !! from one body to another is not counted.
-    subroutine s_add_swept_cells(q_cons_vf, dt_step)
+    !! uncovered (-) at this stage's placement, as rates into ib_heat(2) and out of ib_heat(3). The grid faces do not move with the
+    !! wall, so the face fluxes alone miss the gas swept between face and wall. Called at every placement, after the stage update
+    !! and before the ghost correction overwrites the covered cells: a cell's content enters the step's result with weight a_w (the
+    !! product of the later stages' rk_coef(:,1)/rk_coef(:,4)) and the step-start state with 1 - a_w, so it is booked as a_w q + (1
+    !! - a_w) q_start, which makes the booking exact under the RK blend (checked to 1e-14 per step in a 2D replica). A cell passing
+    !! directly from one body to another is not counted.
+    subroutine s_add_swept_cells(q_cons_vf, q_start_vf, a_w, dt_step)
 
-        type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
-        real(wp), intent(in)                                :: dt_step
+        type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf, q_start_vf
+        real(wp), intent(in)                                :: a_w, dt_step
         real(wp), dimension(3)                              :: r, vb, box_len
-        real(wp)                                            :: rho, e_b, vol
+        real(wp)                                            :: rho, e_b, vol, b_w
         integer                                             :: i, j, k, l, mk, sgn, ib_tmp, ib_id, g, xp, yp, zp
 
         box_len = [glb_bounds(1)%end - glb_bounds(1)%beg, glb_bounds(2)%end - glb_bounds(2)%beg, 0._wp]
         if (num_dims == 3) box_len(3) = glb_bounds(3)%end - glb_bounds(3)%beg
+        b_w = 1._wp - a_w
         $:GPU_PARALLEL_LOOP(private='[i, j, k, l, mk, sgn, ib_tmp, ib_id, g, xp, yp, zp, r, vb, rho, e_b, vol]', collapse=3, &
-                            & copyin='[dt_step, box_len]')
+                            & copyin='[dt_step, box_len, a_w, b_w]')
         do l = 0, p
             do k = 0, n
                 do j = 0, m
@@ -1364,11 +1367,13 @@ contains
                                & *r(1)
                             rho = 0._wp
                             do i = eqn_idx%cont%beg, eqn_idx%cont%end
-                                rho = rho + q_cons_vf(i)%sf(j, k, l)
+                                rho = rho + a_w*q_cons_vf(i)%sf(j, k, l) + b_w*q_start_vf(i)%sf(j, k, l)
                             end do
-                            e_b = q_cons_vf(eqn_idx%E)%sf(j, k, l) + 0.5_wp*rho*(vb(1)**2 + vb(2)**2 + vb(3)**2)
+                            e_b = a_w*q_cons_vf(eqn_idx%E)%sf(j, k, l) + b_w*q_start_vf(eqn_idx%E)%sf(j, k, &
+                                                & l) + 0.5_wp*rho*(vb(1)**2 + vb(2)**2 + vb(3)**2)
                             do i = 1, num_dims
-                                e_b = e_b - q_cons_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)*vb(i)
+                                e_b = e_b - (a_w*q_cons_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, &
+                                             & l) + b_w*q_start_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l))*vb(i)
                             end do
                             vol = dx(j)*dy(k)
                             if (num_dims == 3) vol = vol*dz(l)

@@ -450,6 +450,7 @@ contains
         integer, intent(in)     :: nstage
         integer                 :: i, j, k, l, q, s  !< Generic loop iterator
         real(wp)                :: start, finish
+        real(wp)                :: a_w               !< weight of this stage's state in the step's result (swept-cell booking)
         integer(kind=8)         :: stage_t0, stage_t1, clock_rate, clock_max
         real(wp)                :: stage_time
         integer, parameter      :: n_warmup = 2      !< time steps excluded before the timing floor (warmup/JIT/first-touch)
@@ -566,6 +567,13 @@ contains
                 ! check if any IBMS are moving, and if so, update the markers, ghost points, levelsets, and levelset norms
                 if (moving_immersed_boundary_flag) then
                     call s_propagate_immersed_boundaries(s, t_step)
+                    if (ib_exchange) then  ! book this placement's swept cells before the ghost correction overwrites them
+                        a_w = 1._wp
+                        do q = s + 1, nstage
+                            a_w = a_w*rk_coef(q, 1)/rk_coef(q, 4)
+                        end do
+                        call s_add_swept_cells(q_cons_ts(1)%vf, q_cons_ts(stor)%vf, a_w, dt)
+                    end if
                 end if
 
                 ! update the ghost fluid properties point values based on IB state
