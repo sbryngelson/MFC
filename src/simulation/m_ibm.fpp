@@ -130,6 +130,47 @@ module m_ibm
 
 contains
 
+    !> Shell layer of the cell (I, J, K) into LAY: 0 if it needs no ghost value, 1 .. gp_layers_full for a cell within that box
+    !! (Chebyshev) distance of a fluid cell, which is filled from an image point, and gp_layers_full + 1 for a deeper cell.
+    !!
+    !! Deep cells exist only when gp_layers > gp_layers_full, i.e. for a viscous reconstruction that reaches further into the
+    !! body (see f_ghost_point_layers). Anything such a stencil reads has to hold a current value, not the state the cell was
+    !! initialised with. Those stencils run one coordinate direction at a time, so the cells that matter form a cross, and a
+    !! cell is deep when a fluid cell lies within a Manhattan distance of gp_layers. A box of that radius would swallow all of a
+    !! small body: the inscribed radius of a cube of half-width 6 is 6/sqrt(3) of a sphere's radius in cells.
+    !!
+    !! Inlined in the kernels that need it: as a device function it found no ghost points under NVHPC OpenACC. Needs private
+    !! integers gl_di, gl_dj, gl_dk, gl_dk_max, gl_rem_j, gl_rem_k, gl_cheb.
+    #:def GHOST_LAYER(LAY, I, J, K)
+        ${LAY}$ = 0
+        if (ib_markers%sf(${I}$, ${J}$, ${K}$) /= 0) then
+            gl_dk_max = merge(gp_layers_full, 0, p > 0)
+            gl_cheb = gp_layers_full + 1
+            do gl_di = -gp_layers_full, gp_layers_full
+                do gl_dj = -gp_layers_full, gp_layers_full
+                    do gl_dk = -gl_dk_max, gl_dk_max
+                        if (ib_markers%sf(${I}$ + gl_di, ${J}$ + gl_dj, ${K}$ + gl_dk) == 0) gl_cheb = min(gl_cheb, &
+                            & max(abs(gl_di), abs(gl_dj), abs(gl_dk)))
+                    end do
+                end do
+            end do
+            if (gl_cheb <= gp_layers_full) then
+                ${LAY}$ = gl_cheb
+            else if (gp_layers > gp_layers_full) then
+                gl_dk_max = merge(gp_layers, 0, p > 0)
+                do gl_di = -gp_layers, gp_layers
+                    gl_rem_j = gp_layers - abs(gl_di)
+                    do gl_dj = -gl_rem_j, gl_rem_j
+                        gl_rem_k = min(gl_rem_j - abs(gl_dj), gl_dk_max)
+                        do gl_dk = -gl_rem_k, gl_rem_k
+                            if (ib_markers%sf(${I}$ + gl_di, ${J}$ + gl_dj, ${K}$ + gl_dk) == 0) ${LAY}$ = gp_layers_full + 1
+                        end do
+                    end do
+                end do
+            end if
+        end if
+    #:enddef
+
     !> Allocates memory for the variables in the IBM module
     impure subroutine s_initialize_ibm_module()
 
@@ -1519,69 +1560,23 @@ contains
 
     end subroutine s_compute_image_points
 
-    !> Shell layer of the cell (i, j, k): 0 if it needs no ghost value, 1 .. gp_layers_full for a cell within that box (Chebyshev)
-    !! distance of a fluid cell, which is filled from an image point, and gp_layers_full + 1 for a deeper cell.
-    !!
-    !! Deep cells exist only when gp_layers > gp_layers_full, i.e. for a viscous reconstruction that reaches further into the
-    !! body (see f_ghost_point_layers). Anything such a stencil reads has to hold a current value, not the state the cell was
-    !! initialised with. Those stencils run one coordinate direction at a time, so the cells that matter form a cross, and a
-    !! cell is deep when a fluid cell lies within a Manhattan distance of gp_layers. A box of that radius would swallow all of a
-    !! small body: the inscribed radius of a cube of half-width 6 is 6/sqrt(3) of a sphere's radius in cells.
-    function f_ghost_layer(markers, i, j, k) result(layer)
-
-        $:GPU_ROUTINE(function_name='f_ghost_layer', parallelism='[seq]', cray_inline=True)
-        type(integer_field), intent(in) :: markers  !< ib_markers, passed so the device routine reads the caller's present copy
-        integer, intent(in)             :: i, j, k
-        integer                         :: layer, di, dj, dk, dk_max, rem_j, rem_k, cheb
-
-        layer = 0
-        if (markers%sf(i, j, k) == 0) return
-
-        dk_max = merge(gp_layers_full, 0, p > 0)
-        cheb = gp_layers_full + 1
-        do di = -gp_layers_full, gp_layers_full
-            do dj = -gp_layers_full, gp_layers_full
-                do dk = -dk_max, dk_max
-                    if (markers%sf(i + di, j + dj, k + dk) == 0) cheb = min(cheb, max(abs(di), abs(dj), abs(dk)))
-                end do
-            end do
-        end do
-        if (cheb <= gp_layers_full) then
-            layer = cheb
-            return
-        end if
-        if (gp_layers <= gp_layers_full) return
-
-        dk_max = merge(gp_layers, 0, p > 0)
-        do di = -gp_layers, gp_layers
-            rem_j = gp_layers - abs(di)
-            do dj = -rem_j, rem_j
-                rem_k = min(rem_j - abs(dj), dk_max)
-                do dk = -rem_k, rem_k
-                    if (markers%sf(i + di, j + dj, k + dk) == 0) then
-                        layer = gp_layers_full + 1
-                        return
-                    end if
-                end do
-            end do
-        end do
-
-    end function f_ghost_layer
-
     !> Count the number of ghost points for memory allocation
     subroutine s_find_num_ghost_points(num_gps_out)
 
         integer, intent(out) :: num_gps_out
         integer              :: i, j, k        !< Iterator variables
         integer              :: num_gps_local  !< local copies of the gp count to support GPU compute
+        integer              :: lay, gl_di, gl_dj, gl_dk, gl_dk_max, gl_rem_j, gl_rem_k, gl_cheb
 
         num_gps_local = 0
 
-        $:GPU_PARALLEL_LOOP(private='[i, j, k]', copy='[num_gps_local]', collapse=3)
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, lay, gl_di, gl_dj, gl_dk, gl_dk_max, gl_rem_j, gl_rem_k, gl_cheb]', &
+                            & copy='[num_gps_local]', collapse=3)
         do i = 0, m
             do j = 0, n
                 do k = 0, p
-                    if (f_ghost_layer(ib_markers, i, j, k) > 0) then
+                    @:GHOST_LAYER(lay, i, j, k)
+                    if (lay > 0) then
                         $:GPU_ATOMIC(atomic='update')
                         num_gps_local = num_gps_local + 1
                     end if
@@ -1601,17 +1596,19 @@ contains
         integer :: xp, yp, zp    !< periodicities
         integer :: count, count_i, local_idx
         integer :: patch_id, encoded_patch_id, neighborhood_patch_id
+        integer :: gl_di, gl_dj, gl_dk, gl_dk_max, gl_rem_j, gl_rem_k, gl_cheb
 
         count = 0
         count_i = 0
 
-        $:GPU_PARALLEL_LOOP(private='[i, j, k, lay, local_idx, patch_id, encoded_patch_id, neighborhood_patch_id, xp, yp, zp]', &
-                            & copyin='[count, count_i, glb_bounds]', present='[ghost_points]', collapse=3)
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, lay, local_idx, patch_id, encoded_patch_id, neighborhood_patch_id, xp, yp, zp, &
+                            & gl_di, gl_dj, gl_dk, gl_dk_max, gl_rem_j, gl_rem_k, gl_cheb]', copyin='[count, count_i, &
+                            & glb_bounds]', present='[ghost_points]', collapse=3)
         do i = 0, m
             do j = 0, n
                 do k = 0, p
                     if (ib_markers%sf(i, j, k) /= 0) then
-                        lay = f_ghost_layer(ib_markers, i, j, k)
+                        @:GHOST_LAYER(lay, i, j, k)
 
                         if (lay > 0) then
                             $:GPU_ATOMIC(atomic='capture')
