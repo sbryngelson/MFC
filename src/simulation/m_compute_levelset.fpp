@@ -16,7 +16,7 @@ module m_compute_levelset
 
     implicit none
 
-    private; public :: s_apply_levelset
+    private; public :: s_apply_levelset, s_levelset_point
 
 contains
 
@@ -25,59 +25,56 @@ contains
 
         type(ghost_point), dimension(:), intent(inout) :: gps
         integer, intent(in)                            :: num_gps
-        integer                                        :: i, patch_id, patch_geometry
+        integer                                        :: i
 
         ! no kernel over a zero-size patch_ib map: a rank can hold no patch after a handoff
 
         if (num_ibs == 0) return
 
-        !  3D Patch Geometries
-
-        if (p > 0) then
-            $:GPU_PARALLEL_LOOP(private='[i, patch_id, patch_geometry]', copy='[gps]', &
-                                & copyin='[patch_ib(1:num_ibs), ib_airfoil, ib_airfoil_grids]')
-            do i = 1, num_gps
-                patch_id = gps(i)%ib_patch_id
-                patch_geometry = patch_ib(patch_id)%geometry
-
-                if (patch_geometry == 8) then
-                    call s_sphere_levelset(gps(i))
-                else if (patch_geometry == 9) then
-                    call s_cuboid_levelset(gps(i))
-                else if (patch_geometry == 10) then
-                    call s_cylinder_levelset(gps(i))
-                else if (patch_geometry == 11) then
-                    call s_3d_airfoil_levelset(gps(i))
-                else if (patch_geometry == 12) then
-                    call s_model_levelset(gps(i))
-                end if
-            end do
-            $:END_GPU_PARALLEL_LOOP()
-
-            ! 2D Patch Geometries
-        else if (n > 0) then
-            $:GPU_PARALLEL_LOOP(private='[i, patch_id, patch_geometry]', copy='[gps]', &
-                                & copyin='[patch_ib(1:num_ibs), ib_airfoil, ib_airfoil_grids]')
-            do i = 1, num_gps
-                patch_id = gps(i)%ib_patch_id
-                patch_geometry = patch_ib(patch_id)%geometry
-
-                if (patch_geometry == 2) then
-                    call s_circle_levelset(gps(i))
-                else if (patch_geometry == 3) then
-                    call s_rectangle_levelset(gps(i))
-                else if (patch_geometry == 4) then
-                    call s_airfoil_levelset(gps(i))
-                else if (patch_geometry == 5) then
-                    call s_model_levelset(gps(i))
-                else if (patch_geometry == 6) then
-                    call s_ellipse_levelset(gps(i))
-                end if
-            end do
-            $:END_GPU_PARALLEL_LOOP()
-        end if
+        $:GPU_PARALLEL_LOOP(private='[i]', copy='[gps]', copyin='[patch_ib(1:num_ibs), ib_airfoil, ib_airfoil_grids]')
+        do i = 1, num_gps
+            call s_levelset_point(gps(i))
+        end do
+        $:END_GPU_PARALLEL_LOOP()
 
     end subroutine s_apply_levelset
+
+    !> Signed distance and outward normal of one point (gp%loc, gp%ib_patch_id, periodicity) to its patch
+    subroutine s_levelset_point(gp)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+
+        type(ghost_point), intent(inout) :: gp
+
+        if (p > 0) then
+            select case (patch_ib(gp%ib_patch_id)%geometry)
+            case (8)
+                call s_sphere_levelset(gp)
+            case (9)
+                call s_cuboid_levelset(gp)
+            case (10)
+                call s_cylinder_levelset(gp)
+            case (11)
+                call s_3d_airfoil_levelset(gp)
+            case (12)
+                call s_model_levelset(gp)
+            end select
+        else
+            select case (patch_ib(gp%ib_patch_id)%geometry)
+            case (2)
+                call s_circle_levelset(gp)
+            case (3)
+                call s_rectangle_levelset(gp)
+            case (4)
+                call s_airfoil_levelset(gp)
+            case (5)
+                call s_model_levelset(gp)
+            case (6)
+                call s_ellipse_levelset(gp)
+            end select
+        end if
+
+    end subroutine s_levelset_point
 
     !> Compute the signed distance and outward normal from a ghost point to a circular immersed boundary
     subroutine s_circle_levelset(gp)

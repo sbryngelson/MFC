@@ -32,7 +32,7 @@ module m_ibm
         & s_find_num_ghost_points, s_compute_ghost_point_pressure, s_compute_ghost_point_velocity
     ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, s_report_ibm_surface, &
         & s_write_ib_surface, s_update_ib_temperatures, s_conserve_ib_mass, s_accumulate_ib_face_fluxes, &
-        & s_ibm_set_conduction_temperature, s_ibm_restore_conduction_temperature, s_add_swept_cells
+        & s_ibm_set_conduction_temperature, s_ibm_restore_conduction_temperature, s_add_swept_cells, s_cutvol_advance
 
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
@@ -58,6 +58,13 @@ module m_ibm
     $:GPU_DECLARE(create='[ib_markers_prev]')
     type(integer_field) :: ib_shell  !< ib_mass_relax: global IB id of each fluid cell within ib_shell_width cells of it, else 0
     $:GPU_DECLARE(create='[ib_shell]')
+    !> ib_cutvol (conservation-only cut cells, Seo & Mittal JCP 2011): fluid fraction of each fluid cell (1 away from a body), its
+    !! value and the markers before the step's move, and the translation velocity of each body cell (0 in a fixed body)
+    type(scalar_field)                        :: ib_alpha, ib_alpha_prev
+    type(scalar_field)                        :: ib_cv_f  !< share of each donor an uncovered cell takes
+    type(integer_field)                       :: ib_markers_cv
+    real(wp), allocatable, dimension(:,:,:,:) :: ib_wall_vel
+    $:GPU_DECLARE(create='[ib_alpha, ib_alpha_prev, ib_cv_f, ib_markers_cv, ib_wall_vel]')
 
     !> Quadratic wall-normal fill of one ghost point: two probes along the surface normal, with TSC weights, and the Lagrange
     !! weights that extrapolate the profile through them back to the ghost (see s_wall_fill).
@@ -186,7 +193,7 @@ contains
         @:ACC_SETUP_SFs(corrected_gps)
 
         $:GPU_ENTER_DATA(copyin='[num_gps]')
-        $:GPU_UPDATE(device='[ib_second_order_vel, ib_ip_min_dist]')
+        $:GPU_UPDATE(device='[ib_second_order_vel, ib_ip_min_dist, ib_cutvol]')
 
         if (collision_model > 0) call s_initialize_collisions_module()
 
@@ -201,6 +208,7 @@ contains
         real(wp)        :: max_num_gps_rank
         integer(kind=8) :: max_num_gps
         integer(kind=8) :: n_lumped
+        integer         :: zb
 
         call nvtxStartRange("SETUP-IBM-MODULE")
 
@@ -307,6 +315,20 @@ contains
             @:ACC_SETUP_SFs(ib_markers_prev)
             ib_markers_prev%sf(0:m,0:n,0:p) = ib_markers%sf(0:m,0:n,0:p)
             $:GPU_UPDATE(device='[ib_markers_prev%sf]')
+        end if
+        if (ib_cutvol) then
+            zb = 0; if (p > 0) zb = buff_size
+            @:ALLOCATE(ib_alpha%sf(-buff_size:m + buff_size, -buff_size:n + buff_size, -zb:p + zb))
+            @:ACC_SETUP_SFs(ib_alpha)
+            @:ALLOCATE(ib_alpha_prev%sf(-buff_size:m + buff_size, -buff_size:n + buff_size, -zb:p + zb))
+            @:ACC_SETUP_SFs(ib_alpha_prev)
+            @:ALLOCATE(ib_cv_f%sf(-buff_size:m + buff_size, -buff_size:n + buff_size, -zb:p + zb))
+            @:ACC_SETUP_SFs(ib_cv_f)
+            if (buff_size < 4) call s_mpi_abort('ib_cutvol needs buff_size >= 4 (an uncovered cell draws from cells two away)')
+            @:ALLOCATE(ib_markers_cv%sf(-buff_size:m + buff_size, -buff_size:n + buff_size, -zb:p + zb))
+            @:ACC_SETUP_SFs(ib_markers_cv)
+            @:ALLOCATE(ib_wall_vel(1:3, -buff_size:m + buff_size, -buff_size:n + buff_size, -zb:p + zb))
+            call s_cutvol_fields()
         end if
         ! Ghost-cell IBM, Tseng & Ferziger JCP (2003), Mittal & Iaccarino ARFM (2005)
         call s_find_ghost_points()
@@ -705,7 +727,9 @@ contains
                     ! no normal velocity, the ghost enters only through the numerical dissipation, and wall gas at T_s is kept:
                     ! the mirror of a cold wall in hot gas leaves the window and slowed an unresolved heat-up transient.
                     T_adv = T_s
-                    if (patch_ib(patch_id)%moving_ibm /= 0) T_adv = min(max(T_g, T_surface_min), T_surface_max)
+                    ! ib_cutvol makes the moving wall impermeable, and wall gas is then the consistent ghost (2D replica)
+                    if (patch_ib(patch_id)%moving_ibm /= 0 .and. .not. ib_cutvol) T_adv = min(max(T_g, T_surface_min), &
+                        & T_surface_max)
                     call get_mixture_molecular_weight(Ys_g, mw_g)
                     alpha_rho_IP(1) = alpha_IP(1)*pres_IP*mw_g/(gas_constant*T_adv)
                 end if
@@ -1362,6 +1386,260 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
     end subroutine s_conserve_ib_mass
+
+    !> ib_cutvol: each fluid cell's fluid fraction, alpha = 1/2 + phi/(|n_x| dx + |n_y| dy + |n_z| dz) (the planar-wall area
+    !! fraction to first order) for the nearest of the bodies in its 3^d neighbourhood, at least 1/2 (its centre is outside), and
+    !! the translation velocity of each body cell
+    subroutine s_cutvol_fields()
+
+        type(ghost_point) :: gp
+        integer           :: i, j, k, ii, jj, kk, d, kz, zb, mk, pid, idx, xp, yp, zp
+        real(wp)          :: h, a
+
+        zb = 0; if (p > 0) zb = buff_size
+        kz = 0; if (p > 0) kz = 1
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, d, mk, pid, idx, xp, yp, zp, h, a, gp]', collapse=3, copyin='[zb, kz]')
+        do k = -zb, p + zb
+            do j = -buff_size, n + buff_size
+                do i = -buff_size, m + buff_size
+                    ib_alpha%sf(i, j, k) = 1._wp
+                    do d = 1, 3
+                        ib_wall_vel(d, i, j, k) = 0._wp
+                    end do
+                    if (ib_markers%sf(i, j, k) /= 0) then
+                        call s_decode_patch_periodicity(ib_markers%sf(i, j, k), pid)
+                        call s_get_neighborhood_idx(pid, idx)
+                        if (idx > 0) then
+                            if (patch_ib(idx)%moving_ibm /= 0) then
+                                do d = 1, 3
+                                    ib_wall_vel(d, i, j, k) = patch_ib(idx)%vel(d)
+                                end do
+                            end if
+                        end if
+                    else
+                        do kk = -kz, kz
+                            do jj = -1, 1
+                                do ii = -1, 1
+                                    if (i + ii < -buff_size .or. i + ii > m + buff_size .or. j + jj < -buff_size .or. j + jj > n &
+                                        & + buff_size .or. k + kk < -zb .or. k + kk > p + zb) cycle
+                                    mk = ib_markers%sf(i + ii, j + jj, k + kk)
+                                    if (mk == 0) cycle
+                                    call s_decode_patch_periodicity(mk, pid, xp, yp, zp)
+                                    call s_get_neighborhood_idx(pid, idx)
+                                    if (idx <= 0) cycle
+                                    gp%loc(1) = i; gp%loc(2) = j; gp%loc(3) = k
+                                    gp%ib_patch_id = idx
+                                    gp%x_periodicity = xp; gp%y_periodicity = yp; gp%z_periodicity = zp
+                                    call s_levelset_point(gp)
+                                    h = abs(gp%levelset_norm(1))*dx(i) + abs(gp%levelset_norm(2))*dy(j)
+                                    if (p > 0) h = h + abs(gp%levelset_norm(3))*dz(k)
+                                    a = min(max(0.5_wp + gp%levelset/max(h, sgm_eps), 0.5_wp), 1._wp)
+                                    ib_alpha%sf(i, j, k) = min(ib_alpha%sf(i, j, k), a)
+                                end do
+                            end do
+                        end do
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_cutvol_fields
+
+    !> ib_cutvol: move every prescribed-translation body over the whole step, rebuild the markers and ghost points, and remap the
+    !! gas conservatively (s_cutvol_remap). The geometry is then frozen for the step's stages. q_cons_vf's halo must be current.
+    impure subroutine s_cutvol_advance(q_cons_vf, dt_step)
+
+        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
+        real(wp), intent(in)                                   :: dt_step
+        integer                                                :: i, j, k, zb
+
+        zb = 0; if (p > 0) zb = buff_size
+        $:GPU_PARALLEL_LOOP(private='[i, j, k]', collapse=3, copyin='[zb]')
+        do k = -zb, p + zb
+            do j = -buff_size, n + buff_size
+                do i = -buff_size, m + buff_size
+                    ib_markers_cv%sf(i, j, k) = ib_markers%sf(i, j, k)
+                    ib_alpha_prev%sf(i, j, k) = ib_alpha%sf(i, j, k)
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+        $:GPU_PARALLEL_LOOP(private='[i]', copyin='[dt_step]')
+        do i = 1, num_ibs
+            if (patch_ib(i)%moving_ibm == 1) then
+                patch_ib(i)%x_centroid = patch_ib(i)%x_centroid + dt_step*patch_ib(i)%vel(1)
+                patch_ib(i)%y_centroid = patch_ib(i)%y_centroid + dt_step*patch_ib(i)%vel(2)
+                patch_ib(i)%z_centroid = patch_ib(i)%z_centroid + dt_step*patch_ib(i)%vel(3)
+            end if
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+        call s_update_mib(num_ibs)
+        call s_cutvol_fields()
+        call s_cutvol_remap(q_cons_vf)
+
+    end subroutine s_cutvol_advance
+
+    !> ib_cutvol: conservative remap after a move. A cell fluid before and after (kept) keeps its gas in its new fluid volume, q =
+    !! alpha_prev q / alpha (the advancing wall compresses, the receding wall expands). An uncovered cell takes the fraction f =
+    !! alpha / sum(alpha_prev) (at most 1/4) of every kept neighbour, or of every kept cell within two cells when its neighbours
+    !! cannot spare that (ib_cv_f < 0 marks it); the donors keep their state at (1 - sum f) of their content, so no cell is drained
+    !! or its state shifted. A covered cell gives its content alpha_prev q to its kept neighbours in equal shares. Cells in the halo
+    !! are processed too, from halo states every rank shares.
+    subroutine s_cutvol_remap(q_cons_vf)
+
+        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
+        integer                                                :: i, j, k, ii, jj, kk, q, kz, cnt, r
+        real(wp)                                               :: w, w1, f, ws
+
+        kz = 0; if (p > 0) kz = 1
+
+        ! Volume fractions are intensive: kept and covered cells leave them, an uncovered cell takes its donors' mean
+
+        ! uncovered cells: f of each kept donor within reach r (read before anything changes)
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, q, w, w1, f, r, ws]', collapse=3, copyin='[kz]')
+        do k = -2*kz, p + 2*kz
+            do j = -2, n + 2
+                do i = -2, m + 2
+                    ib_cv_f%sf(i, j, k) = 0._wp
+                    if (ib_markers_cv%sf(i, j, k) /= 0 .and. ib_markers%sf(i, j, k) == 0) then
+                        w = 0._wp; w1 = 0._wp
+                        do kk = -2*kz, 2*kz
+                            do jj = -2, 2
+                                do ii = -2, 2
+                                    if (f_cutvol_kept(ib_markers, ib_markers_cv, i + ii, j + jj, k + kk)) then
+                                        w = w + ib_alpha_prev%sf(i + ii, j + jj, k + kk)
+                                        if (max(abs(ii), abs(jj), abs(kk)) <= 1) w1 = w1 + ib_alpha_prev%sf(i + ii, j + jj, k + kk)
+                                    end if
+                                end do
+                            end do
+                        end do
+                        r = 2
+                        if (ib_alpha%sf(i, j, k) <= 0.25_wp*w1) then
+                            r = 1; w = w1
+                        end if
+                        if (w > 0._wp) then
+                            ws = w
+                            f = min(ib_alpha%sf(i, j, k)/w, 0.25_wp)
+                            ib_cv_f%sf(i, j, k) = merge(f, -f, r == 1)
+                            do q = 1, sys_size
+                                w = 0._wp
+                                do kk = -r*kz, r*kz
+                                    do jj = -r, r
+                                        do ii = -r, r
+                                            if (f_cutvol_kept(ib_markers, ib_markers_cv, i + ii, j + jj, &
+                                                & k + kk)) w = w + ib_alpha_prev%sf(i + ii, j + jj, &
+                                                & k + kk)*q_cons_vf(q)%sf(i + ii, j + jj, k + kk)
+                                        end do
+                                    end do
+                                end do
+                                if (q >= eqn_idx%adv%beg .and. q <= eqn_idx%adv%end) then
+                                    q_cons_vf(q)%sf(i, j, k) = w/ws
+                                else
+                                    q_cons_vf(q)%sf(i, j, k) = f*w/ib_alpha%sf(i, j, k)
+                                end if
+                            end do
+                        end if
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+        ! kept cells: what the uncovered cells took, then the new fluid volume
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, q, w, f]', collapse=3, copyin='[kz]')
+        do k = 0, p
+            do j = 0, n
+                do i = 0, m
+                    if (f_cutvol_kept(ib_markers, ib_markers_cv, i, j, k)) then
+                        w = 0._wp
+                        do kk = -2*kz, 2*kz
+                            do jj = -2, 2
+                                do ii = -2, 2
+                                    f = ib_cv_f%sf(i + ii, j + jj, k + kk)  ! > 0: reach 1, < 0: reach 2
+                                    if (ib_markers_cv%sf(i + ii, j + jj, k + kk) /= 0 .and. ib_markers%sf(i + ii, j + jj, &
+                                        & k + kk) == 0 .and. (f < 0._wp .or. max(abs(ii), abs(jj), abs(kk)) <= 1)) w = w + abs(f)
+                                end do
+                            end do
+                        end do
+                        w = (1._wp - w)*ib_alpha_prev%sf(i, j, k)/ib_alpha%sf(i, j, k)
+                        if (w /= 1._wp) then
+                            do q = 1, sys_size
+                                if (q >= eqn_idx%adv%beg .and. q <= eqn_idx%adv%end) cycle
+                                q_cons_vf(q)%sf(i, j, k) = w*q_cons_vf(q)%sf(i, j, k)
+                            end do
+                        end if
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+        ! covered cells: their content alpha_prev q into the kept neighbours, per unit fluid volume
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, q, cnt, w]', collapse=3, copyin='[kz]')
+        do k = -kz, p + kz
+            do j = -1, n + 1
+                do i = -1, m + 1
+                    if (ib_markers_cv%sf(i, j, k) == 0 .and. ib_markers%sf(i, j, k) /= 0) then
+                        cnt = f_cutvol_count(ib_markers, ib_markers_cv, i, j, k, kz)
+                        if (cnt > 0) then
+                            w = ib_alpha_prev%sf(i, j, k)/real(cnt, wp)
+                            do kk = -kz, kz
+                                do jj = -1, 1
+                                    do ii = -1, 1
+                                        if (i + ii < 0 .or. i + ii > m .or. j + jj < 0 .or. j + jj > n .or. k + kk < 0 .or. k &
+                                            & + kk > p) cycle
+                                        if (.not. f_cutvol_kept(ib_markers, ib_markers_cv, i + ii, j + jj, k + kk)) cycle
+                                        do q = 1, sys_size
+                                            if (q >= eqn_idx%adv%beg .and. q <= eqn_idx%adv%end) cycle
+                                            $:GPU_ATOMIC(atomic='update')
+                                            q_cons_vf(q)%sf(i + ii, j + jj, k + kk) = q_cons_vf(q)%sf(i + ii, j + jj, &
+                                                      & k + kk) + w*q_cons_vf(q)%sf(i, j, k)/ib_alpha%sf(i + ii, j + jj, k + kk)
+                                        end do
+                                    end do
+                                end do
+                            end do
+                        end if
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_cutvol_remap
+
+    !> ib_cutvol: a cell that is fluid now and was before the step's move
+    function f_cutvol_kept(mk, mk_cv, i, j, k) result(kept)
+
+        $:GPU_ROUTINE(function_name='f_cutvol_kept', parallelism='[seq]', cray_inline=True)
+        type(integer_field), intent(in) :: mk, mk_cv  !< ib_markers and ib_markers_cv, passed (see f_ghost_layer)
+        integer, intent(in)             :: i, j, k
+        logical                         :: kept
+
+        kept = mk%sf(i, j, k) == 0 .and. mk_cv%sf(i, j, k) == 0
+
+    end function f_cutvol_kept
+
+    !> ib_cutvol: number of kept cells in the 3^d neighbourhood of (i, j, k)
+    function f_cutvol_count(mk, mk_cv, i, j, k, kz) result(cnt)
+
+        $:GPU_ROUTINE(function_name='f_cutvol_count', parallelism='[seq]', cray_inline=True)
+        type(integer_field), intent(in) :: mk, mk_cv
+        integer, intent(in)             :: i, j, k, kz
+        integer                         :: cnt, ii, jj, kk
+
+        cnt = 0
+        do kk = -kz, kz
+            do jj = -1, 1
+                do ii = -1, 1
+                    if ((ii /= 0 .or. jj /= 0 .or. kk /= 0) .and. f_cutvol_kept(mk, mk_cv, i + ii, j + jj, k + kk)) cnt = cnt + 1
+                end do
+            end do
+        end do
+
+    end function f_cutvol_count
 
     !> Moving bodies: the body-frame energy E' = E - rho u.V_b + rho |V_b|^2/2 and the mass of each cell a body covered (+) or
     !! uncovered (-) at this stage's placement, as rates into ib_heat(2) and out of ib_heat(3). The grid faces do not move with the
@@ -3114,6 +3392,9 @@ contains
         @:DEALLOCATE(corrected_gps%sf)
         if (ib_exchange .and. moving_immersed_boundary_flag) then
             @:DEALLOCATE(ib_markers_prev%sf)
+        end if
+        if (ib_cutvol) then
+            @:DEALLOCATE(ib_alpha%sf, ib_alpha_prev%sf, ib_cv_f%sf, ib_markers_cv%sf, ib_wall_vel)
         end if
         @:DEALLOCATE(ib_face_ft)
         do i = 1, num_ib_airfoils_max

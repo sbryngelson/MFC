@@ -21,6 +21,7 @@ module m_riemann_solver_hllc
     use m_thermochem, only: gas_constant, get_mixture_molecular_weight, get_species_enthalpies_rt, molecular_weights
     use m_thermochem_state, only: get_mixture_caloric_state
     use m_riemann_state
+    use m_ibm, only: ib_markers, ib_wall_vel
 
     implicit none
 
@@ -57,6 +58,8 @@ contains
 
         real(wp)                             :: rho_L, rho_R
         real(wp)                             :: pres_L, pres_R
+        logical                              :: ib_cv  !< ib_cutvol: a face between a fluid cell and a moving body's cell
+        real(wp)                             :: vb_x, vb_y, vb_z, fm_cv  !< that body's velocity; the face's mass flux
         real(wp)                             :: E_L, E_R
         real(wp)                             :: H_L, H_R
         real(wp), dimension(${NUM_SPECIES}$) :: Ys_L, Ys_R, Xs_L, Xs_R, Gamma_iL, Gamma_iR, Cp_iL, Cp_iR, R_species, h_iL, h_iR
@@ -79,7 +82,7 @@ contains
         real(wp)                             :: qv_avg
         real(wp)                             :: c_avg
         real(wp)                             :: s_L, s_R, s_M, s_P, s_S
-        real(wp)                             :: xi_L, xi_R        !< Left and right wave speeds functions
+        real(wp)                             :: xi_L, xi_R  !< Left and right wave speeds functions
         real(wp)                             :: xi_L_m1, xi_R_m1  !< xi_L/R - 1, computed without cancellation
         real(wp)                             :: xi_M, xi_P, xi_tan
         real(wp)                             :: xi_MP, xi_PP
@@ -861,7 +864,7 @@ contains
                             & 'Re_L', 'Re_R', 'alpha_L', 'alpha_R', 'alpha_rho_L', 'alpha_rho_R']
                         #:set _hllc_s5 = ['alpha_lim_L', 'alpha_lim_R', 's_L', 's_R', 's_S', 'vel_avg_rms', 'pcorr', 'Ys_L', &
                             & 'Ys_R', 'Xs_L', 'Xs_R', 'Gamma_iL', 'Gamma_iR', 'Cp_iL', 'Cp_iR']
-                        #:set _hllc_s6 = ['R_species', 'h_iL', 'h_iR']
+                        #:set _hllc_s6 = ['R_species', 'h_iL', 'h_iR', 'ib_cv', 'vb_x', 'vb_y', 'vb_z', 'fm_cv']
                         #:set _hllc_e1 = ['ptilde_L', 'ptilde_R', 'tau_e_L', 'tau_e_R', 'G_L', 'G_R', 'damage_L', 'damage_R', &
                             & 'solid_partial_density_L', 'solid_partial_density_R', &
                             & 'U_L', 'U_R', 'F_L', 'F_R', 'F_star_L', 'F_star_R', 'F_HLLC']
@@ -914,6 +917,35 @@ contains
                                     do i = 1, num_dims
                                         vel_L(i) = qL_prim_rsx_vf(${SF('')}$, eqn_idx%cont%end + i)
                                         vel_R(i) = qR_prim_rsx_vf(${SF(' + 1')}$, eqn_idx%cont%end + i)
+                                    end do
+
+                                    ! ib_cutvol: at a face between fluid and a moving body the flux is taken in the body's frame (no
+                                    ! gas crosses the wall) and transformed back below as the flux through a face moving with it
+                                    ib_cv = .false.
+                                    if (ib_cutvol) then
+                                        if ((ib_markers%sf(${SF('')}$) == 0) .neqv. (ib_markers%sf(${SF(' + 1')}$) == 0)) then
+                                            if (ib_markers%sf(${SF('')}$) /= 0) then
+                                                vb_x = ib_wall_vel(1, ${SF('')}$); vb_y = ib_wall_vel(2, ${SF('')}$)
+                                                vb_z = ib_wall_vel(3, ${SF('')}$)
+                                            else
+                                                vb_x = ib_wall_vel(1, ${SF(' + 1')}$); vb_y = ib_wall_vel(2, ${SF(' + 1')}$)
+                                                vb_z = ib_wall_vel(3, ${SF(' + 1')}$)
+                                            end if
+                                            ib_cv = vb_x /= 0._wp .or. vb_y /= 0._wp .or. vb_z /= 0._wp
+                                        end if
+                                    end if
+                                    if (ib_cv) then
+                                        vel_L(1) = vel_L(1) - vb_x; vel_R(1) = vel_R(1) - vb_x
+                                        if (num_dims > 1) then
+                                            vel_L(2) = vel_L(2) - vb_y; vel_R(2) = vel_R(2) - vb_y
+                                        end if
+                                        if (num_dims > 2) then
+                                            vel_L(3) = vel_L(3) - vb_z; vel_R(3) = vel_R(3) - vb_z
+                                        end if
+                                    end if
+
+                                    $:GPU_LOOP(parallelism='[seq]')
+                                    do i = 1, num_dims
                                         vel_L_rms = vel_L_rms + vel_L(i)**2._wp
                                         vel_R_rms = vel_R_rms + vel_R(i)**2._wp
                                     end do
@@ -1400,6 +1432,36 @@ contains
                                                         & + xi_P*rho_R*Y_R*(vel_R(dir_idx(1)) + s_P*xi_R_m1)
                                             flux_src_rsx_vf(${SF('')}$, i) = 0.0_wp
                                         end do
+                                    end if
+
+                                    if (ib_cv) then  ! body frame -> flux through a face moving with the body (lab variables)
+                                        fm_cv = 0._wp
+                                        $:GPU_LOOP(parallelism='[seq]')
+                                        do i = eqn_idx%cont%beg, eqn_idx%cont%end
+                                            fm_cv = fm_cv + flux_rsx_vf(${SF('')}$, i)
+                                        end do
+                                        flux_rsx_vf(${SF('')}$, eqn_idx%E) = flux_rsx_vf(${SF('')}$, &
+                                                    & eqn_idx%E) + vb_x*flux_rsx_vf(${SF('')}$, &
+                                                    & eqn_idx%mom%beg) + 0.5_wp*(vb_x**2 + vb_y**2 + vb_z**2)*fm_cv
+                                        flux_rsx_vf(${SF('')}$, eqn_idx%mom%beg) = flux_rsx_vf(${SF('')}$, &
+                                                    & eqn_idx%mom%beg) + vb_x*fm_cv
+                                        vel_src_rsx_vf(${SF('')}$, 1) = vel_src_rsx_vf(${SF('')}$, 1) + vb_x
+                                        if (num_dims > 1) then
+                                            flux_rsx_vf(${SF('')}$, eqn_idx%E) = flux_rsx_vf(${SF('')}$, &
+                                                        & eqn_idx%E) + vb_y*flux_rsx_vf(${SF('')}$, eqn_idx%mom%beg + 1)
+                                            flux_rsx_vf(${SF('')}$, eqn_idx%mom%beg + 1) = flux_rsx_vf(${SF('')}$, &
+                                                        & eqn_idx%mom%beg + 1) + vb_y*fm_cv
+                                            vel_src_rsx_vf(${SF('')}$, 2) = vel_src_rsx_vf(${SF('')}$, 2) + vb_y
+                                        end if
+                                        if (num_dims > 2) then
+                                            flux_rsx_vf(${SF('')}$, eqn_idx%E) = flux_rsx_vf(${SF('')}$, &
+                                                        & eqn_idx%E) + vb_z*flux_rsx_vf(${SF('')}$, eqn_idx%mom%beg + 2)
+                                            flux_rsx_vf(${SF('')}$, eqn_idx%mom%beg + 2) = flux_rsx_vf(${SF('')}$, &
+                                                        & eqn_idx%mom%beg + 2) + vb_z*fm_cv
+                                            vel_src_rsx_vf(${SF('')}$, 3) = vel_src_rsx_vf(${SF('')}$, 3) + vb_z
+                                        end if
+                                        ! the volume-fraction flux and its source velocity stay in the body frame, as they must
+                                        ! agree
                                     end if
 
                                     #:if HYPO

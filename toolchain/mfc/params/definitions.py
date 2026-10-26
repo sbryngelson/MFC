@@ -696,6 +696,7 @@ def _load():
     _r("ib_wall_order", INT, {"ib"})
     _r("ib_mass_relax", INT, {"ib"})
     _r("ib_ip_min_dist", REAL, {"ib"})
+    _r("ib_cutvol", LOG, {"ib"})
     _r("ib", LOG, {"ib"})
     _r("collision_model", INT, {"ib"})
     _r("collision_temporal_resolution", INT, {"ib"})
@@ -1495,6 +1496,7 @@ _nv(
     "ib_wall_order",
     "ib_mass_relax",
     "ib_ip_min_dist",
+    "ib_cutvol",
     "many_ib_patch_parallelism",
     "ib_second_order_vel",
     "tau_star",

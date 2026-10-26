@@ -147,6 +147,7 @@ DESCRIPTIONS = {
     "ib_ip_interp": "Image-point interpolation: 1 inverse-distance weighting over 2x2(x2) cells, 2 triangular-shaped-cloud weights over 3x3(x3) cells (default)",
     "ib_mass_relax": "Immersed-boundary mass conservation: N > 0 returns each body's spurious gas mass over about N steps; 0 off; -1 (default) 30 for moving, slip or reacting bodies",
     "ib_wall_order": "Immersed-boundary wall treatment: 1 one-probe mirror ghost fill and one-sided wall gradient (default), 2 two-probe quadratic wall-normal fill and wall gradient with TSC probes",
+    "ib_cutvol": "Moving immersed boundaries: conservation-only fluid fractions of the cells next to a moving wall (the wall's displacement is conserved), prescribed translation only",
     "ib_ip_min_dist": "Minimum wall-to-image-point distance in cell widths, used with ib_second_order_vel; 0 (default) puts the image point at twice the ghost point's wall distance",
     "many_ib_patch_parallelism": "Parallelize over IB patches instead of grid cells (better for many small patches)",
     "ib_second_order_vel": "Extrapolate IB ghost-point velocity linearly through the boundary intercept (second order)",

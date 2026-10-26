@@ -38,6 +38,7 @@ SIM_GPU_DECL_VARS = {
     "Ca",
     "R0ref",
     "ib_ip_min_dist",
+    "ib_cutvol",
     "ib_second_order_vel",
     "Re_inv",
     "Web",

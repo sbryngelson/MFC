@@ -461,6 +461,16 @@ contains
         ! Adaptive dt: initial stage
         if (adap_dt) call s_adaptive_dt_bubble(1)
 
+        ! ib_cutvol: the bodies move once, over the whole step, with a conservative remap; the stages see a frozen geometry
+        if (ib_cutvol .and. moving_immersed_boundary_flag .and. .not. merge(mytime >= t_stop, t_step == t_step_stop, cfl_dt)) then
+            call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
+            call s_cutvol_advance(q_cons_ts(1)%vf, dt)
+            ! the ghost fill interpolates the primitive state, which no RHS has formed yet for the moved geometry
+            call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
+            call s_convert_conservative_to_primitive_variables(q_cons_ts(1)%vf, q_T_sf, q_prim_vf, idwbuff)
+            call s_ibm_correct_state(q_cons_ts(1)%vf, q_prim_vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
+        end if
+
         do s = 1, nstage
             call system_clock(stage_t0)
             ! mytime is read on the device by the GRCBC inflow ramp, so it has to be current before the RHS that
@@ -566,13 +576,17 @@ contains
             if (ib) then
                 ! check if any IBMS are moving, and if so, update the markers, ghost points, levelsets, and levelset norms
                 if (moving_immersed_boundary_flag) then
-                    call s_propagate_immersed_boundaries(s, t_step)
-                    if (ib_exchange) then  ! book this placement's swept cells before the ghost correction overwrites them
-                        a_w = 1._wp
-                        do q = s + 1, nstage
-                            a_w = a_w*rk_coef(q, 1)/rk_coef(q, 4)
-                        end do
-                        call s_add_swept_cells(q_cons_ts(1)%vf, q_cons_ts(stor)%vf, a_w, dt)
+                    if (ib_cutvol) then  ! the step's move and its conservative remap were done before the stages
+                        call s_compute_ib_forces()
+                    else
+                        call s_propagate_immersed_boundaries(s, t_step)
+                        if (ib_exchange) then  ! book this placement's swept cells before the ghost correction overwrites them
+                            a_w = 1._wp
+                            do q = s + 1, nstage
+                                a_w = a_w*rk_coef(q, 1)/rk_coef(q, 4)
+                            end do
+                            call s_add_swept_cells(q_cons_ts(1)%vf, q_cons_ts(stor)%vf, a_w, dt)
+                        end if
                     end if
                 end if
 

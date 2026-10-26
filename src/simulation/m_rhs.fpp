@@ -864,6 +864,22 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
         end if
+        ! ib_cutvol: the fluxes change a cut cell's gas over its fluid volume only (volume sources, added below, do not)
+        if (ib_cutvol) then
+            $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=3)
+            do l = 0, p
+                do k = 0, n
+                    do j = 0, m
+                        if (ib_alpha%sf(j, k, l) < 1._wp) then
+                            do i = 1, sys_size
+                                rhs_vf(i)%sf(j, k, l) = rhs_vf(i)%sf(j, k, l)/ib_alpha%sf(j, k, l)
+                            end do
+                        end if
+                    end do
+                end do
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        end if
 
         ! Additional Physics and Source Terms Additions for acoustic_source
         if (acoustic_source) then

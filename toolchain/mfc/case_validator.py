@@ -834,6 +834,24 @@ class CaseValidator:
         self.prohibit(ib_mass_relax > 0 and self.get("igr", "F") == "T", "ib_mass_relax is not supported with igr")
         self.prohibit(ib_mass_relax > 0 and self.get("model_eqns", 2) != 2, "ib_mass_relax requires model_eqns = 2")
         self.prohibit(ib_mass_relax > 0 and self.get("bubbles_euler", "F") == "T", "ib_mass_relax is not supported with bubbles")
+        ib_cutvol = self.get("ib_cutvol", "F") == "T"
+        self.prohibit(ib_cutvol and not ib, "ib_cutvol requires ib to be enabled")
+        self.prohibit(ib_cutvol and self.get("igr", "F") == "T", "ib_cutvol is not supported with igr")
+        self.prohibit(ib_cutvol and self.get("model_eqns", 2) != 2, "ib_cutvol requires model_eqns = 2")
+        self.prohibit(ib_cutvol and self.get("riemann_solver", 2) != 2, "ib_cutvol requires riemann_solver = 2 (HLLC)")
+        self.prohibit(ib_cutvol and self.get("bubbles_euler", "F") == "T", "ib_cutvol is not supported with bubbles")
+        self.prohibit(ib_cutvol and num_particle_clouds > 0, "ib_cutvol is not supported with particle clouds")
+        self.prohibit(ib_cutvol and self.get("hypoelasticity", "F") == "T", "ib_cutvol is not supported with hypoelasticity")
+        self.prohibit(ib_cutvol and self.get("cyl_coord", "F") == "T", "ib_cutvol requires Cartesian coordinates")
+        for i in range(1, (num_ibs or 0) + 1):
+            mv = self.get(f"patch_ib({i})%moving_ibm", 0) or 0
+            spin = any((self.get(f"patch_ib({i})%angular_vel({d})", 0.0) or 0.0) != 0.0 for d in (1, 2, 3))
+            self.prohibit(
+                ib_cutvol and (mv not in (0, 1) or spin or (self.get(f"patch_ib({i})%kin_model", 0) or 0) > 0),
+                f"ib_cutvol: patch_ib({i}) must be fixed or translate at a prescribed velocity (moving_ibm = 0 or 1, no rotation, no kin_model)",
+            )
+            self.prohibit(ib_cutvol and self.get(f"patch_ib({i})%slip", "F") == "T", f"ib_cutvol: patch_ib({i}) must be no-slip")
+            self.prohibit(ib_cutvol and self.get(f"patch_ib({i})%geometry", 0) not in (2, 8), f"ib_cutvol: patch_ib({i}) must be a circle or a sphere")
         ib_heat_wrt = self.get("ib_heat_wrt", "F") == "T"
         self.prohibit(ib_heat_wrt and not (ib and self.get("chemistry", "F") == "T"), "ib_heat_wrt requires ib and chemistry")
         self.prohibit(ib_heat_wrt and self.get("igr", "F") == "T", "ib_heat_wrt is not supported with igr")
