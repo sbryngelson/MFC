@@ -2685,6 +2685,10 @@ contains
                             if (idir == 3) area = dx(j)*dy(k)
                             if (num_dims == 3 .and. idir /= 3) area = area*dz(l)
                             moving = patch_ib(ib_id)%moving_ibm > 0
+                            f_m = 0._wp
+                            do i = eqn_idx%cont%beg, eqn_idx%cont%end
+                                f_m = f_m + flux_vf(i)%sf(j, k, l)
+                            end do
                             if (do_ft .or. moving) then
                                 ! Lever arm: face centre minus the centroid of the body's periodic image
                                 r = 0._wp
@@ -2695,12 +2699,22 @@ contains
                                 if (num_dims == 3) r(3) = merge(z_cb(l), z_cc(l), &
                                     & idir == 3) - (patch_ib(ib_id)%z_centroid + real(zp, &
                                     & wp)*(glb_bounds(3)%end - glb_bounds(3)%beg))
+                                ! Wall velocity at the face, V_b = V + omega x r
+                                vb(1) = patch_ib(ib_id)%vel(1) + patch_ib(ib_id)%angular_vel(2)*r(3) &
+                                   & - patch_ib(ib_id)%angular_vel(3)*r(2)
+                                vb(2) = patch_ib(ib_id)%vel(2) + patch_ib(ib_id)%angular_vel(3)*r(1) &
+                                   & - patch_ib(ib_id)%angular_vel(1)*r(3)
+                                vb(3) = patch_ib(ib_id)%vel(3) + patch_ib(ib_id)%angular_vel(1)*r(2) &
+                                   & - patch_ib(ib_id)%angular_vel(2)*r(1)
                             end if
                             if (do_ft) then
                                 f = 0._wp
                                 do i = 1, num_dims
                                     f(i) = flux_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)
                                     if (has_src) f(i) = f(i) + flux_src_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)
+                                    ! A moving wall's force is the momentum flux through a face moving with it: the lab flux also
+                                    ! carries the momentum of the gas crossing the face (V_b f_m), which is not a stress on the body
+                                    if (moving) f(i) = f(i) - vb(i)*f_m
                                     f(i) = real(side, wp)*area*f(i)
                                 end do
                                 ! mean pressure gradient: the uniform gradient's surface pressure -f.r gives the displacement force
@@ -2717,20 +2731,10 @@ contains
                             if (all_ibs .or. patch_ib(ib_id)%thermal_bc == 3) then
                                 f_E = flux_vf(eqn_idx%E)%sf(j, k, l)
                                 if (has_src_E) f_E = f_E + flux_src_vf(eqn_idx%E)%sf(j, k, l)
-                                f_m = 0._wp
-                                do i = eqn_idx%cont%beg, eqn_idx%cont%end
-                                    f_m = f_m + flux_vf(i)%sf(j, k, l)
-                                end do
                                 if (moving) then
                                     ! Energy flux in the body frame, f_E - V_b.f_mom + |V_b|^2 f_m/2 (V_b = V + omega x r at the
                                     ! face): the lab flux also carries the wall's pressure/viscous work and the swept gas energy,
                                     ! which are not heat into the body
-                                    vb(1) = patch_ib(ib_id)%vel(1) + patch_ib(ib_id)%angular_vel(2)*r(3) &
-                                       & - patch_ib(ib_id)%angular_vel(3)*r(2)
-                                    vb(2) = patch_ib(ib_id)%vel(2) + patch_ib(ib_id)%angular_vel(3)*r(1) &
-                                       & - patch_ib(ib_id)%angular_vel(1)*r(3)
-                                    vb(3) = patch_ib(ib_id)%vel(3) + patch_ib(ib_id)%angular_vel(1)*r(2) &
-                                       & - patch_ib(ib_id)%angular_vel(2)*r(1)
                                     do i = 1, num_dims
                                         f_mom = flux_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)
                                         if (has_src) f_mom = f_mom + flux_src_vf(eqn_idx%mom%beg + i - 1)%sf(j, k, l)
