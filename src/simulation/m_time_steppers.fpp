@@ -463,6 +463,7 @@ contains
 
         ! ib_cutvol: the bodies move once, over the whole step, with a conservative remap; the stages see a frozen geometry
         if (ib_cutvol .and. moving_immersed_boundary_flag .and. .not. merge(mytime >= t_stop, t_step == t_step_stop, cfl_dt)) then
+            call s_cutvol_analytic_velocity()
             call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
             call s_cutvol_advance(q_cons_ts(1)%vf, dt)
             ! the ghost fill interpolates the primitive state, which no RHS has formed yet for the moved geometry
@@ -907,6 +908,33 @@ contains
     end subroutine s_apply_synthetic_turbulence_force
 
     !> Update immersed boundary positions and velocities at the current Runge-Kutta stage
+    !> ib_cutvol: analytic (prescribed) body velocities at the step midpoint, so the one move per step is second order in time; the
+    !! acceleration for the ghost pressure is the change over the step. The bodies move on the device, so the host copy is refreshed
+    !! first.
+    impure subroutine s_cutvol_analytic_velocity()
+
+        integer                :: i, d
+        integer                :: gbl_id  ! used by mib_analytical
+        real(wp)               :: t_step_start
+        real(wp), dimension(3) :: vel_old
+
+        $:GPU_UPDATE(host='[patch_ib(1:num_ibs)]')
+        t_step_start = mytime
+        mytime = mytime + 0.5_wp*dt
+        do i = 1, num_ibs
+            if (patch_ib(i)%moving_ibm == 1) then
+                vel_old = patch_ib(i)%vel
+                @:mib_analytical()
+                do d = 1, 3
+                    patch_ib(i)%accel(d) = (patch_ib(i)%vel(d) - vel_old(d))/dt
+                end do
+            end if
+        end do
+        mytime = t_step_start
+        $:GPU_UPDATE(device='[patch_ib(1:num_ibs)]')
+
+    end subroutine s_cutvol_analytic_velocity
+
     subroutine s_propagate_immersed_boundaries(s, t_step)
 
         integer, intent(in)    :: s, t_step

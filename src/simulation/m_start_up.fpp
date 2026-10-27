@@ -970,7 +970,8 @@ contains
             call s_build_ib_neighborhood()
             ! ib_mass_relax = -1 (default): on where the ghost-cell treatment measurably creates or destroys gas (a moving,
             ! slip or reacting body), off for fixed no-slip inert walls, and off with a blowing body, whose injected gas the
-            ! account (gasification only) would take back out. Decided over all bodies, not this rank's: it gates collectives.
+            ! account (gasification only) would take back out, and off under ib_cutvol, whose remap conserves the gas. Decided over
+            ! all bodies, not this rank's: it gates collectives.
             if (ib_mass_relax < 0) then
                 block
                     integer(kind=8) :: n_on, n_blow
@@ -980,7 +981,7 @@ contains
                                                      & .or. patch_ib(1:num_ibs)%inj_species > 0), 8), n_blow)
                     ib_mass_relax = 0
                     if ((moving_immersed_boundary_flag .or. n_on > 0_8) .and. n_blow == 0_8 .and. model_eqns == 2 .and. .not. igr &
-                        & .and. .not. bubbles_euler) ib_mass_relax = 30
+                        & .and. .not. ib_cutvol .and. .not. bubbles_euler) ib_mass_relax = 30
                 end block
             end if
             call s_ibm_setup()

@@ -540,8 +540,8 @@ contains
         ib_heat_wrt = .false.
         ib_force_stride = 1
         many_ib_patch_parallelism = .false.
-        ib_second_order_vel = .false.
         ib_ip_min_dist = 0._wp
+        ib_slip_ccst = .true.
         ib_cutvol = .false.
 
         ! Bubble modeling (sim-specific)

@@ -193,7 +193,7 @@ contains
         @:ACC_SETUP_SFs(corrected_gps)
 
         $:GPU_ENTER_DATA(copyin='[num_gps]')
-        $:GPU_UPDATE(device='[ib_second_order_vel, ib_ip_min_dist, ib_cutvol]')
+        $:GPU_UPDATE(device='[ib_ip_min_dist, ib_slip_ccst, ib_cutvol]')
 
         if (collision_model > 0) call s_initialize_collisions_module()
 
@@ -762,7 +762,7 @@ contains
                 else
                     ! Curvature-corrected symmetry technique on a slip wall: the ghost density follows the isentrope and the total
                     ! enthalpy is conserved across the wall, which sets the tangential speed in s_compute_ghost_point_velocity
-                    use_ccst = gp%slip .and. .not. chemistry .and. model_eqns == 2 .and. .not. bubbles_euler
+                    use_ccst = ib_slip_ccst .and. gp%slip .and. .not. chemistry .and. model_eqns == 2 .and. .not. bubbles_euler
                     h_IP = ((gamma + 1._wp)*pres_IP + pi_inf + qv_K)/rho
                     call s_compute_ghost_point_pressure(gp, patch_id, radial_vector, vel_IP, rho, pres_IP, pres_GP)
 
@@ -1751,7 +1751,7 @@ contains
             dist = abs(real(gp%levelset, kind=wp))
             ghost_points(q)%ip_dist = dist
             ! keep the image point stencil off the wall
-            if (ib_second_order_vel) then
+            if (ib_ip_min_dist > 0._wp) then
                 min_cell_width = min(dx(i), dy(j))
                 if (p > 0) min_cell_width = min(min_cell_width, dz(k))
                 ghost_points(q)%ip_dist = max(dist, ib_ip_min_dist*min_cell_width)

@@ -1317,8 +1317,8 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                     cases.append(
                         define_case_d(
                             stack,
-                            "Circle -> second order vel",
-                            {"patch_ib(1)%geometry": 2, "n": 49, "ib_second_order_vel": "T", "ib_ip_min_dist": 1.5},
+                            "Circle -> ib_ip_min_dist",
+                            {"patch_ib(1)%geometry": 2, "n": 49, "ib_ip_min_dist": 1.5},
                         )
                     )
                 if six_eqn_model:
@@ -1350,7 +1350,7 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                     ("default", {}),
                     ("ib_ip_interp=1", {"ib_ip_interp": 1}),
                     ("ib_wall_order=2", {"ib_wall_order": 2}),
-                    ("ib_ip_min_dist", {"ib_second_order_vel": "T", "ib_ip_min_dist": 1.5}),
+                    ("ib_ip_min_dist", {"ib_ip_min_dist": 1.5}),
                 ):
                     if label != "default" and not (viscous and "min_dist" in label):
                         # weno_Re_flux = T selects the viscous IB path whose contact velocity is smoothed (ib_smooth_contact); without it a
@@ -1467,6 +1467,29 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                     },
                 )
             )
+            # ib_cutvol on the same translating circle (no cell crosses its surface): fluid fractions, the body-frame wall flux and
+            # the remap's kept-cell scaling. (An analytic velocity would need a case-specific build, so it is not in the suite.)
+            for label, vel in (("ib_cutvol", 0.1),):
+                cases.append(
+                    define_case_d(
+                        stack,
+                        f"IBM -> Moving Circle -> {label}",
+                        {
+                            "ib": "T",
+                            "num_ibs": 1,
+                            "fd_order": 2,
+                            "n": 49,
+                            "ib_cutvol": "T",
+                            "patch_ib(1)%geometry": 2,
+                            "patch_ib(1)%x_centroid": 0.508,
+                            "patch_ib(1)%y_centroid": 0.51,
+                            "patch_ib(1)%radius": 0.175,
+                            "patch_ib(1)%slip": "F",
+                            "patch_ib(1)%moving_ibm": 1,
+                            "patch_ib(1)%vel(1)": vel,
+                        },
+                    )
+                )
 
         if len(dimInfo[0]) == 2 and not viscous:
             cases.append(

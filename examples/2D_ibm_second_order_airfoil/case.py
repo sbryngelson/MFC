@@ -113,7 +113,7 @@ case = {
 }
 
 # the parameters for second-order IBM
-case.update({"ib_second_order_vel": "T", "ib_ip_min_dist": 1.5})
+case.update({"ib_ip_min_dist": 1.5})
 
 
 print(json.dumps(case, indent=4))
