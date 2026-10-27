@@ -32,7 +32,8 @@ module m_ibm
         & s_find_num_ghost_points, s_compute_ghost_point_pressure, s_compute_ghost_point_velocity
     ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, s_report_ibm_surface, &
         & s_write_ib_surface, s_update_ib_temperatures, s_conserve_ib_mass, s_accumulate_ib_face_fluxes, &
-        & s_ibm_set_conduction_temperature, s_ibm_restore_conduction_temperature, s_add_swept_cells, s_cutvol_advance
+        & s_ibm_set_conduction_temperature, s_ibm_restore_conduction_temperature, s_add_swept_cells, s_cutvol_advance, &
+        & s_cutvol_add_force, s_cutvol_couple
 
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
@@ -61,10 +62,11 @@ module m_ibm
     !> ib_cutvol (conservation-only cut cells, Seo & Mittal JCP 2011): fluid fraction of each fluid cell (1 away from a body), its
     !! value and the markers before the step's move, and the translation velocity of each body cell (0 in a fixed body)
     type(scalar_field)                        :: ib_alpha, ib_alpha_prev
-    type(scalar_field)                        :: ib_cv_f  !< share of each donor an uncovered cell takes
+    type(scalar_field)                        :: ib_cv_f   !< share of each donor an uncovered cell takes
     type(integer_field)                       :: ib_markers_cv
     real(wp), allocatable, dimension(:,:,:,:) :: ib_wall_vel
-    $:GPU_DECLARE(create='[ib_alpha, ib_alpha_prev, ib_cv_f, ib_markers_cv, ib_wall_vel]')
+    real(wp), allocatable, dimension(:,:)     :: ib_cv_dv  !< two-way-coupled body's velocity change over the step so far
+    $:GPU_DECLARE(create='[ib_alpha, ib_alpha_prev, ib_cv_f, ib_markers_cv, ib_wall_vel, ib_cv_dv]')
 
     !> Quadratic wall-normal fill of one ghost point: two probes along the surface normal, with TSC weights, and the Lagrange
     !! weights that extrapolate the profile through them back to the ghost (see s_wall_fill).
@@ -328,6 +330,7 @@ contains
             @:ALLOCATE(ib_markers_cv%sf(-buff_size:m + buff_size, -buff_size:n + buff_size, -zb:p + zb))
             @:ACC_SETUP_SFs(ib_markers_cv)
             @:ALLOCATE(ib_wall_vel(1:3, -buff_size:m + buff_size, -buff_size:n + buff_size, -zb:p + zb))
+            @:ALLOCATE(ib_cv_dv(1:3, num_local_ibs_max))
             call s_cutvol_fields()
         end if
         ! Ghost-cell IBM, Tseng & Ferziger JCP (2003), Mittal & Iaccarino ARFM (2005)
@@ -1446,13 +1449,14 @@ contains
 
     end subroutine s_cutvol_fields
 
-    !> ib_cutvol: move every prescribed-translation body over the whole step, rebuild the markers and ghost points, and remap the
-    !! gas conservatively (s_cutvol_remap). The geometry is then frozen for the step's stages. q_cons_vf's halo must be current.
+    !> ib_cutvol: move every moving body over the whole step, rebuild the markers and ghost points, and remap the gas conservatively
+    !! (s_cutvol_remap). The geometry is then frozen for the step's stages. A two-way-coupled body moves at its predicted midpoint
+    !! velocity V^n + dt a^{n-1}/2, which is also its wall velocity over the stages. q_cons_vf's halo must be current.
     impure subroutine s_cutvol_advance(q_cons_vf, dt_step)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
         real(wp), intent(in)                                   :: dt_step
-        integer                                                :: i, j, k, zb
+        integer                                                :: i, j, k, d, zb
 
         zb = 0; if (p > 0) zb = buff_size
         $:GPU_PARALLEL_LOOP(private='[i, j, k]', collapse=3, copyin='[zb]')
@@ -1466,9 +1470,16 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
-        $:GPU_PARALLEL_LOOP(private='[i]', copyin='[dt_step]')
+        $:GPU_PARALLEL_LOOP(private='[i, d]', copyin='[dt_step]')
         do i = 1, num_ibs
-            if (patch_ib(i)%moving_ibm == 1) then
+            if (patch_ib(i)%moving_ibm == 2) then
+                do d = 1, 3  ! component stores into patch_ib on the device (see s_update_ib_rotation_matrix)
+                    patch_ib(i)%step_vel(d) = patch_ib(i)%vel(d)
+                    patch_ib(i)%vel(d) = patch_ib(i)%vel(d) + 0.5_wp*dt_step*patch_ib(i)%accel(d)
+                    ib_cv_dv(d, i) = 0._wp
+                end do
+            end if
+            if (patch_ib(i)%moving_ibm > 0) then
                 patch_ib(i)%x_centroid = patch_ib(i)%x_centroid + dt_step*patch_ib(i)%vel(1)
                 patch_ib(i)%y_centroid = patch_ib(i)%y_centroid + dt_step*patch_ib(i)%vel(2)
                 patch_ib(i)%z_centroid = patch_ib(i)%z_centroid + dt_step*patch_ib(i)%vel(3)
@@ -1481,6 +1492,46 @@ contains
         call s_cutvol_remap(q_cons_vf)
 
     end subroutine s_cutvol_advance
+
+    !> ib_cutvol: add a stage's force on each two-way-coupled body, wdt (its weight in the step times dt) times force/mass, to the
+    !! body's velocity change over the step. The force is the body-frame face force (s_accumulate_ib_face_fluxes) plus collision and
+    !! body forces, at the frozen geometry; torque is not integrated (no rotation)
+    subroutine s_cutvol_add_force(wdt)
+
+        real(wp), intent(in) :: wdt
+        integer              :: i, d
+
+        $:GPU_PARALLEL_LOOP(private='[i, d]', copyin='[wdt]')
+        do i = 1, num_ibs
+            if (patch_ib(i)%moving_ibm == 2) then
+                do d = 1, 3
+                    ib_cv_dv(d, i) = ib_cv_dv(d, i) + wdt*patch_ib(i)%force(d)/patch_ib(i)%mass
+                end do
+            end if
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_cutvol_add_force
+
+    !> ib_cutvol: end of step for the two-way-coupled bodies, V^{n+1} = V^n + dV and a^n = dV/dt (the next step's predictor and the
+    !! ghost pressure)
+    subroutine s_cutvol_couple(dt_step)
+
+        real(wp), intent(in) :: dt_step
+        integer              :: i, d
+
+        $:GPU_PARALLEL_LOOP(private='[i, d]', copyin='[dt_step]')
+        do i = 1, num_ibs
+            if (patch_ib(i)%moving_ibm == 2) then
+                do d = 1, 3
+                    patch_ib(i)%vel(d) = patch_ib(i)%step_vel(d) + ib_cv_dv(d, i)
+                    patch_ib(i)%accel(d) = ib_cv_dv(d, i)/dt_step
+                end do
+            end if
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_cutvol_couple
 
     !> ib_cutvol: conservative remap after a move. A cell fluid before and after (kept) keeps its gas in its new fluid volume, q =
     !! alpha_prev q / alpha (the advancing wall compresses, the receding wall expands). An uncovered cell takes the fraction f =
@@ -3398,7 +3449,7 @@ contains
             @:DEALLOCATE(ib_markers_prev%sf)
         end if
         if (ib_cutvol) then
-            @:DEALLOCATE(ib_alpha%sf, ib_alpha_prev%sf, ib_cv_f%sf, ib_markers_cv%sf, ib_wall_vel)
+            @:DEALLOCATE(ib_alpha%sf, ib_alpha_prev%sf, ib_cv_f%sf, ib_markers_cv%sf, ib_wall_vel, ib_cv_dv)
         end if
         @:DEALLOCATE(ib_face_ft)
         do i = 1, num_ib_airfoils_max

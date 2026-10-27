@@ -450,7 +450,8 @@ contains
         integer, intent(in)     :: nstage
         integer                 :: i, j, k, l, q, s  !< Generic loop iterator
         real(wp)                :: start, finish
-        real(wp)                :: a_w               !< weight of this stage's state in the step's result (swept-cell booking)
+        real(wp)                :: a_w               !< weight of this stage's state in the step's result
+        logical                 :: cv_move           !< ib_cutvol moves the bodies this step
         integer(kind=8)         :: stage_t0, stage_t1, clock_rate, clock_max
         real(wp)                :: stage_time
         integer, parameter      :: n_warmup = 2      !< time steps excluded before the timing floor (warmup/JIT/first-touch)
@@ -462,7 +463,8 @@ contains
         if (adap_dt) call s_adaptive_dt_bubble(1)
 
         ! ib_cutvol: the bodies move once, over the whole step, with a conservative remap; the stages see a frozen geometry
-        if (ib_cutvol .and. moving_immersed_boundary_flag .and. .not. merge(mytime >= t_stop, t_step == t_step_stop, cfl_dt)) then
+        cv_move = ib_cutvol .and. moving_immersed_boundary_flag .and. .not. merge(mytime >= t_stop, t_step == t_step_stop, cfl_dt)
+        if (cv_move) then
             call s_cutvol_analytic_velocity()
             call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
             call s_cutvol_advance(q_cons_ts(1)%vf, dt)
@@ -577,17 +579,17 @@ contains
             if (ib) then
                 ! check if any IBMS are moving, and if so, update the markers, ghost points, levelsets, and levelset norms
                 if (moving_immersed_boundary_flag) then
+                    a_w = 1._wp  ! weight of this stage's state in the step's result
+                    do q = s + 1, nstage
+                        a_w = a_w*rk_coef(q, 1)/rk_coef(q, 4)
+                    end do
                     if (ib_cutvol) then  ! the step's move and its conservative remap were done before the stages
                         call s_compute_ib_forces()
+                        if (cv_move) call s_cutvol_add_force(a_w*rk_coef(s, 3)/rk_coef(s, 4)*dt)
                     else
                         call s_propagate_immersed_boundaries(s, t_step)
-                        if (ib_exchange) then  ! book this placement's swept cells before the ghost correction overwrites them
-                            a_w = 1._wp
-                            do q = s + 1, nstage
-                                a_w = a_w*rk_coef(q, 1)/rk_coef(q, 4)
-                            end do
-                            call s_add_swept_cells(q_cons_ts(1)%vf, q_cons_ts(stor)%vf, a_w, dt)
-                        end if
+                        ! book this placement's swept cells before the ghost correction overwrites them
+                        if (ib_exchange) call s_add_swept_cells(q_cons_ts(1)%vf, q_cons_ts(stor)%vf, a_w, dt)
                     end if
                 end if
 
@@ -638,6 +640,7 @@ contains
 
         if (ib) then
             if (moving_immersed_boundary_flag) then
+                if (cv_move) call s_cutvol_couple(dt)
                 call s_wrap_periodic_ibs()  ! wraps the positions of IBs to the local proc
                 call s_handoff_ib_ownership()  ! recomputes which ranks own which IBs and communicate to neighbors
             else if (ib_state_wrt) then

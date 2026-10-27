@@ -1468,8 +1468,9 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                 )
             )
             # ib_cutvol on the same translating circle (no cell crosses its surface): fluid fractions, the body-frame wall flux and
-            # the remap's kept-cell scaling. (An analytic velocity would need a case-specific build, so it is not in the suite.)
-            for label, vel in (("ib_cutvol", 0.1),):
+            # the remap's kept-cell scaling; then two-way coupled (body 10x the displaced gas mass), the midpoint move and the
+            # RK-weighted body-frame force. (An analytic velocity would need a case-specific build, so it is not in the suite.)
+            for label, extra in (("ib_cutvol", {"patch_ib(1)%moving_ibm": 1}), ("ib_cutvol two-way", {"patch_ib(1)%moving_ibm": 2, "patch_ib(1)%mass": 1.0})):
                 cases.append(
                     define_case_d(
                         stack,
@@ -1485,8 +1486,8 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                             "patch_ib(1)%y_centroid": 0.51,
                             "patch_ib(1)%radius": 0.175,
                             "patch_ib(1)%slip": "F",
-                            "patch_ib(1)%moving_ibm": 1,
-                            "patch_ib(1)%vel(1)": vel,
+                            "patch_ib(1)%vel(1)": 0.1,
+                            **extra,
                         },
                     )
                 )
