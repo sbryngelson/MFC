@@ -33,8 +33,8 @@ module m_amr_registers
     implicit none
 
     private; public :: s_initialize_amr_registers, s_amr_capture_boundary_flux, s_amr_apply_reflux, s_amr_zero_fine_registers, &
-        & s_finalize_amr_registers, s_amr_reflux_face_flags, s_amr_reflux_faces, s_amr_reflux_apply_faces, s_amr_parent_foot, &
-        & s_amr_reg_prepare, freg, creg, f_amr_face_is_seam
+        & s_finalize_amr_registers, f_amr_block_near, s_amr_reflux_face_flags, s_amr_reflux_faces, s_amr_reflux_apply_faces, &
+        & s_amr_parent_foot, s_amr_reg_prepare, freg, creg, f_amr_face_is_seam
 
     !> SSP-RK3 effective flux weights: q^{n+1} = q^n + dt*(L(q^n)/6 + L(q^(1))/6 + 2*L(q^(2))/3).
     real(wp), parameter :: rk3_w(3) = [1._wp/6._wp, 1._wp/6._wp, 2._wp/3._wp]
@@ -249,13 +249,29 @@ contains
             tvd = all(tv .or. [1, 2, 3] == d)
             s_lo(d) = tvd .and. amr_region_lo(d) - 1 >= sidx(d) .and. amr_region_lo(d) - 1 <= sidx(d) + ext(d)
             s_hi(d) = tvd .and. amr_region_hi(d) + 1 >= sidx(d) .and. amr_region_hi(d) + 1 <= sidx(d) + ext(d)
+            ! nested so the O(blocks) seam search runs only for a face that survived the box tests
             if (clip) then
-                if (s_lo(d) .and. f_amr_face_is_seam(d, -1)) s_lo(d) = .false.
-                if (s_hi(d) .and. f_amr_face_is_seam(d, 1)) s_hi(d) = .false.
+                if (s_lo(d)) then
+                    if (f_amr_face_is_seam(d, -1)) s_lo(d) = .false.
+                end if
+                if (s_hi(d)) then
+                    if (f_amr_face_is_seam(d, 1)) s_hi(d) = .false.
+                end if
             end if
         end do
 
     end subroutine s_amr_reflux_faces
+
+    !> False only if block k's region, widened by its outside face layer, misses the coarse subdomain [sidx, sidx + ext] in some
+    !! dimension; s_amr_reflux_faces then reports no face, so per-stage loops skip the block before selecting it. Reads the
+    !! replicated block list only.
+    pure logical function f_amr_block_near(k, sidx, ext) result(near)
+
+        integer, intent(in) :: k, sidx(3), ext(3)
+
+        near = all((amr_region_lo_all(:,k) - 1 <= sidx + ext .and. amr_region_hi_all(:,k) + 1 >= sidx) .or. .not. amr_dim)
+
+    end function f_amr_block_near
 
     !> This rank's reflux faces (seam-clipped) with its subdomain and the global transverse overlap [tlo, thi] per dim, so capture
     !! and apply share a block-relative frame aligned with the owner's freg. All true / full-block at np=1.
@@ -559,6 +575,7 @@ contains
             do islot = 1, amr_num_blocks
                 ! a level>=2 block's coarse side is its parent (creg captured in the fine branch), not L0
                 if (amr_block_level(islot) >= 2) cycle
+                if (.not. f_amr_block_near(islot, amr_sidx, amr_ext)) cycle
                 call s_amr_select_slot(islot)
                 call s_amr_reflux_face_flags(sidx, ext, own_lo, own_hi, tlo, thi)
                 if (own_lo(id) .or. own_hi(id)) call s_amr_capture_slot(amr_reg_of(islot), id, amr_region_lo - sidx, &
@@ -627,6 +644,7 @@ contains
             a_act = .false.
             do k = 1, amr_num_blocks
                 if (amr_block_level(k) /= 1) cycle
+                if (.not. f_amr_block_near(k, amr_sidx, amr_ext)) cycle
                 call s_amr_select_slot(k)
                 call s_amr_reflux_face_flags(sidx, ext, own_lo, own_hi, tlo, thi)
                 if (.not. (own_lo(${D}$) .or. own_hi(${D}$))) cycle

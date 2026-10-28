@@ -19,7 +19,8 @@ module m_amr_transfer
     use m_global_parameters
     use m_mpi_proxy, only: s_mpi_abort
     use m_mpi_common, only: s_mpi_allreduce_integer_max
-    use m_amr_registers, only: s_amr_reflux_apply_faces, s_amr_parent_foot, freg, s_amr_reg_prepare, s_amr_reflux_faces
+    use m_amr_registers, only: s_amr_reflux_apply_faces, s_amr_parent_foot, freg, s_amr_reg_prepare, s_amr_reflux_faces, &
+        & f_amr_block_near
     use m_phase_timing
     use m_amr_xchg_audit  ! per-call-site accounting of every AMR p2p transfer (s_xa_rec + XA_* site ids)
     use m_amr_state
@@ -76,7 +77,7 @@ contains
 
 #ifdef MFC_MPI
         integer :: k, r, idx, ncand, nhr, nhs, j, kk2
-        integer :: cand(num_procs), glo(3), ghi(3)
+        integer :: cand(num_procs), glo(3), ghi(3), msidx(3), mext(3)
         logical :: s_lo(3), s_hi(3), u_lo(3), u_hi(3)
         logical :: cl(3, num_procs), ch(3, num_procs)
 
@@ -88,10 +89,12 @@ contains
         call s_amr_hdr_pools(amr_n_l1p)
         ! receive side: for every level-1 block another rank owns whose faces this rank refluxes, the owner's freg faces land
         ! straight in this rank's register slot (zero-copy); faces this rank does not reflux are poisoned so a stray read shows
+        call s_amr_rank_decomp(proc_rank, msidx, mext)
         do kk2 = 1, amr_n_l1p
             k = amr_l1p_blk(kk2)
-            call s_amr_select_slot(k)
             if (amr_block_owner(k) == proc_rank) cycle
+            if (.not. f_amr_block_near(k, msidx, mext)) cycle
+            call s_amr_select_slot(k)
             if (.not. f_amr_reflux_participates(proc_rank)) cycle
             call s_amr_reflux_faces_for(proc_rank, s_lo, s_hi)
             nhr = nhr + 1
