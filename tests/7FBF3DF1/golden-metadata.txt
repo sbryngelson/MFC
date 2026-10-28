@@ -1,10 +1,112 @@
-This file was created on 2026-10-28 01:46:17.546155.
+This file was created on 2026-10-28 04:13:35.008501.
 
 mfc.sh:
 
     Invocation: test --gpu mp --mpi --only 7FBF3DF1 --generate -j 48 -- -c tamd
     Lock:       mpi=Yes & gpu=Mp & debug=No & reldebug=No & gcov=No & unified=No & single=No & mixed=No & fastmath=No
-    Git:        73353c84771f45f58ab2c7dedae9d089c9f502be on ib-wall-column (clean)
+    Git:        c719193995a7cee9aa7b1fd693e90b405860e49e on ib-wall-column (dirty)
+
+pre_process:
+
+    CMake Configuration:
+    
+        CMake v3.24.2 on tuolumne1031
+    
+        C       : Clang v20.0.0 (/opt/cray/pe/craype/2.7.36/bin/cc)
+        Fortran : LLVMFlang v24.0.0 (/p/lustre5/bryngelson1/afar/therock-afar-24.3.0-multiarch-10.1.0-592954c/bin/amdflang)
+    
+        PRE_PROCESS   : ON
+        SIMULATION    : OFF
+        POST_PROCESS  : OFF
+        SYSCHECK      : OFF
+        DOCUMENTATION : OFF
+        ALL           : OFF
+    
+        MPI     : ON
+        OpenACC : OFF
+        OpenMP  : ON
+    
+        Fypp    : /p/lustre5/bryngelson1/mfc-reacting/.worktrees/wallcol/build/venv/bin/fypp
+        Doxygen : 
+    
+        Build Type : Release
+    
+    Configuration Environment:
+    
+        CC       : /opt/cray/pe/craype/2.7.36/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.36/bin/CC
+        FC       : /p/lustre5/bryngelson1/afar/therock-afar-24.3.0-multiarch-10.1.0-592954c/bin/amdflang
+        OMPI_CC  : 
+        OMPI_CXX : 
+        OMPI_FC  : 
+
+syscheck:
+
+    CMake Configuration:
+    
+        CMake v3.24.2 on tuolumne1031
+    
+        C       : Clang v20.0.0 (/opt/cray/pe/craype/2.7.36/bin/cc)
+        Fortran : LLVMFlang v24.0.0 (/p/lustre5/bryngelson1/afar/therock-afar-24.3.0-multiarch-10.1.0-592954c/bin/amdflang)
+    
+        PRE_PROCESS   : OFF
+        SIMULATION    : OFF
+        POST_PROCESS  : OFF
+        SYSCHECK      : ON
+        DOCUMENTATION : OFF
+        ALL           : OFF
+    
+        MPI     : ON
+        OpenACC : OFF
+        OpenMP  : ON
+    
+        Fypp    : /p/lustre5/bryngelson1/mfc-reacting/.worktrees/wallcol/build/venv/bin/fypp
+        Doxygen : 
+    
+        Build Type : Release
+    
+    Configuration Environment:
+    
+        CC       : /opt/cray/pe/craype/2.7.36/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.36/bin/CC
+        FC       : /p/lustre5/bryngelson1/afar/therock-afar-24.3.0-multiarch-10.1.0-592954c/bin/amdflang
+        OMPI_CC  : 
+        OMPI_CXX : 
+        OMPI_FC  : 
+
+simulation:
+
+    CMake Configuration:
+    
+        CMake v3.24.2 on tuolumne1031
+    
+        C       : Clang v20.0.0 (/opt/cray/pe/craype/2.7.36/bin/cc)
+        Fortran : LLVMFlang v24.0.0 (/p/lustre5/bryngelson1/afar/therock-afar-24.3.0-multiarch-10.1.0-592954c/bin/amdflang)
+    
+        PRE_PROCESS   : OFF
+        SIMULATION    : ON
+        POST_PROCESS  : OFF
+        SYSCHECK      : OFF
+        DOCUMENTATION : OFF
+        ALL           : OFF
+    
+        MPI     : ON
+        OpenACC : OFF
+        OpenMP  : ON
+    
+        Fypp    : /p/lustre5/bryngelson1/mfc-reacting/.worktrees/wallcol/build/venv/bin/fypp
+        Doxygen : 
+    
+        Build Type : Release
+    
+    Configuration Environment:
+    
+        CC       : /opt/cray/pe/craype/2.7.36/bin/cc
+        CXX      : /opt/cray/pe/craype/2.7.36/bin/CC
+        FC       : /p/lustre5/bryngelson1/afar/therock-afar-24.3.0-multiarch-10.1.0-592954c/bin/amdflang
+        OMPI_CC  : 
+        OMPI_CXX : 
+        OMPI_FC  : 
 
 CPU:
 
@@ -27,7 +129,7 @@ CPU:
     CPU MHz:             3700.000
     CPU max MHz:         3700.0000
     CPU min MHz:         1500.0000
-    BogoMIPS:            7399.73
+    BogoMIPS:            7399.66
     Virtualization:      AMD-V
     L1d cache:           32K
     L1i cache:           32K
