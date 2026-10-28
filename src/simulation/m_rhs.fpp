@@ -2281,7 +2281,7 @@ contains
 
         integer :: i, j, l
 
-        if (allocated(no_marks%sf)) then
+        if (associated(no_marks%sf)) then
             @:DEALLOCATE(no_marks%sf)
         end if
         if (associated(no_wall%sf)) then
