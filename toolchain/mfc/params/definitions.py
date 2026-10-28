@@ -700,6 +700,7 @@ def _load():
     _r("ib_ip_min_dist", REAL, {"ib"})
     _r("wall_column_dt_frac", REAL, {"ib"})
     _r("ib_cutvol", LOG, {"ib"})
+    _r("ib_cutvol_gcl", LOG, {"ib"})
     _r("ib_flux_wall", LOG, {"ib"})
     _r("ib", LOG, {"ib"})
     _r("collision_model", INT, {"ib"})
@@ -1508,6 +1509,7 @@ _nv(
     "ib_ip_min_dist",
     "wall_column_dt_frac",
     "ib_cutvol",
+    "ib_cutvol_gcl",
     "ib_flux_wall",
     "many_ib_patch_parallelism",
     "ib_slip_ccst",

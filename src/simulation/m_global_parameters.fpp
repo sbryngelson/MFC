@@ -545,6 +545,7 @@ contains
         wall_column_dt_frac = 0.1_wp
         ib_slip_ccst = .true.
         ib_cutvol = .false.
+        ib_cutvol_gcl = .false.
         ib_flux_wall = .false.
 
         ! Bubble modeling (sim-specific)

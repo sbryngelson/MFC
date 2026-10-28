@@ -879,7 +879,7 @@ contains
             do l = 0, p
                 do k = 0, n
                     do j = 0, m
-                        if (ib_alpha%sf(j, k, l) < 1._wp) then
+                        if (ib_alpha%sf(j, k, l) /= 1._wp) then
                             do i = 1, sys_size
                                 rhs_vf(i)%sf(j, k, l) = rhs_vf(i)%sf(j, k, l)/ib_alpha%sf(j, k, l)
                             end do

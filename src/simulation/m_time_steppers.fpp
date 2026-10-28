@@ -452,6 +452,7 @@ contains
         real(wp)                :: start, finish
         real(wp)                :: a_w               !< weight of this stage's state in the step's result
         logical                 :: cv_move           !< ib_cutvol moves the bodies this step
+        real(wp)                :: t_in, t_out       !< ib_cutvol_gcl: a stage's input and output times (fractions of the step)
         integer(kind=8)         :: stage_t0, stage_t1, clock_rate, clock_max
         real(wp)                :: stage_time
         integer, parameter      :: n_warmup = 2      !< time steps excluded before the timing floor (warmup/JIT/first-touch)
@@ -467,7 +468,7 @@ contains
         if (cv_move) then
             call s_cutvol_analytic_velocity()
             call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
-            call s_cutvol_advance(q_cons_ts(1)%vf, dt)
+            call s_cutvol_advance(q_cons_ts(1)%vf, dt, bc_type, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
             call s_ib_refresh_prim()
             call s_ibm_correct_state(q_cons_ts(1)%vf, q_prim_vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
         end if
@@ -477,8 +478,12 @@ contains
             call s_ibm_advance_wall_columns(q_cons_ts(1)%vf, q_prim_vf, q_T_sf, dt)
         end if
 
+        t_out = 0._wp
         do s = 1, nstage
             call system_clock(stage_t0)
+            t_in = t_out
+            t_out = (rk_coef(s, 1)*t_in + rk_coef(s, 3))/rk_coef(s, 4)
+            if (cv_move .and. ib_cutvol_gcl) call s_cutvol_stage_alpha(t_out)
             ! mytime is read on the device by the GRCBC inflow ramp, so it has to be current before the RHS that
             ! reads it, not after. Its GPU_DECLARE only creates device storage and never copies the host value, so
             ! without this the first RHS of a run reads uninitialised memory and later stages read a stale time.
@@ -518,6 +523,8 @@ contains
             end if
 
             if (s == 1 .and. bodyForces) call s_update_mean_sources(q_cons_ts(1)%vf, q_T_sf, t_step)
+            if (cv_move .and. ib_cutvol_gcl) call s_cutvol_stage_state(q_cons_ts(1)%vf, q_cons_ts(stor)%vf, t_in, t_out, &
+                & rk_coef(s, 2)/rk_coef(s, 1))
 
             if (bubbles_lagrange .and. .not. adap_dt) call s_update_lagrange_tdv_rk(q_prim_vf, bc_type, stage=s)
             $:GPU_PARALLEL_LOOP(collapse=4)

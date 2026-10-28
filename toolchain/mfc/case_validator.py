@@ -846,6 +846,7 @@ class CaseValidator:
         self.prohibit(ib_cutvol and num_particle_clouds > 0, "ib_cutvol is not supported with particle clouds")
         self.prohibit(ib_cutvol and self.get("hypoelasticity", "F") == "T", "ib_cutvol is not supported with hypoelasticity")
         self.prohibit(ib_cutvol and self.get("cyl_coord", "F") == "T", "ib_cutvol requires Cartesian coordinates")
+        self.prohibit(self.get("ib_cutvol_gcl", "F") == "T" and not ib_cutvol, "ib_cutvol_gcl requires ib_cutvol")
         for i in range(1, (num_ibs or 0) + 1):
             mv = self.get(f"patch_ib({i})%moving_ibm", 0) or 0
             spin = any((self.get(f"patch_ib({i})%angular_vel({d})", 0.0) or 0.0) != 0.0 for d in (1, 2, 3))
