@@ -1262,6 +1262,7 @@ Each forced direction must be periodic (`bc_x[y,z]%%beg = bc_x[y,z]%%end = -1`) 
 | `mean_qdot`      | Real | Uniform heat source per unit volume \f$\dot q\f$ in fluid cells (initial value if controlled; default 0) |
 | `mean_temp`      | Real | Target mass-averaged fluid temperature \f$T_b^\ast\f$; enables the controller |
 | `mean_temp_gain` | Real | Controller gain \f$G\f$, required with `mean_temp`, \f$0 < G < 4/3\f$ |
+| `mean_temp_wall` | Real | Wall temperature \f$T_s\f$ of a thermally developed state; makes the source local (requires `mean_temp`) |
 
 The thermal analogue of the mean pressure gradient: a uniform volumetric heat source in the fluid that holds the bulk fluid temperature of a periodic particle array, so that cold particles can be studied in a gas that does not quench (statistically stationary heat transfer, cf. the thermally fully developed periodic formulation of Tenneti, Sun, Garg & Subramaniam, IJHMT 58, 2013, and Sun, Tenneti & Subramaniam, IJHMT 86, 2015).
 \f$\dot q\f$ is added to the energy equation in fluid cells only (not inside immersed boundaries).
@@ -1274,7 +1275,17 @@ When `mean_temp` is set, \f$\dot q\f$ is updated once per time step from the mas
 with \f$\overline{\rho c_v} = \sum \rho c_v\,dV / \sum dV\f$, the same controller as `mean_mflux` (deadbeat for \f$G = 1\f$ and a constant heat loss).
 \f$t\f$, \f$T_b\f$, the mixing-cup temperature \f$T_m = \sum \rho u_1 T\,dV / \sum \rho u_1\,dV\f$, \f$\dot q\f$, and the fluid volume \f$V_f\f$ (source power \f$\dot q V_f\f$) are written every step to `mean_temp.dat` in the case directory.
 As for `mean_dpdx`, the controller state is not saved in restart files: set `mean_qdot` on restart to the last value in `mean_temp.dat`.
-All active directions must be periodic and Cartesian.
+The domain must be Cartesian and periodic in \f$x\f$; \f$y\f$ and \f$z\f$ may be periodic or walls (`-15`, `-16`).
+
+With `mean_temp_wall`, the source instead gives the thermally fully developed state of flow past isothermal walls at \f$T_s\f$ (Sun, Tenneti & Subramaniam, IJHMT 86, 2015): \f$T = T_s + \psi\, e^{-\beta x}\f$ with \f$\psi\f$ periodic.
+MFC solves for \f$\psi = T - T_s\f$ with the source of the \f$e^{-\beta x}\f$ factor,
+
+\f[ S = \beta\left[\rho c_p u_1 \psi - \partial_x(\lambda\psi) - \lambda\,\partial_x\psi + \beta\lambda\psi\right], \f]
+
+with local \f$c_p\f$ and conductivity \f$\lambda\f$ and central differences in \f$x\f$.
+The controller above still sets the source total \f$\dot q V_f\f$; \f$\beta\f$ is the root of \f$\dot q V_f = \beta(A_1 + \beta A_2)\f$, with \f$A_1 = \sum \rho c_p u_1 \psi\,dV\f$ and \f$A_2 = \sum \lambda\psi\,dV\f$ (the conduction terms integrate to about zero), that tends to \f$\dot q V_f/A_1\f$ as \f$A_2 \to 0\f$.
+At steady state, \f$\beta\f$ is the streamwise decay rate of \f$T - T_s\f$ and the walls' heat equals \f$-\dot q V_f\f$.
+\f$\beta\f$, \f$A_1\f$ and \f$A_2\f$ are written as columns 7-9 of `mean_temp.dat`.
 
 ### 14. Magnetohydrodynamics (MHD)
 

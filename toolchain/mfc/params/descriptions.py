@@ -254,6 +254,7 @@ DESCRIPTIONS = {
     "mean_qdot": "Uniform volumetric heat source in fluid cells [W/m^3] (initial value if mean_temp is set)",
     "mean_temp": "Target mass-averaged fluid temperature (enables the mean_qdot controller; chemistry only)",
     "mean_temp_gain": "Gain of the mean gas temperature controller (0 < G < 4/3)",
+    "mean_temp_wall": "Wall temperature T_s of a thermally developed (self-similar) state; makes the mean_temp source local",
     "bf_spatial_support": "Enable spatially supported body force (Wei & Freund, JFM 2005)",
     "spatial_bf%amp": "Spatially supported body force amplitude",
     "spatial_bf%x_centroid": "Streamwise center of the spatial forcing envelope",
