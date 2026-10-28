@@ -9,6 +9,7 @@ import fastjsonschema
 
 from . import common
 from .analytic_expr import AnalyticExprError, fortranize_expr
+from .case_utils import ib_flux_wall_issue
 from .params.eos_families import EOS_FAMILIES
 from .printer import cons
 from .run import case_dicts
@@ -49,6 +50,9 @@ class Case:
         self.params = copy.deepcopy(params)
         for key, val in self.params.items():
             self.params[key] = self.__normalize_named_value(key, val)
+        # ib_flux_wall left unset: on for an array of fixed, no-slip, non-blowing inert bodies (zero face mass flux)
+        if "ib_flux_wall" not in self.params and ib_flux_wall_issue(self.params, auto=True) is None:
+            self.params["ib_flux_wall"] = "T"
 
     @staticmethod
     def __normalize_named_value(key: str, val):

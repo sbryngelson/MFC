@@ -4087,12 +4087,12 @@ contains
 
     end subroutine s_wc_face_metric
 
-    !> ib_flux_wall: allocate the wall fields, give each reacting body's first-layer ghost its wall area per face area, and report
-    !! the wall area the faces carry. A planar wall of area A has sum|n_i| A of staircase faces, so each face carries 1/sum|n_i| of
-    !! its own area.
+    !> ib_flux_wall: allocate the wall fields, give each body's first-layer ghost its wall area per face area, and report the wall
+    !! area the faces carry. A planar wall of area A has sum|n_i| A of staircase faces, so each face carries 1/sum|n_i| of its own
+    !! area.
     impure subroutine s_ib_flux_wall_setup()
 
-        integer  :: i, j, k, l, q
+        integer  :: i, j, k, l, q, pid
         real(wp) :: area, area_glb, vol
 
         @:ALLOCATE(ib_wall_src(1:ibw_a))
@@ -4118,12 +4118,14 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
-        $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', present='[ghost_points]')
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, l, pid]', present='[ghost_points]')
         do i = 1, num_gps
             j = ghost_points(i)%loc(1); k = ghost_points(i)%loc(2); l = ghost_points(i)%loc(3)
-            if (ghost_points(i)%layer == 1 .and. patch_ib(ghost_points(i)%ib_patch_id)%surface_reaction == 1 &
-                & .and. patch_ib(ghost_points(i)%ib_patch_id)%inj_species == 0 .and. sum(abs(ghost_points(i)%levelset_norm)) &
-                & > 0._wp) then
+            ! A reacting body (fixed: case validator), or a fixed, no-slip, non-blowing inert one, whose zero source carries no mass
+            pid = ghost_points(i)%ib_patch_id
+            if (ghost_points(i)%layer == 1 .and. sum(abs(ghost_points(i)%levelset_norm)) > 0._wp &
+                & .and. patch_ib(pid)%inj_species == 0 .and. (patch_ib(pid)%surface_reaction == 1 &
+                & .or. (patch_ib(pid)%moving_ibm == 0 .and. .not. patch_ib(pid)%slip .and. patch_ib(pid)%v_blow <= 0._wp))) then
                 ib_wall_src(ibw_a)%sf(j, k, l) = sqrt(sum(ghost_points(i)%levelset_norm**2))/sum(abs(ghost_points(i)%levelset_norm))
             end if
         end do
@@ -4145,7 +4147,7 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
         call s_mpi_allreduce_sum(area, area_glb)
-        if (proc_rank == 0) print '(A, ES14.6)', ' ib_flux_wall: reacting wall area carried by the faces = ', area_glb
+        if (proc_rank == 0) print '(A, ES14.6)', ' ib_flux_wall: wall area carried by the faces = ', area_glb
 
     end subroutine s_ib_flux_wall_setup
 
