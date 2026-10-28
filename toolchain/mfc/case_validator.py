@@ -2018,10 +2018,6 @@ class CaseValidator:
             "amr is incompatible with rburn%substeps > 0: the operator-split burn integrates the coarse grid once per step, "
             "after the fine solution has been folded back, so the refined region would never burn",
         )
-        self.prohibit(
-            self.get("ib", "F") == "T" and any((self.get(f"particle_cloud({i})%moving_ibm") or 0) != 0 for i in range(1, int(self.get("num_particle_clouds") or 0) + 1)),
-            "amr supports static particle clouds only",
-        )
         for d in ("x", "y", "z"):
             for e in ("beg", "end"):
                 bc = self.get(f"bc_{d}%{e}")
@@ -2129,12 +2125,7 @@ class CaseValidator:
         if ib:
             # static/prescribed-motion IB AMR (SP20/21): one or more bodies resolved on a static fine block.
             num_ibs = self.get("num_ibs") or 0
-            force_driven = any((self.get(f"patch_ib({i})%moving_ibm") or 0) == 2 for i in range(1, num_ibs + 1))
             stl = any((self.get(f"patch_ib({i})%geometry")) in (5, 12) for i in range(1, num_ibs + 1))
-            self.prohibit(
-                force_driven,
-                "amr with ib supports static or prescribed-motion (moving_ibm=1) bodies only; " "force-driven moving IB (moving_ibm=2) under amr is not yet validated",
-            )
             self.prohibit(stl, "amr with ib does not support STL-model geometry (not yet validated)")
             moving = any((self.get(f"patch_ib({i})%moving_ibm") or 0) != 0 for i in range(1, num_ibs + 1))
             # Moving bodies and regrid size blocks from s_amr_body_bbox, which bounds only these geometries

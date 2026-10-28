@@ -44,6 +44,8 @@ module m_amr_regrid
     !! skips the EL hooks, restriction discards the coarse result under the block). Recomputed collectively each regrid; guarded
     !! rank-locally per stage.
     integer :: lag_supp_lo(3), lag_supp_hi(3)
+    !> set once a regrid has dropped nested children for lack of block capacity, so the warning prints once per regrid
+    logical :: amr_child_dropped = .false.
     logical :: lag_supp_on = .false.
 
 contains
@@ -70,6 +72,8 @@ contains
                 ! overlapping boxes, but the child IB body-bbox expansion has no overlap-merge pass)
                 if (f_amr_boxes_overlap(amr_region_lo_all(:,xb), amr_region_hi_all(:,xb), amr_region_lo_all(:,yb), &
                     & amr_region_hi_all(:,yb))) then
+                    write (0, '(A,6I6,A,6I6)') ' [amr] intersecting blocks (lo,hi): ', amr_region_lo_all(:,xb), &
+                           & amr_region_hi_all(:,xb), ' |', amr_region_lo_all(:,yb), amr_region_hi_all(:,yb)
                     call s_mpi_abort("AMR: two same-level blocks INTERSECT (the child IB body-bbox expansion route can " &
                                      & // "produce this - it has no overlap-merge pass): the overlapping cells would be " &
                                      & // "restricted and refluxed twice, silently breaking conservation. Adjust the body/" &
@@ -85,6 +89,8 @@ contains
                             & yb) .and. amr_region_lo_all(t, yb) <= amr_region_hi_all(t, xb)
                     end do
                     if (tover .and. f_amr_seam_dim(xb, yb) == 0) then
+                        write (0, '(A,6I6,A,6I6)') ' [amr] touching blocks (lo,hi): ', amr_region_lo_all(:,xb), &
+                               & amr_region_hi_all(:,xb), ' |', amr_region_lo_all(:,yb), amr_region_hi_all(:,yb)
                         call s_mpi_abort("AMR: two same-level blocks touch with PARTIAL transverse overlap (IB body-bbox " &
                                          & // "expansion can produce this): the fine-fine seam halo only reconciles exact-match " &
                                          & // "faces, so the shared-face flux would silently leak. Adjust amr_block/regrid inputs " // "so body-expanded boxes merge or separate.")
@@ -374,6 +380,41 @@ contains
 
     end subroutine s_amr_pack_gwin_pairs
 
+    #:if MFC_COMPILER == "LLVMFlang"
+        !> Diagnostic (rank_time_wrt): free device memory on this rank at a named point of a regrid.
+        impure subroutine s_amr_report_mem(tag)
+
+            use iso_c_binding, only: c_int, c_size_t
+            character(len=*), intent(in) :: tag
+
+            interface
+                function hipMemGetInfo(free_b, total_b) bind(C, name='hipMemGetInfo') result(ierr)
+
+                    import :: c_int, c_size_t
+                    integer(c_size_t), intent(out) :: free_b, total_b
+                    integer(c_int)                 :: ierr
+
+                end function hipMemGetInfo
+            end interface
+            integer(c_size_t) :: fb, tb
+            integer(c_int)    :: ie
+
+            if (.not. rank_time_wrt) return
+            ie = hipMemGetInfo(fb, tb)
+            write (0, '(A,I0,A,A,A,F8.2,A,F8.2)') ' [amr-mem] rank ', proc_rank, ' ', tag, ' free GiB ', real(fb, wp)/2._wp**30, &
+                   & ' of ', real(tb, wp)/2._wp**30
+
+        end subroutine s_amr_report_mem
+    #:else
+        impure subroutine s_amr_report_mem(tag)
+
+            character(len=*), intent(in) :: tag
+
+            if (len(tag) < 0) print *, tag  ! device memory is only queried on the AMD build
+
+        end subroutine s_amr_report_mem
+    #:endif
+
     !> Regrid: tag by relative density gradient, cluster (Berger-Rigoutsos + min-separation merge) into separated boxes, pad/clamp/
     !! size-cap each, rebuild every active slot. Each new slot prolongs from coarse then overwrites its overlap with whichever old
     !! slot(s) covered it (rank-local; a split copies from one old slot, a merge from both). Called between steps only. No-op if
@@ -412,22 +453,49 @@ contains
         ! margin until the next regrid (amr_buf)
         if (bubbles_lagrange) call s_amr_compute_lag_supp(mapCells + 2 + amr_buf)
 
+        call s_amr_report_mem('regrid-start')
         call s_amr_regrid_tag_cells(q_cons_base, tag_grid, sidx)
+        call s_amr_report_mem('tagged')
         call s_amr_cad_count(tag_grid, sidx)  ! [amr-cad] cadence containment audit (counts only; report at finalize)
         call s_amr_regrid_cluster_tags(tag_grid, sidx, boxes, nboxes)
+        call s_amr_report_mem('clustered')
         if (nboxes == 0) return  ! nothing tagged on any rank; keep the current blocks
         call s_amr_regrid_shape_boxes(boxes, nboxes)
+        call s_amr_report_mem('shaped')
         if (nboxes == 0) return  ! every box was confined to the domain margin
         call s_amr_regrid_nest_children(boxes, nboxes, box_level)
         if (amr_snap > 0) call s_amr_regrid_snap_boxes(boxes, nboxes, box_level)
         call s_amr_check_box_caps(boxes, nboxes, box_level)  ! invariant: no box may exceed its level's slot cap
         call s_amr_check_box_disjoint(boxes, nboxes, box_level)  ! invariant: same-level boxes are pairwise disjoint
+        if (rank_time_wrt .and. proc_rank == 0) call s_amr_report_coverage(boxes, nboxes, box_level)
         call s_amr_regrid_boxes_unchanged(boxes, nboxes, box_level, same)
+        call s_amr_report_mem('compared')
         if (same) return  ! identical box set and levels: keep the live slots
         call s_amr_regrid_stash_migrate(boxes, nboxes, box_level, old_np, old_ilo, old_ext, old_level, old_owns)
+        call s_amr_report_mem('stashed')
+        call s_amr_report_mem('pre-rebuild')
         call s_amr_regrid_rebuild_slots(q_cons_base, boxes, nboxes, old_np, old_ilo, old_ext, old_level, old_owns)
+        call s_amr_report_mem('post-rebuild')
 
     end subroutine s_amr_regrid
+
+    !> Print the share of the base domain each refinement level's boxes cover (boxes are in level-0 cell indices), so a run can be
+    !! matched to another code's refined fraction.
+    impure subroutine s_amr_report_coverage(boxes, nboxes, box_level)
+
+        type(t_box), intent(in) :: boxes(:)
+        integer, intent(in)     :: nboxes, box_level(:)
+        real(wp)                :: cover(1:max(amr_max_level, 1)), base
+        integer                 :: k
+
+        cover = 0._wp
+        do k = 1, nboxes
+            cover(box_level(k)) = cover(box_level(k)) + real(product(merge(boxes(k)%hi - boxes(k)%lo + 1, 1, amr_dim)), wp)
+        end do
+        base = real(m_glb + 1, wp)*real(n_glb + 1, wp)*real(max(p_glb + 1, 1), wp)
+        print '(A,I0,A,*(F8.4))', ' [amr-cov] boxes ', nboxes, '  level coverage (share of domain) ', cover/base
+
+    end subroutine s_amr_report_coverage
 
     !> Regrid phase 1: per-cell tag field (density-gradient criterion), skipping the two global boundary cells per active dim and
     !! suppressing tags over the acoustic source supports and the Lagrangian-cloud exclusion bbox. sidx returns the rank's global
@@ -543,6 +611,32 @@ contains
 
     end subroutine s_amr_regrid_cluster_tags
 
+    !> True iff two same-level blocks can coexist: disjoint, and either farther apart than the reflux's coincident-outside-cell
+    !! hazard (at least 2 empty coarse cells in some dimension) or face-adjacent with exactly matching transverse extents (a regular
+    !! tile grid, which the fine-fine seam halo reconciles). Mirrors s_amr_check_seam_topology.
+    pure logical function f_amr_boxes_compatible(alo, ahi, blo, bhi) result(ok)
+
+        integer, intent(in) :: alo(3), ahi(3), blo(3), bhi(3)
+        integer             :: d, t, gap
+        logical             :: tmatch, tover
+
+        ok = .true.
+        if (all(alo <= bhi .and. blo <= ahi)) then; ok = .false.; return; end if
+        do d = 1, 3
+            if (.not. amr_dim(d)) cycle
+            gap = max(blo(d) - ahi(d), alo(d) - bhi(d)) - 1  ! empty cells between the blocks along d (negative: they overlap in d)
+            if (gap >= 2 .or. gap < 0) cycle
+            tover = .true.; tmatch = .true.
+            do t = 1, 3
+                if (t == d .or. .not. amr_dim(t)) cycle
+                tover = tover .and. alo(t) <= bhi(t) .and. blo(t) <= ahi(t)
+                tmatch = tmatch .and. alo(t) == blo(t) .and. ahi(t) == bhi(t)
+            end do
+            if (tover .and. .not. (gap == 0 .and. tmatch)) then; ok = .false.; return; end if
+        end do
+
+    end function f_amr_boxes_compatible
+
     !> Regrid hysteresis (amr_snap > 0): every new box within amr_snap coarse cells per face of a live block of the same level takes
     !! that block's box. A feature drifting a cell between regrids otherwise shifts every tile of its envelope by that cell and
     !! re-creates every block; snapped boxes are identical, and when every box snaps s_amr_regrid_boxes_unchanged skips the rebuild
@@ -566,6 +660,11 @@ contains
                 if (amr_block_level(ks) /= box_level(k)) cycle
                 if (all(abs(amr_region_lo_all(:,ks) - boxes(k)%lo) <= amr_snap) .and. all(abs(amr_region_hi_all(:, &
                     & ks) - boxes(k)%hi) <= amr_snap)) then
+                    ! a snapped block lags its fresh box by up to amr_snap cells per face: a body block (bbox plus margin) would
+                    ! lose that much of its margin and a moving body would reach the block edge before the next regrid, so with
+                    ! IB the old block must contain the fresh box outright
+                    if (ib .and. .not. (all(amr_region_lo_all(:,ks) <= boxes(k)%lo) .and. all(amr_region_hi_all(:, &
+                        & ks) >= boxes(k)%hi))) cycle
                     if (any(amr_region_lo_all(:,ks) /= boxes(k)%lo) .or. any(amr_region_hi_all(:, &
                         & ks) /= boxes(k)%hi)) nsnap = nsnap + 1
                     snapped(k)%lo = amr_region_lo_all(:,ks); snapped(k)%hi = amr_region_hi_all(:,ks)
@@ -580,6 +679,10 @@ contains
             do kk = k + 1, nboxes
                 if (box_level(kk) /= box_level(k)) cycle
                 if (all(snapped(k)%lo <= snapped(kk)%hi .and. snapped(kk)%lo <= snapped(k)%hi)) then
+                    ok = .false.; exit
+                end if
+                ! a snapped box can land touching, or one cell from, a box that did not snap
+                if (ib .and. .not. f_amr_boxes_compatible(snapped(k)%lo, snapped(k)%hi, snapped(kk)%lo, snapped(kk)%hi)) then
                     ok = .false.; exit
                 end if
             end do
@@ -615,15 +718,229 @@ contains
 
     end subroutine s_amr_clip_to_active_box
 
-    !> Regrid phase 3: pad + clamp + size-cap each box, clip it clear of the acoustic/Lagrangian supports and the active window,
-    !! expand it over immersed bodies, then tile oversized boxes (non-IB) or merge overlapping ones (IB).
+    !> Box minus a body block: append to out(n+1:) the pieces of `box` that stay `gap` empty coarse cells clear of [glo:ghi], and
+    !! `gap` clear of each other. Per active dimension the pieces beyond the gap-grown block are cut off (spanning the part of `box`
+    !! not yet cut), then the remainder is narrowed to the block's own span, so the next dimension's pieces start `gap` cells from
+    !! the earlier ones. The leftover inside the block's span is the block itself and is dropped. The caller guarantees `box`
+    !! overlaps the gap-grown block.
+    pure subroutine s_amr_box_carve(box, glo, ghi, gap, out, n)
+
+        type(t_box), intent(in)    :: box
+        integer, intent(in)        :: glo(3), ghi(3), gap
+        type(t_box), intent(inout) :: out(:)
+        integer, intent(inout)     :: n
+        type(t_box)                :: rem
+        integer                    :: d
+
+        rem = box
+        do d = 1, 3
+            if (.not. amr_dim(d)) cycle
+            if (rem%lo(d) < glo(d) - gap) then
+                n = n + 1; out(n) = rem; out(n)%hi(d) = glo(d) - gap - 1
+            end if
+            if (rem%hi(d) > ghi(d) + gap) then
+                n = n + 1; out(n) = rem; out(n)%lo(d) = ghi(d) + gap + 1
+            end if
+            rem%lo(d) = max(rem%lo(d), glo(d)); rem%hi(d) = min(rem%hi(d), ghi(d))
+            if (rem%lo(d) > rem%hi(d)) return  ! the box only reaches the gap ring: nothing of it lies over the block
+        end do
+
+    end subroutine s_amr_box_carve
+
+    !> Abort if the ranks hold different box lists. The box list is built on replicated inputs, but the immersed bodies are not
+    !! replicated: each rank holds the bodies in its own neighborhood (ib_neighborhood_radius), and a rank that cannot see a body
+    !! the others see builds a different list, which hangs the ownership collectives that follow with no message.
+    impure subroutine s_amr_check_boxes_agree(boxes, nboxes)
+
+        type(t_box), intent(in) :: boxes(:)
+        integer, intent(in)     :: nboxes
+        real(wp)                :: chk, cmin, cmax
+        integer                 :: k
+
+        chk = real(nboxes, wp)
+        do k = 1, nboxes
+            chk = chk + real(modulo(k*7919, 1009), wp)*real(sum(boxes(k)%lo*(/1, 131, 17161/)) + 3*sum(boxes(k)%hi*(/1, 131, &
+                             & 17161/)), wp)
+        end do
+        call s_mpi_allreduce_min(chk, cmin)
+        call s_mpi_allreduce_max(chk, cmax)
+        if (cmin /= cmax) then
+            call s_mpi_abort('amr regrid with ib: the ranks built different block lists, because they hold different sets of ' &
+                             & // 'immersed bodies; raise ib_neighborhood_radius until every rank sees every body')
+        end if
+
+    end subroutine s_amr_check_boxes_agree
+
+    !> Regrid phase 3a (IB): tile the padded cluster boxes around the immersed bodies. A body is owned whole by one block, its
+    !! bounding box plus the containment margin (bodies whose boxes lie within the gap of each other share one block). Every cluster
+    !! box that reaches a body gives up the ground under that block and a gap-wide ring around it, and the remainder tiles to <=
+    !! amr_maxc_fit like the non-IB path; the body blocks are appended once each, after the tiles. The ring keeps the body block
+    !! clear of every other block: the fine-fine seam halo and the reflux only reconcile faces whose transverse extents match
+    !! exactly, so a body block cannot touch a piece cut from a wider box. A box wider than the cap (a planar front crossing a body)
+    !! therefore stays refined along its whole length instead of being clamped and then unioned with the body, which overran the
+    !! cap.
+    impure subroutine s_amr_carve_tile_around_bodies(boxes, nboxes, out, nt, capt)
+
+        type(t_box), intent(in)    :: boxes(:)
+        integer, intent(in)        :: nboxes
+        type(t_box), intent(inout) :: out(:)
+        integer, intent(inout)     :: nt, capt
+        ! empty coarse cells between two blocks that do not share a regular grid: one empty cell leaves both blocks the same
+        ! outside coarse cell, which the batched reflux apply writes from both blocks in one kernel
+        integer, parameter       :: gap = 2
+        type(t_box), allocatable :: pieces(:), rest(:)
+        integer, allocatable     :: glo(:,:), ghi(:,:), clo(:,:), chi(:,:), gbx(:,:)
+        integer, parameter       :: BOX_UNSET = -1000000000
+        integer                  :: nbody, gid, ierr
+        integer                  :: e(3), d, dsep, nsep, lowb, upb, need, avail_l, avail_u, tl, tu, cl(3), ch(3)
+        logical, allocatable     :: hit(:)
+        integer                  :: ng, i, j, g, k, p, npc, nn, mrg, blo(3), bhi(3)
+        logical                  :: merged
+
+        ! the margin matches s_amr_expand_box_over_bodies: the image-point stencil, and for nested levels the child insets
+
+        mrg = max(amr_buf, 4) + max(0, amr_max_level - 1)*amr_cpat_mar
+        nbody = max(num_gbl_ibs, num_ibs, 1)
+        allocate (glo(3, nbody), ghi(3, nbody), clo(3, nbody), chi(3, nbody), hit(nbody))
+
+        ! Every rank must build the same boxes. A rank knows only the bodies near it, and the last digits of a body's position
+        ! can differ between ranks (each sums the forces on it in its own order), which is enough to move a box edge by one cell.
+        ! So each rank contributes the boxes of the bodies it holds, indexed by global body id, and one max-reduction leaves every
+        ! rank with the same box for every body, including bodies it cannot see.
+        allocate (gbx(12, nbody)); gbx = BOX_UNSET
+        do i = 1, num_ibs
+            gid = patch_ib(i)%gbl_patch_id
+            if (gid < 1 .or. gid > nbody) gid = i
+            call s_amr_body_bbox(i, mrg, blo, bhi); call s_amr_body_bbox(i, 0, cl, ch)
+            gbx(1:3,gid) = blo; gbx(4:6,gid) = bhi; gbx(7:9,gid) = cl; gbx(10:12,gid) = ch
+        end do
+#ifdef MFC_MPI
+        call MPI_ALLREDUCE(MPI_IN_PLACE, gbx, size(gbx), MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, ierr)
+#endif
+        ng = 0
+        do gid = 1, nbody
+            if (gbx(1, gid) <= BOX_UNSET) cycle
+            blo = gbx(1:3,gid); bhi = gbx(4:6,gid)
+            ! blocks stay buff_size inside the domain: a body whose margin-padded bbox does not fit cannot be contained
+            if (any(amr_dim .and. (blo < buff_size .or. bhi > [m_glb, n_glb, p_glb] - buff_size))) then
+                call s_mpi_abort('amr dynamic regrid with ib: the immersed body plus its containment ' &
+                                 & // 'margin does not fit inside the refinable domain interior (blocks stay buff_size off the edges)')
+            end if
+            ! core: the body itself
+            ng = ng + 1; glo(:,ng) = blo; ghi(:,ng) = bhi; clo(:,ng) = gbx(7:9,gid); chi(:,ng) = gbx(10:12,gid)
+        end do
+        deallocate (gbx)
+
+        ! Two body blocks conflict when they face each other across fewer than `gap` empty cells while overlapping in the other
+        ! dimensions (they would share an outside coarse cell, or touch off-grid), or overlap outright. Blocks that merely come
+        ! close at a corner do not conflict. A face-to-face conflict is resolved by trimming the two safety margins apart, down to
+        ! a floor of 3 cells beyond the body (the image-point stencil reaches about 3 coarse cells from the surface, and the
+        ! moving-body guard needs 2 plus a cell of drift); only a conflict the margins cannot absorb merges the two groups into one
+        ! block.
+        merged = .true.
+        do while (merged)
+            merged = .false.
+            outer: do i = 1, ng - 1
+                do j = i + 1, ng
+                    e = 0
+                    do d = 1, 3
+                        ! empty cells between (< 0: overlap)
+                        if (amr_dim(d)) e(d) = max(glo(d, j) - ghi(d, i), glo(d, i) - ghi(d, j)) - 1
+                    end do
+                    nsep = count(amr_dim .and. e >= 0)  ! dimensions in which the two boxes are apart
+                    if (nsep == 0) then
+                        ! overlapping outright: one block
+                        glo(:,i) = min(glo(:,i), glo(:,j)); ghi(:,i) = max(ghi(:,i), ghi(:,j))
+                        clo(:,i) = min(clo(:,i), clo(:,j)); chi(:,i) = max(chi(:,i), chi(:,j))
+                        glo(:,j) = glo(:,ng); ghi(:,j) = ghi(:,ng); clo(:,j) = clo(:,ng); chi(:,j) = chi(:,ng); ng = ng - 1
+                        merged = .true.; exit outer
+                    else if (nsep == 1) then
+                        dsep = 0
+                        do d = 1, 3
+                            if (amr_dim(d) .and. e(d) >= 0) dsep = d
+                        end do
+                        if (e(dsep) < gap) then
+                            need = gap - e(dsep)
+                            lowb = merge(i, j, ghi(dsep, i) < ghi(dsep, j)); upb = merge(j, i, lowb == i)
+                            avail_l = max(0, ghi(dsep, lowb) - (chi(dsep, lowb) + 3))
+                            avail_u = max(0, (clo(dsep, upb) - 3) - glo(dsep, upb))
+                            if (avail_l + avail_u >= need) then
+                                tl = min(need, avail_l); tu = need - tl
+                                ghi(dsep, lowb) = ghi(dsep, lowb) - tl; glo(dsep, upb) = glo(dsep, upb) + tu
+                            else
+                                glo(:,i) = min(glo(:,i), glo(:,j)); ghi(:,i) = max(ghi(:,i), ghi(:,j))
+                                clo(:,i) = min(clo(:,i), clo(:,j)); chi(:,i) = max(chi(:,i), chi(:,j))
+                                glo(:,j) = glo(:,ng); ghi(:,j) = ghi(:,ng); clo(:,j) = clo(:,ng); chi(:,j) = chi(:,ng); ng = ng - 1
+                                merged = .true.; exit outer
+                            end if
+                        end if
+                    end if
+                end do
+            end do outer
+        end do
+        do g = 1, ng
+            if (any(amr_dim .and. ghi(:,g) - glo(:,g) + 1 > amr_maxc_fit)) then
+                write (0, '(A,I0,A,I0,A,3I6,A,3I6,A,3I6,A,I0)') ' [amr] body group ', g, ' of ', ng, ' lo ', glo(:,g), ' hi ', &
+                       & ghi(:,g), ' cap ', amr_maxc_fit, ' num_ibs ', num_ibs
+                call s_mpi_abort('amr dynamic regrid with ib: a body (or bodies closer than the block gap) plus ' &
+                                 & // 'margin exceeds the per-rank block size cap; use fewer ranks or a larger amr_maxc_fit')
+            end if
+        end do
+
+        ! Canonical order. Each rank's patch_ib is its own neighborhood list, in its own order, and the carve below is not
+        ! order-independent (the pieces depend on which body is cut first, and the block list on the emission order); every rank
+        ! must produce the same block list, so order the groups by their low corner.
+        do i = 2, ng
+            blo = glo(:,i); bhi = ghi(:,i); j = i - 1
+            do while (j >= 1)
+                if (.not. (glo(3, j) > blo(3) .or. (glo(3, j) == blo(3) .and. (glo(2, j) > blo(2) .or. (glo(2, &
+                    & j) == blo(2) .and. glo(1, j) > blo(1)))))) exit
+                glo(:,j + 1) = glo(:,j); ghi(:,j + 1) = ghi(:,j); j = j - 1
+            end do
+            glo(:,j + 1) = blo; ghi(:,j + 1) = bhi
+        end do
+
+        allocate (pieces(amr_max_blocks), rest(amr_max_blocks))
+        hit = .false.
+        do k = 1, nboxes
+            npc = 1; pieces(1) = boxes(k)
+            do g = 1, ng
+                nn = 0
+                do p = 1, npc
+                    if (f_amr_boxes_overlap(pieces(p)%lo, pieces(p)%hi, glo(:,g) - gap, ghi(:,g) + gap)) then
+                        if (f_amr_boxes_overlap(pieces(p)%lo, pieces(p)%hi, glo(:,g), ghi(:,g))) hit(g) = .true.
+                        if (nn + 2*num_dims > amr_max_blocks) call s_mpi_abort('amr regrid: too many pieces around a body')
+                        call s_amr_box_carve(pieces(p), glo(:,g), ghi(:,g), gap, rest, nn)
+                    else
+                        nn = nn + 1; rest(nn) = pieces(p)
+                    end if
+                end do
+                pieces(1:nn) = rest(1:nn); npc = nn
+            end do
+            do p = 1, npc
+                call s_amr_tile_box(pieces(p)%lo, pieces(p)%hi, out, nt, amr_max_fine, capt)
+            end do
+        end do
+
+        do g = 1, ng
+            if (.not. hit(g)) cycle
+            if (nt >= amr_max_fine) then
+                capt = 1
+            else
+                nt = nt + 1; out(nt)%lo = glo(:,g); out(nt)%hi = ghi(:,g)
+            end if
+        end do
+
+    end subroutine s_amr_carve_tile_around_bodies
+
+    !> Regrid phase 3: pad + clamp each box, clip it clear of the acoustic/Lagrangian supports and the active window, then tile
+    !! oversized boxes, carving out the block each immersed body owns whole (IB).
     impure subroutine s_amr_regrid_shape_boxes(boxes, nboxes)
 
         type(t_box), allocatable, intent(inout) :: boxes(:)
         integer, intent(inout)                  :: nboxes
         type(t_box), allocatable                :: tiled(:)
         integer                                 :: lo(3), hi(3), k, kk, ntl, capt
-        logical                                 :: merged
 
         ! 3) pad + clamp + size-cap each box (amr_maxc_fit lets each box move freely across rank boundaries); drop margin-only boxes
 
@@ -631,9 +948,8 @@ contains
         do kk = 1, nboxes
             lo = merge(max(boxes(kk)%lo - amr_buf, buff_size), 0, amr_dim)
             hi = merge(min(boxes(kk)%hi + amr_buf, [m_glb, n_glb, p_glb] - buff_size), 0, amr_dim)
-            ! IB keeps the size-cap clamp (a body needs one contiguous block; splitting a body across tiles is untested); the
-            ! general path leaves boxes full-size and tiles them (below) into <= amr_maxc_fit sub-blocks with a fine-fine halo
-            if (ib) hi = merge(min(hi, lo + amr_maxc_fit - 1), 0, amr_dim)
+            ! boxes stay full-size here and are tiled (below) into <= amr_maxc_fit sub-blocks with a fine-fine halo; with IB the
+            ! tiling first carves out the block each body owns whole
             ! keep candidate boxes clear of every acoustic source support (the source acts on the coarse grid only); clipping
             ! only shrinks, so boxes stay disjoint; empties drop below
             if (acoustic_source) call s_amr_clip_box_from_sources(lo, hi)
@@ -642,56 +958,32 @@ contains
             ! at faces outside it). Tags cannot arise outside (frozen-ambient exterior), so only the amr_buf padding is ever cut,
             ! and the cut cells are ambient. np=1 only (ab_active is false under MPI).
             if (ab_active) call s_amr_clip_to_active_box(lo, hi)
-            ! a fine block that partially covers an immersed body is an untested regime (ghost prolongation through body-interior
-            ! cells, refluxing across the body): any box overlapping a body's bounding box expands to contain the whole body plus
-            ! margin
-            if (ib) call s_amr_expand_box_over_bodies(lo, hi)
             if (any(hi < lo)) cycle  ! confined to the domain margin
             k = k + 1; boxes(k)%lo = lo; boxes(k)%hi = hi
         end do
         nboxes = k
         if (nboxes == 0) return
 
-        ! max_grid_size tiling (non-IB): split any box larger than amr_maxc_fit into contiguous <= amr_maxc_fit sub-blocks so a
-        ! whole block fits a rank's local solver scratch. Tiles are adjacent; the block-to-block fine-fine halo
-        ! (s_amr_fine_fine_halo) makes the seams conservative and the reflux skips fine-fine faces. (IB keeps the clamp, above.)
-        if (.not. ib) then
-            allocate (tiled(amr_max_blocks))
-            ntl = 0; capt = 0
+        ! max_grid_size tiling: split any box larger than amr_maxc_fit into contiguous <= amr_maxc_fit sub-blocks so a whole block
+        ! fits a rank's local solver scratch. Tiles are adjacent; the block-to-block fine-fine halo (s_amr_fine_fine_halo) makes
+        ! the seams conservative and the reflux skips fine-fine faces. With IB, each body first takes its own block out of the
+        ! boxes that reach it (s_amr_carve_tile_around_bodies), so a body is never split across tiles.
+        allocate (tiled(amr_max_blocks))
+        ntl = 0; capt = 0
+        if (ib) then
+            call s_amr_carve_tile_around_bodies(boxes, nboxes, tiled, ntl, capt)
+        else
             do kk = 1, nboxes
                 call s_amr_tile_box(boxes(kk)%lo, boxes(kk)%hi, tiled, ntl, amr_max_fine, capt)
             end do
-            if (capt == 1 .and. proc_rank == 0) print '(A,I0)', ' [amr] WARNING: tiling capped at amr_max_blocks = ', amr_max_blocks
-            deallocate (boxes); call move_alloc(tiled, boxes)
-            nboxes = ntl
         end if
+        if (capt == 1 .and. proc_rank == 0) print '(A,I0)', ' [amr] WARNING: tiling capped at amr_max_blocks = ', amr_max_blocks
+        deallocate (boxes); call move_alloc(tiled, boxes)
+        nboxes = ntl
+        if (ib) call s_amr_check_boxes_agree(boxes, nboxes)
 
         if (ib) then
-            ! body-containment expansion can make boxes overlap (bisection guarantees disjoint boxes, but two boxes near one body
-            ! both grow over it): merge pairs closer than a 2-cell gap to a bbox until none remain. Overlapping blocks would
-            ! double-restrict/reflux; a 1-cell gap with transverse overlap gives the two blocks a coincident outside coarse
-            ! cell, which the batched reflux apply writes from both blocks in one kernel, an unsynchronized read-modify-write
-            ! (the clusterer's min-separation merge guarantees a >= 2 gap everywhere else; this restores it after expansion).
-            merged = .true.
-            do while (merged)
-                merged = .false.
-                outer: do k = 1, nboxes - 1
-                    do kk = k + 1, nboxes
-                        if (f_amr_boxes_overlap(boxes(k)%lo - 1, boxes(k)%hi + 1, boxes(kk)%lo, boxes(kk)%hi)) then
-                            boxes(k)%lo = min(boxes(k)%lo, boxes(kk)%lo)
-                            boxes(k)%hi = max(boxes(k)%hi, boxes(kk)%hi)
-                            boxes(kk) = boxes(nboxes); nboxes = nboxes - 1
-                            if (any(amr_dim .and. boxes(k)%hi - boxes(k)%lo + 1 > amr_maxc_fit)) then
-                                call s_mpi_abort('amr regrid: merging body-containing blocks exceeds ' &
-                                                 & // 'the per-rank block size cap')
-                            end if
-                            merged = .true.
-                            exit outer
-                        end if
-                    end do
-                end do outer
-            end do
-            ! the expansion may also have grown a box onto an acoustic source support or the Lagrangian cloud: the constraints
+            ! a body block may sit on an acoustic source support or the Lagrangian cloud: the constraints
             ! (contain the body, exclude the source/cloud) cannot both hold, so fail closed
             if (acoustic_source .or. (bubbles_lagrange .and. lag_supp_on)) then
                 do k = 1, nboxes
@@ -739,6 +1031,7 @@ contains
 
         box_level(1:nboxes) = 1
         if (amr_max_level < 2) return
+        amr_child_dropped = .false.
 
         ! the nesting appends into `boxes` (up to amr_max_blocks). The non-IB path already grew it via the tiling move_alloc; the
         ! IB path (merges only) leaves it at the cluster count, so grow it here or the appends overrun the allocation
@@ -1050,7 +1343,16 @@ contains
         nt = 0; capped = 0
         call s_amr_tile_box(clo, chi, tiles, nt, amr_max_blocks, capped, amr_maxc_fit/amr_ref_ratio**(lev - 1))
         do it = 1, nt
-            if (nmych + 1 > amr_max_fine) exit
+            if (nmych + 1 > amr_max_fine) then
+                ! refinement is dropped here, not just limited: say so (the global box count is amr_max_blocks, so a weak-scaling
+                ! run needs it to grow with the rank count)
+                if (.not. amr_child_dropped) then
+                    write (0, '(A,I0,A)') ' [amr] WARNING: nested refinement dropped, box capacity amr_max_blocks = ', &
+                           & amr_max_blocks, ' reached; raise amr_max_blocks'
+                    amr_child_dropped = .true.
+                end if
+                exit
+            end if
             nmych = nmych + 1
             mych(1:3,nmych) = tiles(it)%lo; mych(4:6,nmych) = tiles(it)%hi; mych(7, nmych) = kb
         end do
@@ -1475,7 +1777,9 @@ contains
         call s_amr_reconcile_slots()
         ! rebuild every block's fine-grid IB state for the new geometry (markers/ghost points/image points recomputed from the
         ! body definitions; no state carries across regrids)
+        call s_amr_report_mem('pre-ib-setup')
         if (ib) call s_amr_setup_ib()
+        call s_amr_report_mem('post-ib-setup')
         call s_amr_select_slot(1)
         call s_amr_check_seam_topology()
 
