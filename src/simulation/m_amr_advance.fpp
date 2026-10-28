@@ -23,7 +23,7 @@ module m_amr_advance
     use m_rhs, only: s_compute_rhs
     use m_phase_timing
     use m_ibm, only: s_ibm_setup_fine, s_ibm_swap_to_fine, s_ibm_restore_from_fine, s_ibm_correct_state, s_ibm_load_fine_markers, &
-        & s_update_mib, moving_immersed_boundary_flag, num_gps, f_ibm_fine_gps, s_ibm_tally_gps_by_body, &
+        & s_update_mib, s_ibm_reset_fine_park, moving_immersed_boundary_flag, num_gps, f_ibm_fine_gps, s_ibm_tally_gps_by_body, &
         & s_ibm_check_bodies_on_one_rank
     use m_amr_state
     use m_amr_distribution
@@ -51,6 +51,7 @@ contains
         if (.not. amr .or. .not. ib) return
         save_cur = amr_cur
         allocate (body_gps(max(num_gbl_ibs, 1))); body_gps = 0_8
+        call s_ibm_reset_fine_park()
         do islot = 1, amr_num_blocks
             call s_amr_select_slot(islot)
             if (.not. amr_rank_owns_block) cycle
