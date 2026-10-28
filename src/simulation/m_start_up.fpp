@@ -1338,7 +1338,8 @@ contains
             patch_ib(num_ibs)%y_centroid = ib_buf(18)
             patch_ib(num_ibs)%z_centroid = ib_buf(19)
             patch_ib(num_ibs)%radius = ib_buf(20)
-            patch_ib(num_ibs)%Twall = ib_buf(21)
+            ! a prescribed wall temperature (thermal_bc = 1) is input, so the restart's namelist value stands
+            if (patch_ib(num_ibs)%thermal_bc /= 1) patch_ib(num_ibs)%Twall = ib_buf(21)
             local_ib_patch_ids(num_ibs) = num_ibs
         end do
 

@@ -1344,6 +1344,7 @@ contains
         character(LEN=path_len + 2*name_len) :: file_loc
         character(len=11 + 18*nf)            :: probe
         integer                              :: i
+        logical                              :: d_exist
 
 #ifdef MFC_MPI
         integer :: ierr
@@ -1365,6 +1366,11 @@ contains
             write (file_loc, '(A,I0,A)') trim(case_dir) // '/D/' // stem // '_', t_step_start, '.dat'
         else
             file_loc = trim(case_dir) // '/D/' // stem // '.dat'
+        end if
+        ! A restart-only run in a fresh directory has no D/ from pre_process
+        if (proc_rank == 0) then
+            call my_inquire(trim(case_dir) // '/D', d_exist)
+            if (.not. d_exist) call s_create_directory(trim(case_dir) // '/D')
         end if
 #ifdef MFC_MPI
         ! MPI_MODE_CREATE does not truncate, so a shorter run following a longer one in the same
