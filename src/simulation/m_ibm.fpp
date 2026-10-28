@@ -3770,11 +3770,12 @@ contains
 
     end subroutine s_wall_column_setup
 
-    !> Advance every wall column over dt from the step-start state (refreshed primitives and temperature), then set the columns'
-    !! guard targets and their ghosts' conduction temperatures for the first stage. T and p at the top s_m come through the Lagrange
-    !! probe (s_lag3_weights); where its stencil has less than half its weight in the gas (a narrow gap) the ghost keeps the mirror
-    !! this step. lambda and c_p are tabulated per column, at the ghost's (image-point) composition, between the extremes of the
-    !! column. On the first step of a run, restart included, the columns start from the gas field sampled along their normals.
+    !> Advance every wall column over dt from the step-start state (primitives and temperature refreshed before the last
+    !! correction), then set the columns' guard targets and their ghosts' conduction temperatures for the first stage. T and p at
+    !! the top s_m come through the Lagrange probe (s_lag3_weights); where its stencil has less than half its weight in the gas (a
+    !! narrow gap) the ghost keeps the mirror this step. lambda and c_p are tabulated per column, at the ghost's (image-point)
+    !! composition, between the extremes of the column. On the first step of a run, restart included, the columns start from the gas
+    !! field sampled along their normals.
     impure subroutine s_ibm_advance_wall_columns(q_cons_vf, q_prim_vf, q_T_sf, dt_step)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf, q_prim_vf
@@ -3786,7 +3787,7 @@ contains
         real(wp), dimension(3)                              :: cb, nrm, foot, x, wdt
         real(wp), dimension(3, 3)                           :: wd
         integer, dimension(3)                               :: ic, nb
-        real(wp)                                            :: Tw, Tm, pm, mw, kap, sm, ff, Tlo, dTt, prop, qv, acc
+        real(wp)                                            :: Tw, Tm, pm, mw, kap, sm, ff, Tlo, dTt, prop, qv, acc, rho_g
         integer                                             :: i, j, k, f, dir, nsub, a1, a2, a3
         logical                                             :: init
         type(ghost_point)                                   :: gp
@@ -3795,7 +3796,7 @@ contains
         init = .not. wc_ready
         wc_ready = .true.
         $:GPU_PARALLEL_LOOP(private='[i, j, k, f, dir, nsub, a1, a2, a3, Tc, lam_t, cp_t, Ys, cb, nrm, foot, x, wdt, wd, ic, nb, &
-                            & Tw, Tm, pm, mw, kap, sm, ff, Tlo, dTt, prop, qv, acc, gp]', copyin='[init, dt_step]', present='[ghost_points]')
+                            & Tw, Tm, pm, mw, kap, sm, ff, Tlo, dTt, prop, qv, acc, rho_g, gp]', copyin='[init, dt_step]', present='[ghost_points]')
         do i = 1, num_gps
             if (wc_on(i) < 0) cycle
             gp = ghost_points(i)
@@ -3809,8 +3810,13 @@ contains
             kap = 1._wp/patch_ib(gp%ib_patch_id)%radius
             Tm = f_tsc_apply(q_T_sf, ic, wd)
             pm = f_tsc_apply(q_prim_vf(eqn_idx%E), ic, wd)
+            ! the ghost's own (image-point) composition, from the state its last correction wrote
+            rho_g = 0._wp
+            do k = eqn_idx%cont%beg, eqn_idx%cont%end
+                rho_g = rho_g + q_cons_vf(k)%sf(gp%loc(1), gp%loc(2), gp%loc(3))
+            end do
             do k = 1, num_species
-                Ys(k) = q_prim_vf(eqn_idx%species%beg + k - 1)%sf(gp%loc(1), gp%loc(2), gp%loc(3))
+                Ys(k) = q_cons_vf(eqn_idx%species%beg + k - 1)%sf(gp%loc(1), gp%loc(2), gp%loc(3))/rho_g
             end do
             call get_mixture_molecular_weight(Ys, mw)
 
@@ -3881,8 +3887,8 @@ contains
     !! guard: sum_f G_f (T_f - T_cond) = sum_f (q w_f - cut_f), G_f = lambda_f area/h with the face conductivity the diffusion flux
     !! forms (each side at its own state, the ghost at T_w), and cut_f = g lambda (T_ext - T_f)^+ area/h. The guard stops the drain
     !! of a gas cell colder than the column over its own area: heat of gas the staircase has no room for, zero in steady state. The
-    !! body still books q w_f (s_accumulate_ib_face_fluxes adds the cut back). Called after each ghost correction, so the gas values
-    !! lag one stage as the image point's do.
+    !! body still books q w_f (s_accumulate_ib_face_fluxes adds the cut back). Called after each ghost correction, on that stage's
+    !! refreshed gas state: a guard a stage late let a step start's drain empty a near-wall cell in an impulsively started flow.
     impure subroutine s_wall_column_tcond(q_cons_vf, q_prim_vf, q_T_sf)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf, q_prim_vf

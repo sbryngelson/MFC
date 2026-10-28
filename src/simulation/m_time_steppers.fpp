@@ -596,8 +596,9 @@ contains
                     end if
                 end if
 
-                ! update the ghost fluid properties point values based on IB state
-                if (moving_immersed_boundary_flag) call s_ib_refresh_prim()
+                ! update the ghost fluid properties point values based on IB state; wall columns read this stage's gas, so their
+                ! guard acts within the stage that drains a cell
+                if (moving_immersed_boundary_flag .or. ib_wall_col) call s_ib_refresh_prim()
                 call s_ibm_correct_state(q_cons_ts(1)%vf, q_prim_vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
             end if
 
