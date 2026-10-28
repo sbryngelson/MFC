@@ -2463,6 +2463,37 @@ contains
 
     end subroutine s_tsc_weights
 
+    !> Lagrange (biquadratic, triquadratic in 3D) weights of point loc on the stencil s_tsc_weights centres there, from the cells'
+    !! own centres: an interpolant, where TSC smooths a sample by about (h^2/4) lap phi. Where a stencil cell is solid the TSC
+    !! weights are kept.
+    subroutine s_lag3_weights(markers, loc, ic, wd, fluid_frac)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+        type(integer_field), intent(in)        :: markers
+        real(wp), dimension(3), intent(in)     :: loc
+        integer, dimension(3), intent(out)     :: ic
+        real(wp), dimension(3, 3), intent(out) :: wd
+        real(wp), intent(out)                  :: fluid_frac
+        real(wp)                               :: xm, x0, xp
+        integer                                :: dim
+
+        call s_tsc_weights(markers, loc, ic, wd, fluid_frac)
+        if (fluid_frac < 1._wp) return
+        do dim = 1, num_dims
+            if (dim == 1) then
+                xm = x_cc(ic(1) - 1); x0 = x_cc(ic(1)); xp = x_cc(ic(1) + 1)
+            else if (dim == 2) then
+                xm = y_cc(ic(2) - 1); x0 = y_cc(ic(2)); xp = y_cc(ic(2) + 1)
+            else
+                xm = z_cc(ic(3) - 1); x0 = z_cc(ic(3)); xp = z_cc(ic(3) + 1)
+            end if
+            wd(1, dim) = (loc(dim) - x0)*(loc(dim) - xp)/((xm - x0)*(xm - xp))
+            wd(2, dim) = (loc(dim) - xm)*(loc(dim) - xp)/((x0 - xm)*(x0 - xp))
+            wd(3, dim) = (loc(dim) - xm)*(loc(dim) - x0)/((xp - xm)*(xp - x0))
+        end do
+
+    end subroutine s_lag3_weights
+
     !> Tensor product of the 1D TSC weights: the coefficient on each cell of the 3x3x3 stencil.
     function f_tsc_stencil(wd) result(c)
 
@@ -3740,10 +3771,10 @@ contains
     end subroutine s_wall_column_setup
 
     !> Advance every wall column over dt from the step-start state (refreshed primitives and temperature), then set the columns'
-    !! guard targets and their ghosts' conduction temperatures for the first stage. T and p at the top s_m come through the TSC
-    !! probe; where it has less than half its weight in the gas (a narrow gap) the ghost keeps the mirror this step. lambda and c_p
-    !! are tabulated per column, at the ghost's (image-point) composition, between the extremes of the column. On the first step of
-    !! a run, restart included, the columns start from the gas field sampled along their normals.
+    !! guard targets and their ghosts' conduction temperatures for the first stage. T and p at the top s_m come through the Lagrange
+    !! probe (s_lag3_weights); where its stencil has less than half its weight in the gas (a narrow gap) the ghost keeps the mirror
+    !! this step. lambda and c_p are tabulated per column, at the ghost's (image-point) composition, between the extremes of the
+    !! column. On the first step of a run, restart included, the columns start from the gas field sampled along their normals.
     impure subroutine s_ibm_advance_wall_columns(q_cons_vf, q_prim_vf, q_T_sf, dt_step)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf, q_prim_vf
@@ -3769,7 +3800,7 @@ contains
             if (wc_on(i) < 0) cycle
             gp = ghost_points(i)
             call s_wc_axis(gp, sm, nrm, foot)
-            call s_tsc_weights(ib_markers, foot + sm*nrm, ic, wd, ff)
+            call s_lag3_weights(ib_markers, foot + sm*nrm, ic, wd, ff)
             wc_on(i) = 0
             wc_q(i) = 0._wp
             if (ff < 0.5_wp) cycle
