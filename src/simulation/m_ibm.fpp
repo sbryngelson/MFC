@@ -134,8 +134,9 @@ module m_ibm
     private :: ib_rec_len, n_ib_nbrs, ib_nbrs, ib_send_counts, ib_reqs, ib_stats, ib_send_bufs, ib_recv_bufs
 
     !> Force (1:3) and torque (4:6) on each local IB from the fluid-body face fluxes of the last RHS evaluation
-    real(wp), allocatable, dimension(:,:) :: ib_face_ft
-    $:GPU_DECLARE(create='[ib_face_ft]')
+    !> and their RK-weighted sum over the step's stages (what the step exchanges; the force history records it)
+    real(wp), allocatable, dimension(:,:) :: ib_face_ft, ib_face_ft_step
+    $:GPU_DECLARE(create='[ib_face_ft, ib_face_ft_step]')
 
 contains
 
@@ -241,9 +242,9 @@ contains
         if (num_procs > 1) call s_setup_ib_force_comm()
 #endif
 
-        @:ALLOCATE(ib_face_ft(6, num_local_ibs_max))
-        ib_face_ft = 0._wp
-        $:GPU_UPDATE(device='[ib_face_ft]')
+        @:ALLOCATE(ib_face_ft(6, num_local_ibs_max), ib_face_ft_step(6, num_local_ibs_max))
+        ib_face_ft = 0._wp; ib_face_ft_step = 0._wp
+        $:GPU_UPDATE(device='[ib_face_ft, ib_face_ft_step]')
 
         call s_update_ib_lookup()
 
@@ -2688,10 +2689,11 @@ contains
         all_ibs = ib_heat_wrt .or. ib_mass_relax > 0
 
         if (do_ft .and. idir == 1) then
-            $:GPU_PARALLEL_LOOP(private='[i, l]', collapse=2)
+            $:GPU_PARALLEL_LOOP(private='[i, l]', collapse=2, copyin='[stage]')
             do i = 1, num_ibs
                 do l = 1, 6
                     ib_face_ft(l, i) = 0._wp
+                    if (stage == 1) ib_face_ft_step(l, i) = 0._wp
                 end do
             end do
             $:END_GPU_PARALLEL_LOOP()
@@ -2777,6 +2779,10 @@ contains
                                     ib_face_ft(i, ib_id) = ib_face_ft(i, ib_id) + f(i)
                                     $:GPU_ATOMIC(atomic='update')
                                     ib_face_ft(i + 3, ib_id) = ib_face_ft(i + 3, ib_id) + tq(i)
+                                    $:GPU_ATOMIC(atomic='update')
+                                    ib_face_ft_step(i, ib_id) = ib_face_ft_step(i, ib_id) + w*f(i)
+                                    $:GPU_ATOMIC(atomic='update')
+                                    ib_face_ft_step(i + 3, ib_id) = ib_face_ft_step(i + 3, ib_id) + w*tq(i)
                                 end do
                             end if
                             if (all_ibs .or. patch_ib(ib_id)%thermal_bc == 3) then
@@ -2809,21 +2815,26 @@ contains
     end subroutine s_accumulate_ib_face_fluxes
 
     !> Set each IB's force and torque: the fluid's share from the face fluxes of the last RHS evaluation
-    !! (s_accumulate_ib_face_fluxes), plus collisions and body forces
-    subroutine s_compute_ib_forces()
+    !! (s_accumulate_ib_face_fluxes), or with step their RK-weighted sum over the step, plus collisions and body forces
+    subroutine s_compute_ib_forces(step)
 
+        logical, intent(in), optional   :: step
         integer                         :: i, l
         real(wp), dimension(num_ibs, 3) :: forces, torques
+        logical                         :: use_step
+
+        use_step = .false.
+        if (present(step)) use_step = step
 
         call nvtxStartRange("COMPUTE-IB-FORCES")
 
         ! no kernel over zero-size mapped arrays: a rank can hold no patch after a handoff
         if (num_ibs > 0) then
-            $:GPU_PARALLEL_LOOP(private='[i, l]', copyout='[forces, torques]')
+            $:GPU_PARALLEL_LOOP(private='[i, l]', copyout='[forces, torques]', copyin='[use_step]')
             do i = 1, num_ibs
                 do l = 1, 3
-                    forces(i, l) = ib_face_ft(l, i)
-                    torques(i, l) = ib_face_ft(l + 3, i)
+                    forces(i, l) = merge(ib_face_ft_step(l, i), ib_face_ft(l, i), use_step)
+                    torques(i, l) = merge(ib_face_ft_step(l + 3, i), ib_face_ft(l + 3, i), use_step)
                 end do
             end do
             $:END_GPU_PARALLEL_LOOP()
@@ -3451,7 +3462,7 @@ contains
         if (ib_cutvol) then
             @:DEALLOCATE(ib_alpha%sf, ib_alpha_prev%sf, ib_cv_f%sf, ib_markers_cv%sf, ib_wall_vel, ib_cv_dv)
         end if
-        @:DEALLOCATE(ib_face_ft)
+        @:DEALLOCATE(ib_face_ft, ib_face_ft_step)
         do i = 1, num_ib_airfoils_max
             if (allocated(ib_airfoil_grids(i)%upper)) then
                 @:DEALLOCATE(ib_airfoil_grids(i)%upper)

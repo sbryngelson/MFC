@@ -468,9 +468,7 @@ contains
             call s_cutvol_analytic_velocity()
             call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
             call s_cutvol_advance(q_cons_ts(1)%vf, dt)
-            ! the ghost fill interpolates the primitive state, which no RHS has formed yet for the moved geometry
-            call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
-            call s_convert_conservative_to_primitive_variables(q_cons_ts(1)%vf, q_T_sf, q_prim_vf, idwbuff)
+            call s_ib_refresh_prim()
             call s_ibm_correct_state(q_cons_ts(1)%vf, q_prim_vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
         end if
 
@@ -594,6 +592,7 @@ contains
                 end if
 
                 ! update the ghost fluid properties point values based on IB state
+                if (moving_immersed_boundary_flag) call s_ib_refresh_prim()
                 call s_ibm_correct_state(q_cons_ts(1)%vf, q_prim_vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
             end if
 
@@ -641,10 +640,11 @@ contains
         if (ib) then
             if (moving_immersed_boundary_flag) then
                 if (cv_move) call s_cutvol_couple(dt)
+                call s_compute_ib_forces(step=.true.)  ! the step's RK-weighted force, for the history
                 call s_wrap_periodic_ibs()  ! wraps the positions of IBs to the local proc
                 call s_handoff_ib_ownership()  ! recomputes which ranks own which IBs and communicate to neighbors
             else if (ib_state_wrt) then
-                call s_compute_ib_forces()
+                call s_compute_ib_forces(step=.true.)
             end if
             if (ib_exchange) call s_update_ib_temperatures(dt, q_cons_ts(1)%vf)
             if (ib_mass_relax > 0) call s_conserve_ib_mass(q_cons_ts(1)%vf)
@@ -937,6 +937,15 @@ contains
         $:GPU_UPDATE(device='[patch_ib(1:num_ibs)]')
 
     end subroutine s_cutvol_analytic_velocity
+
+    !> Primitive state of the updated q_cons_ts(1), halos included, for the ghost fill's image points: q_prim_vf otherwise still
+    !! holds the state the last RHS was formed from, so the ghosts would lag the gas by a stage
+    impure subroutine s_ib_refresh_prim()
+
+        call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
+        call s_convert_conservative_to_primitive_variables(q_cons_ts(1)%vf, q_T_sf, q_prim_vf, idwbuff)
+
+    end subroutine s_ib_refresh_prim
 
     subroutine s_propagate_immersed_boundaries(s, t_step)
 
