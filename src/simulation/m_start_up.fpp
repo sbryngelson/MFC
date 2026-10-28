@@ -971,18 +971,20 @@ contains
             ! ib_mass_relax = -1 (default): on where the ghost-cell treatment measurably creates or destroys gas (a moving,
             ! slip or reacting body), off for fixed no-slip inert walls, and off with a blowing body, whose injected gas the
             ! account (gasification only) would take back out, and off under ib_cutvol, whose remap conserves the gas, and under
-            ! ib_flux_wall, whose wall faces carry exactly the gasification. Decided over all bodies, not this rank's: it gates
+            ! ib_flux_wall, whose wall faces carry exactly the gasification. Released each step (1) with a slip wall, whose
+            ! ghost-layer intake it then returns exactly; else over 30 steps. Decided over all bodies, not this rank's: it gates
             ! collectives.
             if (ib_mass_relax < 0) then
                 block
-                    integer(kind=8) :: n_on, n_blow
-                    call s_mpi_allreduce_integer_sum(int(count(patch_ib(1:num_ibs)%slip &
-                                                     & .or. patch_ib(1:num_ibs)%surface_reaction /= 0), 8), n_on)
+                    integer(kind=8) :: n_on, n_blow, n_slip
+                    call s_mpi_allreduce_integer_sum(int(count(patch_ib(1:num_ibs)%slip), 8), n_slip)
+                    call s_mpi_allreduce_integer_sum(int(count(patch_ib(1:num_ibs)%surface_reaction /= 0), 8), n_on)
                     call s_mpi_allreduce_integer_sum(int(count(patch_ib(1:num_ibs)%v_blow > 0._wp &
                                                      & .or. patch_ib(1:num_ibs)%inj_species > 0), 8), n_blow)
                     ib_mass_relax = 0
-                    if ((moving_immersed_boundary_flag .or. n_on > 0_8) .and. n_blow == 0_8 .and. model_eqns == 2 .and. .not. igr &
-                        & .and. .not. ib_cutvol .and. .not. ib_flux_wall .and. .not. bubbles_euler) ib_mass_relax = 30
+                    if ((moving_immersed_boundary_flag .or. n_on + n_slip > 0_8) .and. n_blow == 0_8 .and. model_eqns == 2 &
+                        & .and. .not. igr .and. .not. ib_cutvol .and. .not. ib_flux_wall .and. .not. bubbles_euler) &
+                        & ib_mass_relax = merge(1, 30, n_slip > 0_8)
                 end block
             end if
             call s_ibm_setup()

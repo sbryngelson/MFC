@@ -145,7 +145,7 @@ DESCRIPTIONS = {
     "num_particle_clouds": "Number of particle bed specifications to generate immersed boundary patches from",
     "ib_neighborhood_radius": "Neighborhood radius in ranks for IB awareness",
     "ib_ip_interp": "Image-point interpolation: 1 inverse-distance weighting over 2x2(x2) cells, 2 triangular-shaped-cloud weights over 3x3(x3) cells (default)",
-    "ib_mass_relax": "Immersed-boundary mass conservation: N > 0 returns each body's spurious gas mass over about N steps; 0 off; -1 (default) 30 for moving, slip or reacting bodies",
+    "ib_mass_relax": "Immersed-boundary mass conservation: N > 0 returns each body's spurious gas mass over about N steps; 0 off; -1 (default) 1 with a slip wall, else 30 if moving or reacting",
     "ib_wall_order": "Immersed-boundary wall treatment: 1 one-probe mirror ghost fill and one-sided wall gradient (default), 2 two-probe quadratic wall-normal fill and wall gradient with TSC probes",
     "ib_flux_wall": "Fixed reacting immersed boundaries: fluid|body face mass, species and energy fluxes from the surface solve's rates (exact gas budget)",
     "ib_cutvol": "Moving immersed boundaries: conservation-only fluid fractions of the cells next to a moving wall (the wall's displacement is conserved), prescribed translation only",
