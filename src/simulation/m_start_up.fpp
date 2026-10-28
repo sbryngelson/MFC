@@ -769,6 +769,7 @@ contains
         integer                 :: stor
         integer                 :: save_count
 
+        if (ib) call s_report_ib_contact(mytime)
         if (down_sample) then
             call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
         end if

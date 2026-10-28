@@ -34,7 +34,7 @@ module m_ibm
     ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, s_report_ibm_surface, &
         & s_write_ib_surface, s_update_ib_temperatures, s_conserve_ib_mass, s_accumulate_ib_face_fluxes, &
         & s_ibm_set_conduction_temperature, s_ibm_restore_conduction_temperature, s_add_swept_cells, s_cutvol_advance, &
-        & s_cutvol_add_force, s_cutvol_couple, s_ib_flux_wall_prepare
+        & s_cutvol_add_force, s_cutvol_couple, s_ib_flux_wall_prepare, s_report_ib_contact
 
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
@@ -45,6 +45,11 @@ module m_ibm
     !! surface. Gradient tiers are for the surface balance, fill tiers for the ghost state the flow solve sees.
     integer, dimension(3) :: n_grad_tier = 0, n_fill_tier = 0
     integer               :: n_surface_not_converged = 0
+
+    !> Near contact, since the last save: ghost points whose image-point stencil reaches another body's cells (most at one
+    !! placement), and slip ghosts whose image point was not positive, re-weighted over its positive cells or left at their last
+    !! state
+    integer :: n_cross_stencil = 0, n_ccst_reweighted = 0, n_ccst_kept = 0
 
     !> Ghost points whose levelset distance was not positive, leaving the surface gradient (X_IP - X_s)/d undefined. Separate from
     !! the counter above because this is a grid/geometry degeneracy, not a kinetics failure.
@@ -548,6 +553,8 @@ contains
         real(wp) :: T_adv  !< Temperature of the advected ghost: T_g in the thermodynamic window (moving wall), else T_s
         real(wp) :: h_IP, dh_ccst  !< Enthalpy at the image point, and its excess over the slip ghost (CCST)
         logical :: use_ccst
+        real(wp) :: w_pos  !< Image-point stencil weight on positive cells (CCST guard)
+        integer :: n_rew, n_kept
         logical :: surface_converged
         integer :: n_not_converged, n_ill_posed  !< Per-call reacting-surface failure tallies (see the module-level counters)
         integer :: ng1, ng2, ng3, nf1, nf2, nf3  !< Per-call wall-gradient and wall-fill tier tallies
@@ -598,6 +605,7 @@ contains
         n_not_converged = 0
         n_ill_posed = 0
         ng1 = 0; ng2 = 0; ng3 = 0; nf1 = 0; nf2 = 0; nf3 = 0
+        n_rew = 0; n_kept = 0
 
         if (num_gps > 0) then
             ! Seed the staging buffer, so a component no ghost point writes survives the flush unchanged.
@@ -615,8 +623,8 @@ contains
                                 & G_K, Gs, gp, radial_vector, j, k, l, q, qv_K, c_IP, nbub, patch_id, Ys_IP, W_species, T_IP, &
                                 & mw_IP, e_IP, Ys_g, Ys_s, T_s, T_g, T_adv, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, theta, h_IP, &
                                 & dh_ccst, use_ccst, surface_converged, vel_sum_g, E_ghost, alpha_q, alpha_rho_q, e_q, wf, wg, &
-                                & tier_wg, mdot_k, e_s, nrm_l]', reduction='[[n_not_converged, n_ill_posed, ng1, ng2, ng3, nf1, &
-                                & nf2, nf3]]', reductionOp='[+]', present='[ghost_points]')
+                                & tier_wg, mdot_k, e_s, nrm_l, w_pos]', reduction='[[n_not_converged, n_ill_posed, ng1, ng2, ng3, &
+                                & nf1, nf2, nf3, n_rew, n_kept]]', reductionOp='[+]', present='[ghost_points]')
             do i = 1, num_gps
                 if (record_surface) gp_surf(:,i) = 0._wp
                 ghost_points(i)%T_cond = T_cond_unset
@@ -799,6 +807,18 @@ contains
                     ! Curvature-corrected symmetry technique on a slip wall: the ghost density follows the isentrope and the total
                     ! enthalpy is conserved across the wall, which sets the tangential speed in s_compute_ghost_point_velocity
                     use_ccst = ib_slip_ccst .and. gp%slip .and. .not. chemistry .and. model_eqns == 2 .and. .not. bubbles_euler
+                    ! A near-vacuum image point (a closing gap) would make the isentrope NaN: re-weight it over its positive cells
+                    ! without the CCST rescale, or with none keep the ghost's last state
+                    if (use_ccst .and. .not. f_positive_state(rho, pres_IP)) then
+                        call s_interpolate_image_point(q_prim_vf, gp, alpha_rho_IP, alpha_IP, pres_IP, vel_IP, c_IP, pos_w=w_pos)
+                        if (w_pos <= 0._wp) then
+                            n_kept = n_kept + 1
+                            cycle
+                        end if
+                        n_rew = n_rew + 1
+                        use_ccst = .false.
+                        call s_convert_species_to_mixture_variables_kernel(rho, gamma, pi_inf, qv_K, alpha_IP, alpha_rho_IP, Re_K)
+                    end if
                     h_IP = ((gamma + 1._wp)*pres_IP + pi_inf + qv_K)/rho
                     call s_compute_ghost_point_pressure(gp, patch_id, radial_vector, vel_IP, rho, pres_IP, pres_GP)
 
@@ -1023,8 +1043,39 @@ contains
         n_surface_ill_posed = n_surface_ill_posed + n_ill_posed
         n_grad_tier = n_grad_tier + [ng1, ng2, ng3]
         n_fill_tier = n_fill_tier + [nf1, nf2, nf3]
+        n_ccst_reweighted = n_ccst_reweighted + n_rew
+        n_ccst_kept = n_ccst_kept + n_kept
 
     end subroutine s_ibm_correct_state
+
+    !> Density and p + B (every fluid's isentrope offset) are positive
+    pure logical function f_positive_state(rho, pres) result(ok)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+        real(wp), intent(in) :: rho, pres
+        integer              :: q
+
+        ok = rho > 0._wp
+        do q = 1, num_fluids
+            ok = ok .and. pres + isentrope_B(q) > 0._wp
+        end do
+
+    end function f_positive_state
+
+    !> One line per save while bodies are in near contact (see n_cross_stencil); collective, so every rank calls it
+    impure subroutine s_report_ib_contact(time)
+
+        real(wp), intent(in) :: time
+        integer              :: nc, nr, nk
+
+        call s_mpi_reduce_int_sum(n_cross_stencil, nc)
+        call s_mpi_reduce_int_sum(n_ccst_reweighted, nr)
+        call s_mpi_reduce_int_sum(n_ccst_kept, nk)
+        if (proc_rank == 0 .and. nc + nr + nk > 0) print '(A,ES12.5,3(A,I0))', ' [IBCONTACT] t = ', time, &
+            & ': ghosts sampling another body ', nc, ', slip ghosts re-weighted ', nr, ', kept ', nk
+        n_cross_stencil = 0; n_ccst_reweighted = 0; n_ccst_kept = 0
+
+    end subroutine s_report_ib_contact
 
     !> Give the wall conduction gradient the mirrored ghost temperature from s_ibm_correct_state in place of the temperature of the
     !! ghost state, which holds the same mirror inside the thermodynamic window. Only the face difference may read it: the mirror of
@@ -2032,9 +2083,11 @@ contains
         type(ghost_point)            :: gp
         integer                      :: q, i, j, k, ii, jj, kk  !< Grid indexes and iterators
         logical                      :: is_cell_center
+        integer                      :: mk, gid, ncr            !< Stencil marker, its body, ghost points reaching another body
 
+        ncr = 0
         $:GPU_PARALLEL_LOOP(private='[q, i, j, k, ii, jj, kk, dist, buf, gp, interp_coeffs, eta, alpha, is_cell_center, &
-                            & stencil_coeffs, fluid_w, lo, ic, wd, sample_loc]', present='[ghost_points]')
+                            & stencil_coeffs, fluid_w, lo, ic, wd, sample_loc, mk, gid]', reduction='[[ncr]]', reductionOp='[+]', present='[ghost_points]')
         do q = 1, num_gps
             gp = ghost_points(q)
             if (.not. gp%ip_ok) then
@@ -2142,6 +2195,21 @@ contains
                 ghost_points(q)%interp_valid = any(interp_coeffs > 0._wp)
             end if
 
+            ! Near contact: a weighted stencil cell belongs to another body
+            gid = 0
+            do kk = 1, merge(ib_ip_width, 1, p /= 0)
+                do jj = 1, ib_ip_width
+                    do ii = 1, ib_ip_width
+                        mk = ib_markers%sf(lo(1) + ii - 1, lo(2) + jj - 1, lo(3) + kk - 1)
+                        if (stencil_coeffs(ii, jj, kk) > 0._wp .and. mk /= 0 .and. gid == 0) then
+                            call s_decode_patch_periodicity(mk, gid)
+                            if (gid == patch_ib(gp%ib_patch_id)%gbl_patch_id) gid = 0
+                        end if
+                    end do
+                end do
+            end do
+            if (gid /= 0) ncr = ncr + 1
+
             ! An image point buried in a neighboring IB gets no weights at all: its ghost point is
             ! averaged from its own neighbors instead, in s_ibm_correct_state.
             do kk = 1, 3
@@ -2175,13 +2243,15 @@ contains
             if (ghost_points(q)%interp_valid) corrected_gps%sf(gp%loc(1), gp%loc(2), gp%loc(3)) = 1
         end do
         $:END_GPU_PARALLEL_LOOP()
+        n_cross_stencil = max(n_cross_stencil, ncr)
 
     end subroutine s_compute_interpolation_coeffs
 
     !> Interpolate primitive variables to a ghost point's image point from the weights in gp%interp_coeffs (see
-    !! s_compute_interpolation_coeffs)
+    !! s_compute_interpolation_coeffs). With pos_w, only cells of positive density and p + B are weighted, renormalized by their
+    !! weight pos_w (5-equation variables only)
     subroutine s_interpolate_image_point(q_prim_vf, gp, alpha_rho_IP, alpha_IP, pres_IP, vel_IP, c_IP, r_IP, v_IP, pb_IP, mv_IP, &
-                                         & nmom_IP, pb_in, mv_in, presb_IP, massv_IP, Ys_IP)
+                                         & nmom_IP, pb_in, mv_in, presb_IP, massv_IP, Ys_IP, pos_w)
         $:GPU_ROUTINE(parallelism='[seq]')
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf  !< Primitive Variables
@@ -2199,9 +2269,10 @@ contains
         real(wp), optional, dimension(:), intent(inout) :: nmom_IP
         real(wp), optional, dimension(:), intent(inout) :: presb_IP, massv_IP
         real(wp), optional, dimension(:), intent(inout) :: Ys_IP  !< Interpolated species mass fractions (chemistry)
+        real(wp), optional, intent(out)                 :: pos_w
         integer                                         :: i, j, k, l, q  !< Iterator variables
         integer                                         :: i1, i2, j1, j2, k1, k2  !< Iterator variables
-        real(wp)                                        :: coeff
+        real(wp)                                        :: coeff, rho_c
 
         i1 = gp%ip_stencil(1); i2 = i1 + ib_ip_width - 1
         j1 = gp%ip_stencil(2); j2 = j1 + ib_ip_width - 1
@@ -2216,6 +2287,7 @@ contains
         alpha_IP = 0._wp
         pres_IP = 0._wp
         vel_IP = 0._wp
+        if (present(pos_w)) pos_w = 0._wp
 
         if (chemistry) Ys_IP = 0._wp
 
@@ -2245,6 +2317,14 @@ contains
                 $:GPU_LOOP(parallelism='[seq]')
                 do k = k1, k2
                     coeff = gp%interp_coeffs(i - i1 + 1, j - j1 + 1, k - k1 + 1)
+                    if (present(pos_w)) then
+                        rho_c = 0._wp
+                        do l = eqn_idx%cont%beg, eqn_idx%cont%end
+                            rho_c = rho_c + q_prim_vf(l)%sf(i, j, k)
+                        end do
+                        if (.not. f_positive_state(rho_c, real(q_prim_vf(eqn_idx%E)%sf(i, j, k), kind=wp))) coeff = 0._wp
+                        pos_w = pos_w + coeff
+                    end if
 
                     pres_IP = pres_IP + coeff*q_prim_vf(eqn_idx%E)%sf(i, j, k)
 
@@ -2303,6 +2383,14 @@ contains
                 end do
             end do
         end do
+
+        if (present(pos_w)) then
+            if (pos_w > 0._wp) then
+                pres_IP = pres_IP/pos_w; vel_IP = vel_IP/pos_w
+                alpha_rho_IP = alpha_rho_IP/pos_w; alpha_IP = alpha_IP/pos_w
+                if (surface_tension) c_IP = c_IP/pos_w
+            end if
+        end if
 
     end subroutine s_interpolate_image_point
 
