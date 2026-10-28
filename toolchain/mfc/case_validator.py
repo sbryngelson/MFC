@@ -883,6 +883,20 @@ class CaseValidator:
             "IB forces (ib_state_wrt or moving IBs) are not supported with igr or hypoelastic HLLD, whose RHS is not one set of face fluxes",
         )
 
+        # Wall conduction column: radial, on an inert isothermal circle or sphere; its state lives on fixed ghost points and its
+        # flux enters through the mixture-averaged conduction flux
+        for i in range(1, (num_ibs or 0) + 1):
+            self.prohibit((self.get(f"patch_ib({i})%wall_column_len", 0.0) or 0.0) < 0, f"patch_ib({i})%wall_column_len must be >= 0")
+            if self.get(f"patch_ib({i})%wall_column", "F") != "T":
+                continue
+            pre = f"patch_ib({i})%wall_column"
+            self.prohibit(self.get(f"patch_ib({i})%thermal_bc", 0) != 1, f"{pre} requires thermal_bc = 1")
+            self.prohibit((self.get(f"patch_ib({i})%surface_reaction", 0) or 0) != 0, f"{pre} requires surface_reaction = 0")
+            self.prohibit(self.get(f"patch_ib({i})%geometry", 0) not in (2, 8), f"{pre} requires a circle (geometry 2) or sphere (geometry 8)")
+            self.prohibit(moving, f"{pre} requires every immersed boundary to be fixed (moving_ibm = 0)")
+            self.prohibit(self.get("chem_params%diffusion", "F") != "T", f"{pre} requires chem_params%diffusion = T")
+            self.prohibit(self.get("chem_params%transport_model", 1) != 1, f"{pre} requires chem_params%transport_model = 1")
+
         p = self.get("p", 0)
         for i in range(1, (num_ibs or 0) + 1):
             moving = self.get(f"patch_ib({i})%moving_ibm", 0) or 0

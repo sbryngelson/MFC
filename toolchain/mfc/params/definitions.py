@@ -1022,6 +1022,8 @@ def _load():
         ("emissivity", REAL),
         ("T_rad", REAL),
         ("heat_power", REAL),
+        ("wall_column", LOG),
+        ("wall_column_len", REAL),
         ("v_blow", REAL),
         ("burn_rate_exp", REAL),
         ("burn_rate_pref", REAL),

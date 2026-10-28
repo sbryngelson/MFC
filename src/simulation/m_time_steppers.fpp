@@ -471,6 +471,11 @@ contains
             call s_ib_refresh_prim()
             call s_ibm_correct_state(q_cons_ts(1)%vf, q_prim_vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
         end if
+        ! Wall conduction columns: once per step, from the step-start state
+        if (ib_wall_col) then
+            call s_ib_refresh_prim()
+            call s_ibm_advance_wall_columns(q_cons_ts(1)%vf, q_prim_vf, q_T_sf, dt)
+        end if
 
         do s = 1, nstage
             call system_clock(stage_t0)
