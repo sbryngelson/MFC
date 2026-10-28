@@ -15,12 +15,13 @@ import math
 import cantera as ct
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--ny", type=int, default=16, help="cells across the gap H")
+parser.add_argument("--ny", type=int, default=32, help="cells across the gap H")
+parser.add_argument("--nx", type=int, default=25, help="cells along x (WENO5 needs at least 25 per direction)")
 parser.add_argument("--tw", type=float, default=330.0, help="wall temperature [K]")
 parser.add_argument("--t0", type=float, default=300.0, help="initial and target bulk gas temperature [K]")
 parser.add_argument("--mach", type=float, default=0.1, help="bulk Mach number")
 parser.add_argument("--re", type=float, default=150.0, help="Re_Dh = rho U_b 2H / mu")
-parser.add_argument("--tend", type=float, default=10.0, help="run time [H^2 / alpha]")
+parser.add_argument("--tend", type=float, default=0.5, help="run time [H^2 / alpha]; developed in about 0.1")
 parser.add_argument("--saves", type=int, default=10)
 args, _ = parser.parse_known_args()
 
@@ -31,16 +32,17 @@ a = math.sqrt(gas.cp_mass / gas.cv_mass * ct.one_atm / rho)
 U = args.mach * a
 H = args.re * mu / (2.0 * rho * U)
 dy = H / args.ny
+Lx = args.nx * dy
 dt = 0.4 * dy / (U + a)
 nt = args.saves * math.ceil(args.tend * H**2 * rho * gas.cp_mass / k / dt / args.saves)
 
 case = {
     "run_time_info": "F",
     "x_domain%beg": 0.0,
-    "x_domain%end": H,
+    "x_domain%end": Lx,
     "y_domain%beg": 0.0,
     "y_domain%end": H,
-    "m": args.ny - 1,
+    "m": args.nx - 1,
     "n": args.ny - 1,
     "p": 0,
     "dt": dt,
@@ -83,9 +85,9 @@ case = {
     "prim_vars_wrt": "T",
     "parallel_io": "F",
     "patch_icpp(1)%geometry": 3,
-    "patch_icpp(1)%x_centroid": 0.5 * H,
+    "patch_icpp(1)%x_centroid": 0.5 * Lx,
     "patch_icpp(1)%y_centroid": 0.5 * H,
-    "patch_icpp(1)%length_x": H,
+    "patch_icpp(1)%length_x": Lx,
     "patch_icpp(1)%length_y": H,
     "patch_icpp(1)%vel(1)": U,
     "patch_icpp(1)%vel(2)": 0.0,
