@@ -393,6 +393,7 @@ CONSTRAINTS = {
     "ib_ip_interp": {"min": 1, "max": 2},
     "ib_wall_order": {"min": 1, "max": 2},
     "ib_mass_relax": {"min": -1},
+    "face_bound": {"choices": [-1, 0, 1]},
     "ib_ip_min_dist": {"min": 0},
     "num_source": {"min": 1},
     "num_probes": {"min": 1},
@@ -837,6 +838,7 @@ def _load():
     ]:
         _r(n, LOG)
     _r("int_comp", INT)
+    _r("face_bound", INT)
     _r("case_dir", STR, str_len="path_len")
     _r("file_extension", STR, str_len="path_len")
     _r("files_dir", STR, str_len="path_len")
@@ -1433,6 +1435,7 @@ _nv(
     "null_weights",
     "muscl_eps",
     "int_comp",
+    "face_bound",
     "ic_eps",
     "ic_beta",
     "riemann_hypo_ADC",

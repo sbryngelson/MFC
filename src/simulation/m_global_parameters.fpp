@@ -409,6 +409,7 @@ contains
         palpha_eps = dflt_real
         ptgalpha_eps = dflt_real
         int_comp = 0
+        face_bound = -1
         ic_eps = dflt_ic_eps
         ic_beta = dflt_ic_beta
         rdma_mpi = .false.
@@ -992,6 +993,8 @@ contains
         $:GPU_UPDATE(device='[ib_keep_ghost]')
         ib_wall_quad = ib .and. ib_wall_order == 2
         $:GPU_UPDATE(device='[ib_wall_quad]')
+        ! face_bound = -1 (default): on for single-fluid runs; multi-fluid interfaces keep their established behaviour
+        if (face_bound < 0) face_bound = merge(1, 0, num_fluids == 1)
 
         ! Configuring Coordinate Direction Indexes
         if (bubbles_euler) then

@@ -577,6 +577,7 @@ See @ref equations "Equations" for the mathematical models these parameters cont
 | `muscl_lim`                | Integer | MUSCL Slope Limiter: [1] minmod; [2] monotonized central; [3] Van Albada; [4] Van Leer; [5] SUPERBEE |
 | `muscl_eps`                | Real    | MUSCL limiter slope-product threshold (default: hard-coded thresholds; set to 0 for textbook behavior) |
 | `int_comp`                 | Integer | Interface Compression [0] Off [1] THINC [2] MTHINC (default 0) |
+| `face_bound`               | Integer | Positivity bound on reconstructed face states, `model_eqns = 2` only: 1 on, 0 off, -1 (default) on for single-fluid runs |
 | `flux_lim`                 | Integer | Flux limiter for post-process: [1] minmod; [2] MUSCL; [3] OSPRE; [4] SUPERBEE |
 | `ic_eps`                   | Real    | Interface compression threshold (default: 1e-4) |
 | `ic_beta`                  | Real    | Interface compression sharpness parameter (default: 1.6) |
@@ -682,6 +683,8 @@ When not set (default), the threshold is 1e-9 for minmod/MC, and 1e-6 for others
 Setting `muscl_eps = 0` gives textbook limiter behavior where limiters activate whenever both slopes have the same sign.
 
 - `int_comp` activates interface compression using [1] THINC or [2] MTHINC (default off) used in variable reconstruction, with control parameters (`ic_eps`, and `ic_beta`).
+
+- `face_bound = 1` (`model_eqns = 2`) scales each cell's reconstructed face states toward the cell state just enough that the face mixture density and \f$p + p_\infty\f$ stay positive (Zhang and Shu, 2010), with \f$p_\infty\f$ of the stiffest fluid (zero for ideal gases); pressure is not bounded under a state-dependent EOS. With chemistry it also keeps the face mixture gas constant positive and the face temperature at or below `T_surface_max`. It acts only where a face state would leave these bounds, as next to near-vacuum cells in supersonic expansions or behind a moving body, and leaves the solution unchanged elsewhere. The default `-1` turns it on for single-fluid runs (chemistry included) and off for multi-fluid runs, where WENO undershoots of a vanishing partial density at a material interface would activate it and change established interface results; `0` turns it off and `1` on.
 
 - `riemann_solver` specifies the choice of the Riemann solver that is used in simulation by an integer from 1 through 4.
 `riemann_solver = 1`, `2`, and `3` correspond to HLL, HLLC, and Exact Riemann solver, respectively (\cite Toro09).

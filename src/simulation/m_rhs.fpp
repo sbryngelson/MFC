@@ -1049,10 +1049,8 @@ contains
         end if
 
         ! Species onto the simplex first; the convex rho/p/T scaling then keeps them there
-        if (chemistry) then
-            call s_bound_species_faces(q_prim_qp%vf, qL_rsx_vf, qR_rsx_vf, id)
-            call s_bound_face_states(id)
-        end if
+        if (chemistry) call s_bound_species_faces(q_prim_qp%vf, qL_rsx_vf, qR_rsx_vf, id)
+        if (face_bound == 1 .and. model_eqns == 2) call s_bound_face_states(id)
 
         ! Reconstruct viscous derivatives for viscosity
         if (weno_Re_flux) then
@@ -1079,16 +1077,17 @@ contains
 
     end subroutine s_reconstruct_riemann_states
 
-    !> Scales each cell's chemistry face states toward its cell state by one theta (Zhang & Shu, JCP 2010) so that face rho and p
-    !! stay positive and face T <= T_surface_max, past which cp can go negative and the sound speed NaN. WENO overshoots there at
-    !! sharp IB corners, whose hot ghost layers mirror different faces (#1964).
+    !> Scales each cell's face states toward its cell state by one theta (Zhang & Shu, JCP 2010) so that face rho and p + p_inf stay
+    !! positive, and with chemistry face T <= T_surface_max, past which cp can go negative and the sound speed NaN. WENO overshoots
+    !! next to near-vacuum cells (supersonic expansions, cells a moving body uncovers) and at sharp IB corners, whose hot ghost
+    !! layers mirror different faces (#1964). Inactive where no face state leaves those bounds.
     subroutine s_bound_face_states(id)
 
         integer, intent(in)                  :: id
         type(int_bounds_info), dimension(3)  :: b
         real(wp), dimension(${NUM_SPECIES}$) :: Ys
         real(wp), dimension(3)               :: vb, vL, vR  !< (rho, p, R_mix) of the cell and its two faces
-        real(wp)                             :: theta
+        real(wp)                             :: theta, pinf
         integer                              :: i, j, k, l, polyn
 
         ! Same range as s_reconstruct_cell_boundary_values
@@ -1096,27 +1095,38 @@ contains
         polyn = merge(weno_polyn, muscl_polyn, recon_type == recon_type_weno)
         b = idwbuff
         b(id)%beg = b(id)%beg + polyn; b(id)%end = b(id)%end - polyn
+        ! Bound p + p_inf with the stiffest fluid's p_inf (zero for ideal gases), so liquid tension is untouched; p is left alone
+        ! under a state-dependent EOS
+        pinf = maxval(pi_infs(1:num_fluids)/(gammas(1:num_fluids) + 1._wp))
 
-        $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, Ys, vb, vL, vR, theta]', copyin='[b]')
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, Ys, vb, vL, vR, theta]', copyin='[b, pinf]')
         do l = b(3)%beg, b(3)%end
             do k = b(2)%beg, b(2)%end
                 do j = b(1)%beg, b(1)%end
                     #:for V, Q in [('vb', 'q_prim_qp%vf({})%sf(j, k, l)'), ('vL', 'qL_rsx_vf(j, k, l, {})'), ('vR', &
                                     & 'qR_rsx_vf(j, k, l, {})')]
+                        ${V}$(1) = 0._wp
                         $:GPU_LOOP(parallelism='[seq]')
-                        do i = 1, num_species
-                            Ys(i) = ${Q.format('eqn_idx%species%beg + i - 1')}$
+                        do i = eqn_idx%cont%beg, eqn_idx%cont%end
+                            ${V}$(1) = ${V}$(1) + ${Q.format('i')}$
                         end do
-                        call get_specific_gas_constant(Ys, ${V}$(3))
-                        ${V}$(1) = ${Q.format('eqn_idx%cont%beg')}$; ${V}$(2) = ${Q.format('eqn_idx%E')}$
+                        ${V}$(2) = ${Q.format('eqn_idx%E')}$
+                        if (chemistry) then
+                            $:GPU_LOOP(parallelism='[seq]')
+                            do i = 1, num_species
+                                Ys(i) = ${Q.format('eqn_idx%species%beg + i - 1')}$
+                            end do
+                            call get_specific_gas_constant(Ys, ${V}$(3))
+                        end if
                     #:endfor
                     ! rho, p and R_mix are linear in theta, so positivity is closed form and T <= T_max quadratic
-                    theta = 1._wp
-                    $:GPU_LOOP(parallelism='[seq]')
-                    do i = 1, 3
-                        theta = min(theta, f_theta_floor(vb(i), vL(i)), f_theta_floor(vb(i), vR(i)))
-                    end do
-                    theta = min(f_theta_T(theta, vb, vL), f_theta_T(theta, vb, vR))
+                    theta = min(1._wp, f_theta_floor(vb(1), vL(1)), f_theta_floor(vb(1), vR(1)))
+                    if (.not. any_state_dependent_eos) theta = min(theta, f_theta_floor(vb(2) + pinf, vL(2) + pinf), &
+                        & f_theta_floor(vb(2) + pinf, vR(2) + pinf))
+                    if (chemistry) then
+                        theta = min(theta, f_theta_floor(vb(3), vL(3)), f_theta_floor(vb(3), vR(3)))
+                        theta = min(f_theta_T(theta, vb, vL), f_theta_T(theta, vb, vR))
+                    end if
                     if (theta < 1._wp) then
                         $:GPU_LOOP(parallelism='[seq]')
                         do i = 1, sys_size
