@@ -542,6 +542,7 @@ contains
         ib_force_stride = 1
         many_ib_patch_parallelism = .false.
         ib_ip_min_dist = 0._wp
+        wall_column_dt_frac = 0.1_wp
         ib_slip_ccst = .true.
         ib_cutvol = .false.
         ib_flux_wall = .false.

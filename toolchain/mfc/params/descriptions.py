@@ -149,6 +149,7 @@ DESCRIPTIONS = {
     "ib_wall_order": "Immersed-boundary wall treatment: 1 one-probe mirror ghost fill and one-sided wall gradient (default), 2 two-probe quadratic wall-normal fill and wall gradient with TSC probes",
     "ib_flux_wall": "Fixed reacting immersed boundaries: fluid|body face mass, species and energy fluxes from the surface solve's rates (exact gas budget)",
     "ib_cutvol": "Moving immersed boundaries: conservation-only fluid fractions of the cells next to a moving wall (the wall's displacement is conserved), prescribed translation only",
+    "wall_column_dt_frac": "Wall columns: largest fraction of a near-wall cell's heat span a step's column drain may take, as a time-step limit (default 0.1)",
     "ib_ip_min_dist": "Minimum wall-to-image-point distance in cell widths; 0 (default) puts the image point at twice the ghost point's wall distance",
     "many_ib_patch_parallelism": "Parallelize over IB patches instead of grid cells (better for many small patches)",
     "ib_slip_ccst": "Slip walls: curvature-corrected symmetry technique (isentropic ghost density, total-enthalpy tangential speed); default T",

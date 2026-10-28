@@ -35,7 +35,8 @@ module m_ibm
     ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, s_report_ibm_surface, &
         & s_write_ib_surface, s_update_ib_temperatures, s_conserve_ib_mass, s_accumulate_ib_face_fluxes, &
         & s_ibm_set_conduction_temperature, s_ibm_restore_conduction_temperature, s_add_swept_cells, s_cutvol_advance, &
-        & s_cutvol_add_force, s_cutvol_couple, s_ib_flux_wall_prepare, s_report_ib_contact, s_ibm_advance_wall_columns
+        & s_cutvol_add_force, s_cutvol_couple, s_ib_flux_wall_prepare, s_report_ib_contact, s_ibm_advance_wall_columns, &
+        & f_wall_column_dt
 
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
@@ -3882,6 +3883,70 @@ contains
         call s_wall_column_tcond(q_cons_vf, q_prim_vf, q_T_sf)
 
     end subroutine s_ibm_advance_wall_columns
+
+    !> Wall-column time-step limit: a step's column drain takes at most wall_column_dt_frac of a near-wall gas cell's heat span, rho
+    !! c_v V |T_top - T_w| (rho, c_v at the cell's state). At a step start the column's flux is the true singular one, about 10x the
+    !! mirror's, and at the acoustic step it removed 40 % of a cell's heat per wall face in one stage: the collapsing pressure sent
+    !! an impulsively started flow non-finite. From the last step's flux; before the first, from the semi-infinite start, q dt = 2
+    !! lambda dT sqrt(dt/(pi alpha_w)). Idle in steady state, where the drain per step is a small part of the span.
+    impure function f_wall_column_dt(q_prim_vf, q_T_sf) result(dt_lim)
+
+        type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
+        type(scalar_field), intent(in)                      :: q_T_sf
+        real(wp)                                            :: dt_lim
+        real(wp), dimension(${NUM_SPECIES}$)                :: Ys
+        integer, dimension(3)                               :: nb
+        real(wp)                                            :: Tw, Tf, pf, mw, cp_f, cp_w, lam_f, lam_w, rcv, sw, span, vol, lim
+        integer                                             :: i, f, q, dir
+        real(wp)                                            :: frac
+        logical                                             :: ready
+        type(ghost_point)                                   :: gp
+
+        dt_lim = huge(1._wp)
+        if (num_gps == 0) return
+        ready = wc_ready
+        frac = wall_column_dt_frac
+        $:GPU_PARALLEL_LOOP(private='[i, f, q, dir, nb, Ys, Tw, Tf, pf, mw, cp_f, cp_w, lam_f, lam_w, rcv, sw, span, vol, lim, &
+                            & gp]', copyin='[ready, frac]', reduction='[[dt_lim]]', reductionOp='[min]', present='[ghost_points]')
+        do i = 1, num_gps
+            if (wc_on(i) < 0 .or. (ready .and. wc_on(i) /= 1)) cycle
+            gp = ghost_points(i)
+            ! the column's total face weight, and the gas cell of its last gas face
+            sw = 0._wp
+            nb = gp%loc
+            do f = 1, 2*num_dims
+                if (wc_g(f, i) <= 0._wp) cycle
+                sw = sw + wc_w(f, i)
+                dir = (f + 1)/2
+                nb = gp%loc
+                nb(dir) = nb(dir) + 2*mod(f + 1, 2) - 1
+            end do
+            Tf = q_T_sf%sf(nb(1), nb(2), nb(3))
+            pf = q_prim_vf(eqn_idx%E)%sf(nb(1), nb(2), nb(3))
+            do q = 1, num_species
+                Ys(q) = q_prim_vf(eqn_idx%species%beg + q - 1)%sf(nb(1), nb(2), nb(3))
+            end do
+            call get_mixture_molecular_weight(Ys, mw)
+            call get_mixture_specific_heat_cp_mass(Tf, Ys, cp_f)
+            Tw = patch_ib(gp%ib_patch_id)%Twall
+            vol = dx(nb(1))*dy(nb(2))
+            if (p > 0) vol = vol*dz(nb(3))
+            rcv = pf*mw/(gas_constant*Tf)*(cp_f - gas_constant/mw)*vol
+            if (ready) then
+                span = abs(wc_T(wc_n, i) - Tw)
+                lim = frac*rcv*span/max(abs(wc_q(i))*sw, tiny(1._wp))
+            else
+                ! q dt = 2 lambda_bar dT sqrt(dt/(pi alpha_w)) <= frac rcv dT / sw, alpha_w = lambda_w R T_w/(p W c_p,w)
+                call get_mixture_thermal_conductivity_mixavg(Tf, Ys, lam_f)
+                call get_mixture_thermal_conductivity_mixavg(Tw, Ys, lam_w)
+                call get_mixture_specific_heat_cp_mass(Tw, Ys, cp_w)
+                lim = (frac*rcv*sqrt(pi*lam_w*gas_constant*Tw/(pf*mw*cp_w))/((lam_f + lam_w)*max(sw, tiny(1._wp))))**2
+            end if
+            dt_lim = min(dt_lim, lim)
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end function f_wall_column_dt
 
     !> Conduction temperature of each active column ghost that makes its gas faces carry the column's wall flux, less a one-sided
     !! guard: sum_f G_f (T_f - T_cond) = sum_f (q w_f - cut_f), G_f = lambda_f area/h with the face conductivity the diffusion flux

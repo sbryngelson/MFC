@@ -3811,8 +3811,25 @@ def list_cases() -> typing.List[TestCaseBuilder]:
             "t_step_save": 20,
         }
         cases.append(define_case_d(stack, "IBM Hot Cylinder", hot_cyl, override_tol=10 ** (-6)))
-        # The same wall with its sub-grid conduction columns (patch_ib%wall_column) and their heat booking
-        cases.append(define_case_d(stack, "IBM Hot Cylinder -> Wall Column", {**hot_cyl, "patch_ib(1)%wall_column": "T", "ib_heat_wrt": "T"}, override_tol=10 ** (-6)))
+        # The same wall with its sub-grid conduction columns (patch_ib%wall_column) and their heat booking; the columns'
+        # time-step limit needs an adaptive step
+        cases.append(
+            define_case_d(
+                stack,
+                "IBM Hot Cylinder -> Wall Column",
+                {
+                    **hot_cyl,
+                    "patch_ib(1)%wall_column": "T",
+                    "ib_heat_wrt": "T",
+                    "cfl_adap_dt": "T",
+                    "cfl_target": 0.02,
+                    "n_start": 0,
+                    "t_save": 8.0e-7,
+                    "t_stop": 8.0e-7,
+                },
+                override_tol=10 ** (-6),
+            )
+        )
         stack.pop()
 
         # Mach 1.5 air onto a hot (1800 K) isothermal IB rectangle. Its corner ghost layers mirror different faces, and WENO

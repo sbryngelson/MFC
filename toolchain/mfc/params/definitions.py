@@ -395,6 +395,7 @@ CONSTRAINTS = {
     "ib_mass_relax": {"min": -1},
     "face_bound": {"choices": [-1, 0, 1]},
     "ib_ip_min_dist": {"min": 0},
+    "wall_column_dt_frac": {"min": 0},
     "num_source": {"min": 1},
     "num_probes": {"min": 1},
     "nb": {"min": 1},
@@ -697,6 +698,7 @@ def _load():
     _r("ib_wall_order", INT, {"ib"})
     _r("ib_mass_relax", INT, {"ib"})
     _r("ib_ip_min_dist", REAL, {"ib"})
+    _r("wall_column_dt_frac", REAL, {"ib"})
     _r("ib_cutvol", LOG, {"ib"})
     _r("ib_flux_wall", LOG, {"ib"})
     _r("ib", LOG, {"ib"})
@@ -1502,6 +1504,7 @@ _nv(
     "ib_wall_order",
     "ib_mass_relax",
     "ib_ip_min_dist",
+    "wall_column_dt_frac",
     "ib_cutvol",
     "ib_flux_wall",
     "many_ib_patch_parallelism",

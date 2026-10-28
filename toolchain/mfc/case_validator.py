@@ -896,6 +896,13 @@ class CaseValidator:
             self.prohibit(moving, f"{pre} requires every immersed boundary to be fixed (moving_ibm = 0)")
             self.prohibit(self.get("chem_params%diffusion", "F") != "T", f"{pre} requires chem_params%diffusion = T")
             self.prohibit(self.get("chem_params%transport_model", 1) != 1, f"{pre} requires chem_params%transport_model = 1")
+            # a step start's column flux sets the time step (wall_column_dt_frac), so the step must adapt
+            self.prohibit(
+                self.get("cfl_adap_dt", "F") != "T" and self.get("cfl_const_dt", "F") != "T",
+                f"{pre} requires cfl_adap_dt or cfl_const_dt (the wall-column time-step limit)",
+            )
+            frac = self.get("wall_column_dt_frac", 0.1)
+            self.prohibit(not 0 < frac <= 1, "wall_column_dt_frac must be in (0, 1]")
 
         p = self.get("p", 0)
         for i in range(1, (num_ibs or 0) + 1):

@@ -730,8 +730,10 @@ class TestImmersedBoundarySurfaceChemistry(ConstraintTestCase):
         self.assertAccepts({**body, "patch_ib(1)%emissivity": 0.9, "patch_ib(1)%T_rad": 300.0, "patch_ib(1)%heat_power": 5.0})
 
     def test_a_wall_column_needs_a_fixed_inert_isothermal_circle_or_sphere(self):
-        col = {**self.case(thermal_bc=1, Twall=300.0, wall_column="T", wall_column_len=1.0e-3), "chemistry": "T", "chem_params%diffusion": "T"}
+        col = {**self.case(thermal_bc=1, Twall=300.0, wall_column="T", wall_column_len=1.0e-3), "chemistry": "T", "chem_params%diffusion": "T", "cfl_adap_dt": "T"}
         self.assertAccepts(col)
+        self.assertRejects({**col, "cfl_adap_dt": "F"}, "requires cfl_adap_dt or cfl_const_dt")
+        self.assertRejects({**col, "wall_column_dt_frac": 0.0}, "wall_column_dt_frac must be in (0, 1]")
         self.assertRejects({**col, "patch_ib(1)%thermal_bc": 3, "patch_ib(1)%rho_solid": 1.0, "patch_ib(1)%cp_solid": 1.0}, "wall_column requires thermal_bc = 1")
         self.assertRejects({**col, "patch_ib(1)%surface_reaction": 1, "surface_cantera_file": "s.yaml", "surface_phase": "surf"}, "requires surface_reaction = 0")
         self.assertRejects({**col, "patch_ib(1)%moving_ibm": 2}, "requires every immersed boundary to be fixed")
