@@ -22,7 +22,7 @@ module m_amr_restart
     use m_amr, only: s_amr_reduce_xchg_flag, amr_slots, amr_cons_st, amr_loc_of, amr_seam_pairs_dirty, amr_mesh_epoch, &
         & s_amr_alloc_slot, s_amr_reconcile_slots, s_amr_assign_block_owners, s_set_amr_fine_geometry
     use m_amr_regrid, only: s_amr_check_seam_topology
-    use m_amr_distribution, only: f_amr_static_cut
+    use m_amr_distribution, only: f_amr_static_cut, s_amr_adopt_block_owners
 
     implicit none
 
@@ -223,11 +223,16 @@ contains
 
     !> Install the restored block set: rebuild whole-block owners from the regions, allocate this run's owned slots (freeing any
     !! stale init slots), then each block's geometry under the correct owner.
-    impure subroutine s_amr_restart_install_blocks()
+    impure subroutine s_amr_restart_install_blocks(own)
 
-        integer :: k
+        integer, intent(in), optional :: own(:)  !< recorded owner per block, when it is valid for this run
+        integer                       :: k
 
-        call s_amr_assign_block_owners()
+        if (present(own)) then
+            call s_amr_adopt_block_owners(own)
+        else
+            call s_amr_assign_block_owners()
+        end if
         call s_amr_reconcile_slots()
         do k = l0_slot_off + 1, amr_num_blocks  ! fine blocks only: an L0 tile is not refined, and s_l0_tiles_init built it
             amr_cur = k
@@ -328,7 +333,12 @@ contains
         do k = 1, amr_num_blocks
             call s_amr_restart_check_record(k, cat%reg(:,k), cat%lvl(k))
         end do
-        call s_amr_restart_install_blocks()
+        ! at the writer's rank count, keep the recorded owners (every fine block must carry one)
+        if (abs(ghdr(1)) == num_procs .and. .not. f_amr_static_cut() .and. all(cat%own(1,l0_slot_off + 1:amr_num_blocks) > 0)) then
+            call s_amr_restart_install_blocks(cat%own(1,1:amr_num_blocks) - 1)
+        else
+            call s_amr_restart_install_blocks()
+        end if
         do k = 1, amr_num_blocks
             cnt = 0
             if (amr_owns_all(k)) then

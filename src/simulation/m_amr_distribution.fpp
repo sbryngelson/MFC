@@ -29,10 +29,11 @@ module m_amr_distribution
     implicit none
 
     private
-    public :: f_amr_m1_seq, f_amr_m1_tag, f_amr_static_cut, f_amr_overlap_count, f_amr_rank_overlaps, s_amr_assign_block_owners, &
-        & s_amr_body_bbox, s_amr_box_isect, s_amr_compute_isect, s_amr_expand_box_over_bodies, s_amr_m1_wave_open, &
-        & s_amr_rank_coarse_range, s_amr_rank_decomp, s_amr_rank_interior, s_amr_ranks_overlapping, s_amr_refresh_lists, &
-        & s_amr_refresh_my_blocks, s_amr_sfc_cut, s_amr_sort_by_key, s_amr_tile_box, s_amr_validate_decomp, s_amr_validate_owner
+    public :: f_amr_m1_seq, f_amr_m1_tag, f_amr_static_cut, f_amr_overlap_count, f_amr_rank_overlaps, s_amr_adopt_block_owners, &
+        & s_amr_assign_block_owners, s_amr_body_bbox, s_amr_box_isect, s_amr_compute_isect, s_amr_expand_box_over_bodies, &
+        & s_amr_m1_wave_open, s_amr_rank_coarse_range, s_amr_rank_decomp, s_amr_rank_interior, s_amr_ranks_overlapping, &
+        & s_amr_refresh_lists, s_amr_refresh_my_blocks, s_amr_sfc_cut, s_amr_sort_by_key, s_amr_tile_box, s_amr_validate_decomp, &
+        & s_amr_validate_owner
 
 contains
 
@@ -570,6 +571,34 @@ contains
         deallocate (aidx, aown, key, akey, wt, cost, awt)
 
     end subroutine s_amr_assign_block_owners
+
+    !> Install a recorded owner table instead of recomputing it (restart at the writer's rank count). The cost weights read live
+    !! state (body markers) that differs between the regrid before the write and the restart, so recomputing can move a cut and
+    !! disagree with the file. The table came from per-level SFC cuts, so each level's cut is the running max Morton key of each
+    !! rank's blocks; s_amr_validate_owner rejects a table that is not contiguous in that order.
+    impure subroutine s_amr_adopt_block_owners(own)
+
+        integer, intent(in) :: own(:)
+        integer             :: k, r, lev, maxlev
+        integer(kind=8)     :: key
+
+        maxlev = maxval(amr_block_level(l0_slot_off + 1:amr_num_blocks))
+        do lev = 1, maxlev
+            amr_fine_cut(:,lev) = -1_8
+            do k = l0_slot_off + 1, amr_num_blocks
+                if (amr_block_level(k) /= lev) cycle
+                key = f_morton(amr_region_lo_all(1, k), amr_region_lo_all(2, k), amr_region_lo_all(3, k))
+                amr_fine_cut(own(k), lev) = max(amr_fine_cut(own(k), lev), key)
+                amr_block_owner(k) = own(k); amr_myblk_dirty = .true.
+            end do
+            do r = 1, num_procs - 1
+                if (amr_fine_cut(r, lev) < amr_fine_cut(r - 1, lev)) amr_fine_cut(r, lev) = amr_fine_cut(r - 1, lev)
+            end do
+            if (lev == 1 .and. l0_slot_off == 0) amr_owner_cut = amr_fine_cut(:,1)
+        end do
+        call s_amr_validate_owner()
+
+    end subroutine s_amr_adopt_block_owners
 
     !> Per-level and total load-balance report: max/mean assigned block weight over ranks (1 = perfect, num_procs = one rank holds
     !! everything). Replicated inputs, so every rank computes it and rank 0 prints. no_blocks_ranks is the granularity floor (a
