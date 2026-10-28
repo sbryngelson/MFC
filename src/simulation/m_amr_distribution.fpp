@@ -29,10 +29,10 @@ module m_amr_distribution
     implicit none
 
     private
-    public :: f_amr_m1_seq, f_amr_m1_tag, f_amr_overlap_count, f_amr_rank_overlaps, s_amr_assign_block_owners, s_amr_body_bbox, &
-        & s_amr_box_isect, s_amr_compute_isect, s_amr_expand_box_over_bodies, s_amr_m1_wave_open, s_amr_rank_coarse_range, &
-        & s_amr_rank_decomp, s_amr_rank_interior, s_amr_ranks_overlapping, s_amr_refresh_lists, s_amr_refresh_my_blocks, &
-        & s_amr_sfc_cut, s_amr_sort_by_key, s_amr_tile_box, s_amr_validate_decomp, s_amr_validate_owner
+    public :: f_amr_m1_seq, f_amr_m1_tag, f_amr_static_cut, f_amr_overlap_count, f_amr_rank_overlaps, s_amr_assign_block_owners, &
+        & s_amr_body_bbox, s_amr_box_isect, s_amr_compute_isect, s_amr_expand_box_over_bodies, s_amr_m1_wave_open, &
+        & s_amr_rank_coarse_range, s_amr_rank_decomp, s_amr_rank_interior, s_amr_ranks_overlapping, s_amr_refresh_lists, &
+        & s_amr_refresh_my_blocks, s_amr_sfc_cut, s_amr_sort_by_key, s_amr_tile_box, s_amr_validate_decomp, s_amr_validate_owner
 
 contains
 
@@ -480,6 +480,40 @@ contains
 
     end function f_amr_m1_tag
 
+    !> Debug: MFC_AMR_STATIC_CUT=1 replaces the cost-weighted cut by an even split of the L0 Morton key range, so each rank keeps a
+    !! fixed region whatever refines there. Only for measuring what the cost-weighted cut buys.
+    impure logical function f_amr_static_cut() result(on)
+
+        character(len=8) :: v
+        integer          :: st
+
+        call get_environment_variable("MFC_AMR_STATIC_CUT", v, status=st)
+        on = (st == 0 .and. v(1:1) == "1")
+
+    end function f_amr_static_cut
+
+    subroutine s_amr_static_cut(keys, n, cut, owner)
+
+        integer, intent(in)          :: n
+        integer(kind=8), intent(in)  :: keys(n)
+        integer(kind=8), intent(out) :: cut(0:num_procs - 1)
+        integer, intent(out)         :: owner(n)
+        integer(kind=8)              :: kmax
+        integer                      :: k, r
+
+        kmax = max(f_morton(m_glb, n_glb, p_glb), maxval(keys))
+        do r = 0, num_procs - 1
+            cut(r) = (kmax + 1_8)/num_procs*(r + 1) - 1_8
+        end do
+        cut(num_procs - 1) = kmax
+        do k = 1, n
+            r = 0
+            do while (keys(k) > cut(r)); r = r + 1; end do
+            owner(k) = r
+        end do
+
+    end subroutine s_amr_static_cut
+
     impure subroutine s_amr_assign_block_owners()
 
         integer :: k, a, lev, maxlev, na
@@ -523,6 +557,7 @@ contains
             end do
             if (na < 1) cycle
             call s_amr_sfc_cut(akey, awt, na, amr_fine_cut(:,lev), aown)
+            if (f_amr_static_cut()) call s_amr_static_cut(akey, na, amr_fine_cut(:,lev), aown)
             do a = 1, na
                 amr_block_owner(aidx(a)) = aown(a); amr_myblk_dirty = .true.
             end do
