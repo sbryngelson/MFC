@@ -39,6 +39,7 @@ SIM_GPU_DECL_VARS = {
     "R0ref",
     "ib_ip_min_dist",
     "ib_cutvol",
+    "ib_flux_wall",
     "ib_slip_ccst",
     "Re_inv",
     "Web",

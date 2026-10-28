@@ -4114,6 +4114,14 @@ def list_cases() -> typing.List[TestCaseBuilder]:
             },
         )
     )
+    # ib_flux_wall on the same example and mechanism: the wall faces carry the surface solve's species, mass and energy fluxes.
+    cases.append(
+        define_case_f(
+            "2D -> Chemistry -> IBM Reacting Surface -> Flux Wall",
+            "examples/2D_ibm_reacting_surface/case.py",
+            mods={"m": 24, "n": 24, "parallel_io": "F", "t_stop": 2.0e-5, "t_save": 2.0e-5, "ib_flux_wall": "T", "ib_heat_wrt": "T"},
+        )
+    )
     # The initial conductive layer around the lumped body: it starts at its initial Twall like a prescribed wall.
     cases.append(
         define_case_f(

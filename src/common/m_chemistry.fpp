@@ -351,7 +351,8 @@ contains
     end function f_qss_alpha
 
     !> Compute species mass diffusion fluxes at cell interfaces using mixture-averaged diffusivities.
-    subroutine s_compute_chemistry_diffusion_flux(idir, q_prim_qp, flux_src_vf, irx, iry, irz, q_T_sf, ib_marks, use_marks)
+    subroutine s_compute_chemistry_diffusion_flux(idir, q_prim_qp, flux_src_vf, irx, iry, irz, q_T_sf, ib_marks, use_marks, &
+        & wall_a, use_wall)
 
         type(scalar_field), dimension(sys_size), intent(in)    :: q_prim_qp
         type(scalar_field), dimension(sys_size), intent(inout) :: flux_src_vf
@@ -359,8 +360,12 @@ contains
         integer, intent(in)                                    :: idir
         type(scalar_field), intent(in)                         :: q_T_sf
         !> Immersed-body cells (use_marks): q_T_sf holds their conduction temperature, the properties use their own state
-        type(integer_field), intent(in)      :: ib_marks
-        logical, intent(in)                  :: use_marks
+        type(integer_field), intent(in) :: ib_marks
+        logical, intent(in)             :: use_marks
+        !> Reacting-wall area share of each body cell (use_wall, ib_flux_wall): those faces carry the surface rates in the Riemann
+        !! flux, so diffusion keeps only conduction there
+        type(scalar_field), intent(in)       :: wall_a
+        logical, intent(in)                  :: use_wall
         real(wp), dimension(${NUM_SPECIES}$) :: Xs_L, Xs_R, Xs_cell, Ys_L, Ys_R, Ys_cell
         real(wp), dimension(${NUM_SPECIES}$) :: mass_diffusivities_mixavg1, mass_diffusivities_mixavg2
         real(wp), dimension(${NUM_SPECIES}$) :: mass_diffusivities_mixavg_Cell, dXk_dxi, h_l, h_r, h_k
@@ -509,6 +514,11 @@ contains
                                                 & - rho_Vic*Ys_cell(eqn - eqn_idx%species%beg + 1)
                             end do
 
+                            if (f_flux_wall_face(x, y, z, offsets, ib_marks, wall_a, use_wall)) then
+                                Mass_Diffu_Flux = 0._wp
+                                Mass_Diffu_Energy = 0._wp
+                            end if
+
                             ! Add thermal conduction contribution
                             Mass_Diffu_Energy = lambda_Cell*dT_dxi + Mass_Diffu_Energy
 
@@ -606,6 +616,10 @@ contains
                                                 & - eqn_idx%species%beg + 1)
                             end do
                             Mass_Diffu_Energy = rho_cell*diffusivity_cell*dh_dxi
+                            if (f_flux_wall_face(x, y, z, offsets, ib_marks, wall_a, use_wall)) then
+                                Mass_Diffu_Flux = 0._wp
+                                Mass_Diffu_Energy = lambda_Cell*(T_R - T_L)/grid_spacing
+                            end if
 
                             ! Update flux arrays
                             flux_src_vf(eqn_idx%E)%sf(x, y, z) = flux_src_vf(eqn_idx%E)%sf(x, y, z) - Mass_Diffu_Energy
@@ -623,6 +637,30 @@ contains
         end if
 
     end subroutine s_compute_chemistry_diffusion_flux
+
+    !> Whether the face between cell (x, y, z) and its neighbour at + offsets is a reacting-wall face (ib_flux_wall): one side is an
+    !! immersed-body cell with a wall area share
+    function f_flux_wall_face(x, y, z, offsets, ib_marks, wall_a, use_wall) result(on)
+
+        $:GPU_ROUTINE(function_name='f_flux_wall_face', parallelism='[seq]', cray_inline=True)
+
+        integer, intent(in)               :: x, y, z
+        integer, dimension(3), intent(in) :: offsets
+        type(integer_field), intent(in)   :: ib_marks
+        type(scalar_field), intent(in)    :: wall_a
+        logical, intent(in)               :: use_wall
+        logical                           :: on
+
+        on = .false.
+        if (.not. use_wall) return
+        if (ib_marks%sf(x, y, z) /= 0) then
+            on = ib_marks%sf(x + offsets(1), y + offsets(2), z + offsets(3)) == 0 .and. wall_a%sf(x, y, z) > 0._wp
+        else
+            on = ib_marks%sf(x + offsets(1), y + offsets(2), z + offsets(3)) /= 0 .and. wall_a%sf(x + offsets(1), y + offsets(2), &
+                             & z + offsets(3)) > 0._wp
+        end if
+
+    end function f_flux_wall_face
 
     !> Temperature the diffusion properties of cell (x, y, z) are evaluated at: q_T_sf's value T, except in an immersed-body cell,
     !! where T is the conduction temperature (m_ibm) and the cell's own state temperature p W/(rho R) is used

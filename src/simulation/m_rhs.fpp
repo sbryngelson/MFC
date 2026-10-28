@@ -123,6 +123,7 @@ module m_rhs
 
     !> Stand-in for ib_markers in s_compute_chemistry_diffusion_flux when there is no immersed boundary (never read)
     type(integer_field)                       :: no_marks
+    type(scalar_field)                        :: no_wall  !< Stand-in for ib_wall_src(ibw_a) without ib_flux_wall (never read)
     real(wp), allocatable, dimension(:,:,:)   :: blkmod1, blkmod2, alpha1, alpha2, Kterm
     real(wp), allocatable, dimension(:,:,:,:) :: qL_rsx_vf, qR_rsx_vf
     real(wp), allocatable, dimension(:,:,:,:) :: dqL_rsx_vf, dqR_rsx_vf
@@ -152,6 +153,10 @@ contains
         if (chemistry .and. .not. ib) then
             @:ALLOCATE(no_marks%sf(0:0, 0:0, 0:0))
             @:ACC_SETUP_SFs(no_marks)
+        end if
+        if (chemistry .and. .not. ib_flux_wall) then
+            @:ALLOCATE(no_wall%sf(0:0, 0:0, 0:0))
+            @:ACC_SETUP_SFs(no_wall)
         end if
 
         @:ALLOCATE(q_cons_qp%vf(1:sys_size))
@@ -655,6 +660,7 @@ contains
             call s_convert_conservative_to_primitive_variables(q_cons_qp%vf, q_T_sf, q_prim_qp%vf, idwint)
             call nvtxEndRange
             if (ib .and. chemistry) call s_ibm_set_conduction_temperature(q_T_sf)
+            if (ib_flux_wall) call s_ib_flux_wall_prepare(q_cons_vf)
 
             call nvtxStartRange("RHS-COMMUNICATION")
             call s_populate_variables_buffers(bc_type, q_prim_qp%vf, pb_in, mv_in, q_T_sf)
@@ -736,12 +742,15 @@ contains
                     ! RHS for diffusion
                     if (chemistry .and. chem_params%diffusion) then
                         call nvtxStartRange("RHS-CHEM-DIFFUSION")
-                        if (ib) then
+                        if (ib_flux_wall) then
                             call s_compute_chemistry_diffusion_flux(id, q_prim_qp%vf, flux_src_n(id)%vf, irx, iry, irz, q_T_sf, &
-                                                                    & ib_markers, .true.)
+                                                                    & ib_markers, .true., ib_wall_src(ibw_a), .true.)
+                        else if (ib) then
+                            call s_compute_chemistry_diffusion_flux(id, q_prim_qp%vf, flux_src_n(id)%vf, irx, iry, irz, q_T_sf, &
+                                                                    & ib_markers, .true., no_wall, .false.)
                         else
                             call s_compute_chemistry_diffusion_flux(id, q_prim_qp%vf, flux_src_n(id)%vf, irx, iry, irz, q_T_sf, &
-                                                                    & no_marks, .false.)
+                                                                    & no_marks, .false., no_wall, .false.)
                         end if
                         call nvtxEndRange
                     end if
@@ -2264,6 +2273,9 @@ contains
 
         if (allocated(no_marks%sf)) then
             @:DEALLOCATE(no_marks%sf)
+        end if
+        if (associated(no_wall%sf)) then
+            @:DEALLOCATE(no_wall%sf)
         end if
 
         if (.not. igr) then

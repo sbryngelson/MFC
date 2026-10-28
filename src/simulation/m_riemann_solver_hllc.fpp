@@ -21,7 +21,7 @@ module m_riemann_solver_hllc
     use m_thermochem, only: gas_constant, get_mixture_molecular_weight, get_species_enthalpies_rt, molecular_weights
     use m_thermochem_state, only: get_mixture_caloric_state
     use m_riemann_state
-    use m_ibm, only: ib_markers, ib_wall_vel
+    use m_ibm, only: ib_markers, ib_wall_vel, ib_wall_src, ib_wall_theta, ibw_e, ibw_u, ibw_a
 
     implicit none
 
@@ -60,6 +60,9 @@ contains
         real(wp)                             :: pres_L, pres_R
         logical                              :: ib_cv  !< ib_cutvol: a face between a fluid cell and a moving body's cell
         real(wp)                             :: vb_x, vb_y, vb_z, fm_cv  !< that body's velocity; the face's mass flux
+        logical                              :: ib_fw  !< ib_flux_wall: a face between a fluid cell and a reacting body's cell
+        integer                              :: fw_o  !< its body cell's offset from the face's left cell (0 or 1)
+        real(wp)                             :: fw_a, fw_m  !< signed share of the wall rates the face takes; its mass flux
         real(wp)                             :: E_L, E_R
         real(wp)                             :: H_L, H_R
         real(wp), dimension(${NUM_SPECIES}$) :: Ys_L, Ys_R, Xs_L, Xs_R, Gamma_iL, Gamma_iR, Cp_iL, Cp_iR, R_species, h_iL, h_iR
@@ -864,7 +867,8 @@ contains
                             & 'Re_L', 'Re_R', 'alpha_L', 'alpha_R', 'alpha_rho_L', 'alpha_rho_R']
                         #:set _hllc_s5 = ['alpha_lim_L', 'alpha_lim_R', 's_L', 's_R', 's_S', 'vel_avg_rms', 'pcorr', 'Ys_L', &
                             & 'Ys_R', 'Xs_L', 'Xs_R', 'Gamma_iL', 'Gamma_iR', 'Cp_iL', 'Cp_iR']
-                        #:set _hllc_s6 = ['R_species', 'h_iL', 'h_iR', 'ib_cv', 'vb_x', 'vb_y', 'vb_z', 'fm_cv']
+                        #:set _hllc_s6 = ['R_species', 'h_iL', 'h_iR', 'ib_cv', 'vb_x', 'vb_y', 'vb_z', 'fm_cv', 'ib_fw', 'fw_o', &
+                            & 'fw_a', 'fw_m']
                         #:set _hllc_e1 = ['ptilde_L', 'ptilde_R', 'tau_e_L', 'tau_e_R', 'G_L', 'G_R', 'damage_L', 'damage_R', &
                             & 'solid_partial_density_L', 'solid_partial_density_R', &
                             & 'U_L', 'U_R', 'F_L', 'F_R', 'F_star_L', 'F_star_R', 'F_HLLC']
@@ -932,6 +936,22 @@ contains
                                                 vb_z = ib_wall_vel(3, ${SF(' + 1')}$)
                                             end if
                                             ib_cv = vb_x /= 0._wp .or. vb_y /= 0._wp .or. vb_z /= 0._wp
+                                        end if
+                                    end if
+                                    ! ib_flux_wall: at a face between fluid and a reacting body the mass, species and energy fluxes
+                                    ! are the body cell's surface rates (s_ibm_correct_state) times its area share and the fluid
+                                    ! cell's positivity factor, signed into the gas
+                                    ib_fw = .false.
+                                    if (ib_flux_wall) then
+                                        if ((ib_markers%sf(${SF('')}$) == 0) .neqv. (ib_markers%sf(${SF(' + 1')}$) == 0)) then
+                                            if (ib_markers%sf(${SF('')}$) /= 0) then
+                                                fw_o = 0
+                                                fw_a = ib_wall_src(ibw_a)%sf(${SF('')}$)*ib_wall_theta%sf(${SF(' + 1')}$)
+                                            else
+                                                fw_o = 1
+                                                fw_a = -ib_wall_src(ibw_a)%sf(${SF(' + 1')}$)*ib_wall_theta%sf(${SF('')}$)
+                                            end if
+                                            ib_fw = ib_wall_src(ibw_a)%sf(${SF(' + fw_o')}$) > 0._wp
                                         end if
                                     end if
                                     if (ib_cv) then
@@ -1432,6 +1452,30 @@ contains
                                                         & + xi_P*rho_R*Y_R*(vel_R(dir_idx(1)) + s_P*xi_R_m1)
                                             flux_src_rsx_vf(${SF('')}$, i) = 0.0_wp
                                         end do
+                                    end if
+
+                                    ! the wall's fluxes; the momentum the Riemann mass flux carried goes with the wall's
+                                    if (ib_fw) then
+                                        fm_cv = 0._wp
+                                        $:GPU_LOOP(parallelism='[seq]')
+                                        do i = eqn_idx%cont%beg, eqn_idx%cont%end
+                                            fm_cv = fm_cv + flux_rsx_vf(${SF('')}$, i)
+                                        end do
+                                        fw_m = 0._wp
+                                        $:GPU_LOOP(parallelism='[seq]')
+                                        do i = 1, num_species
+                                            flux_rsx_vf(${SF('')}$, &
+                                                        & eqn_idx%species%beg + i - 1) = fw_a*ib_wall_src(i)%sf(${SF(' + fw_o')}$)
+                                            fw_m = fw_m + flux_rsx_vf(${SF('')}$, eqn_idx%species%beg + i - 1)
+                                        end do
+                                        flux_rsx_vf(${SF('')}$, eqn_idx%cont%beg) = fw_m
+                                        $:GPU_LOOP(parallelism='[seq]')
+                                        do i = 1, num_dims
+                                            flux_rsx_vf(${SF('')}$, eqn_idx%cont%end + i) = flux_rsx_vf(${SF('')}$, &
+                                                        & eqn_idx%cont%end + i) + (fw_m - fm_cv)*ib_wall_src(ibw_u + i &
+                                                        & - 1)%sf(${SF(' + fw_o')}$)
+                                        end do
+                                        flux_rsx_vf(${SF('')}$, eqn_idx%E) = fw_a*ib_wall_src(ibw_e)%sf(${SF(' + fw_o')}$)
                                     end if
 
                                     if (ib_cv) then  ! body frame -> flux through a face moving with the body (lab variables)

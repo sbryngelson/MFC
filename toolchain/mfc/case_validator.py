@@ -852,6 +852,20 @@ class CaseValidator:
             )
             self.prohibit(ib_cutvol and self.get(f"patch_ib({i})%slip", "F") == "T", f"ib_cutvol: patch_ib({i}) must be no-slip")
             self.prohibit(ib_cutvol and self.get(f"patch_ib({i})%geometry", 0) not in (2, 8), f"ib_cutvol: patch_ib({i}) must be a circle or a sphere")
+        ib_flux_wall = self.get("ib_flux_wall", "F") == "T"
+        self.prohibit(ib_flux_wall and not (ib and self.get("chemistry", "F") == "T"), "ib_flux_wall requires ib and chemistry")
+        self.prohibit(ib_flux_wall and self.get("igr", "F") == "T", "ib_flux_wall is not supported with igr")
+        self.prohibit(ib_flux_wall and self.get("model_eqns", 2) != 2, "ib_flux_wall requires model_eqns = 2")
+        self.prohibit(ib_flux_wall and self.get("num_fluids", 1) != 1, "ib_flux_wall requires num_fluids = 1")
+        self.prohibit(ib_flux_wall and self.get("riemann_solver", 2) != 2, "ib_flux_wall requires riemann_solver = 2 (HLLC)")
+        self.prohibit(ib_flux_wall and self.get("cyl_coord", "F") == "T", "ib_flux_wall requires Cartesian coordinates")
+        self.prohibit(ib_flux_wall and num_particle_clouds > 0, "ib_flux_wall is not supported with particle clouds")
+        reacting = [i for i in range(1, (num_ibs or 0) + 1) if (self.get(f"patch_ib({i})%surface_reaction", 0) or 0) == 1]
+        self.prohibit(ib_flux_wall and not reacting, "ib_flux_wall requires a patch_ib with surface_reaction = 1")
+        for i in reacting:
+            self.prohibit(ib_flux_wall and (self.get(f"patch_ib({i})%moving_ibm", 0) or 0) != 0, f"ib_flux_wall: reacting patch_ib({i}) must be fixed (moving_ibm = 0)")
+            blow = (self.get(f"patch_ib({i})%v_blow", 0.0) or 0.0) > 0 or (self.get(f"patch_ib({i})%inj_species", 0) or 0) > 0
+            self.prohibit(ib_flux_wall and blow, f"ib_flux_wall: reacting patch_ib({i}) cannot also blow (v_blow, inj_species)")
         ib_heat_wrt = self.get("ib_heat_wrt", "F") == "T"
         self.prohibit(ib_heat_wrt and not (ib and self.get("chemistry", "F") == "T"), "ib_heat_wrt requires ib and chemistry")
         self.prohibit(ib_heat_wrt and self.get("igr", "F") == "T", "ib_heat_wrt is not supported with igr")

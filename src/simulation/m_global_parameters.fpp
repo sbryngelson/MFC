@@ -543,6 +543,7 @@ contains
         ib_ip_min_dist = 0._wp
         ib_slip_ccst = .true.
         ib_cutvol = .false.
+        ib_flux_wall = .false.
 
         ! Bubble modeling (sim-specific)
         bubble_model = 1
