@@ -437,7 +437,7 @@ contains
         chem_params%reaction_substeps = 0
         chem_params%adap_substeps = .false.
         chem_params%reaction_substeps_max = 0
-        chem_params%transport_dt = .false.
+        chem_params%transport_dt = .true.
 
         num_bc_patches = 0
         bc_io = .false.
@@ -1027,6 +1027,8 @@ contains
 
         $:GPU_UPDATE(device='[Bx0]')
 
+        ! The transport dt limit (default on) needs the primitive species and temperature, which IGR does not keep
+        if (igr .or. .not. chemistry) chem_params%transport_dt = .false.
         $:GPU_UPDATE(device='[chem_params]')
 
         $:GPU_UPDATE(device='[rburn]')

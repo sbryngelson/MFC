@@ -68,10 +68,10 @@ contains
             D_max = max(D_max, prop/(rho*cv))
             if (chem_params%transport_model == 1) then
                 call get_species_mass_diffusivities_mixavg(pres, T, Ys, D_k)
-                ! A species with Y = 0 has no flux and nothing to amplify, so only the species present limit dt
+                ! Only the species above a trace floor limit dt (see transport_dt_y_floor)
                 $:GPU_LOOP(parallelism='[seq]')
                 do i = 1, num_species
-                    if (Ys(i) /= 0._wp) D_max = max(D_max, D_k(i))
+                    if (Ys(i) > transport_dt_y_floor) D_max = max(D_max, D_k(i))
                 end do
             end if
         end if
