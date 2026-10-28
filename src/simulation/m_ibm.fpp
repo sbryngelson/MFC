@@ -85,7 +85,7 @@ module m_ibm
         & s_find_num_ghost_points, s_compute_ghost_point_pressure, s_compute_ghost_point_velocity
     ; public :: ib_gbl_idx_lookup, s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, &
         & s_report_ibm_surface, s_ibm_alloc_fine, s_ibm_setup_fine, s_ibm_swap_to_fine, s_ibm_restore_from_fine, &
-        & s_ibm_load_fine_markers, num_gps
+        & s_ibm_load_fine_markers, num_gps, f_ibm_fine_gps, s_ibm_tally_gps_by_body, s_ibm_check_bodies_on_one_rank
 
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
@@ -115,6 +115,9 @@ module m_ibm
 
     type(ghost_point), dimension(:), allocatable :: ghost_points
     $:GPU_DECLARE(create='[ghost_points]')
+    !> per-i-slab ghost-point counts/offsets for the ordered gather (AMR); sized to the widest block's extent in x
+    integer, allocatable, dimension(:) :: gp_slab
+    $:GPU_DECLARE(create='[gp_slab]')
 
     integer :: num_gps  !< Number of ghost points
 #if defined(MFC_OpenACC)
@@ -267,6 +270,9 @@ contains
         ! are written by the device pipeline below) - an extra dynamic map on top of the declared entry corrupts
         ! CCE-OMP's descriptor (lib-4425)
         @:ALLOCATE(ghost_points(1:max_num_gps))
+        if (allocated(ib_fine)) then
+            @:ALLOCATE(gp_slab(0:max(m, mkr_hi(1)) + 1))
+        end if
         ! AMR-IB: device-resident park for the coarse/fine ghost-point swap (replaces host ib_fine%gps). move_alloc +
         ! GPU_ENTER_DATA (the amr_cg idiom) gives the bare derived-type allocatable a valid descriptor and device
         ! mapping; a direct @:ALLOCATE of it aborts with lib-4425 on CCE OpenMP-offload.
@@ -959,29 +965,68 @@ contains
 
     end subroutine s_find_num_ghost_points
 
+    !> Fill the geometry-independent fields of ghost point local_idx at marker cell (i, j, k): the patch, periodicity, slip flag and
+    !! the wall-adjacency flags. Device routine shared by the unordered and the slab-ordered gather.
+    subroutine s_fill_ghost_point(local_idx, i, j, k)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+        integer, intent(in) :: local_idx, i, j, k
+        integer             :: patch_id, encoded_patch_id, neighborhood_patch_id, xp, yp, zp
+
+        ghost_points(local_idx)%loc = [i, j, k]
+        encoded_patch_id = ib_markers%sf(i, j, k)
+        call s_decode_patch_periodicity(encoded_patch_id, patch_id, xp, yp, zp)
+        call s_get_neighborhood_idx(patch_id, neighborhood_patch_id)
+        ghost_points(local_idx)%ib_patch_id = neighborhood_patch_id
+        ghost_points(local_idx)%x_periodicity = xp
+        ghost_points(local_idx)%y_periodicity = yp
+        ghost_points(local_idx)%z_periodicity = zp
+        ghost_points(local_idx)%slip = patch_ib(neighborhood_patch_id)%slip
+
+        #:for X, ID, IDX in [('x', 1, 'i'), ('y', 2, 'j'), ('z', 3, 'k')]
+            ghost_points(local_idx)%DB(${ID}$) = 0
+            if (${ID}$ <= num_dims) then  ! Onlyrun the numeher of dimensions present
+                if (ib_bc_${X}$%beg /= BC_PERIODIC) then
+                    if ((${X}$_cc(${IDX}$) - d${X}$(${IDX}$)) < glb_bounds(${ID}$)%beg) then
+                        ! if the grid cell is in a wall on the "left"
+                        ghost_points(local_idx)%DB(${ID}$) = -1
+                    else if ((${X}$_cc(${IDX}$) + d${X}$(${IDX}$)) > glb_bounds(${ID}$)%end) then
+                        ! if the grid cell is in a wall on the "right"
+                        ghost_points(local_idx)%DB(${ID}$) = 1
+                    end if
+                end if
+            end if
+        #:endfor
+
+    end subroutine s_fill_ghost_point
+
     !> Locate all ghost points in the domain
     subroutine s_find_ghost_points()
 
         ! Operates on the declare-target module-global ghost_points directly, not a dummy argument: the on-device parallel loop
         ! writes it and the on-device sort below reorders it, both under the SAME declare-target name on the device, so nothing
         ! ever crosses host<->device here.
-        integer           :: i, j, k, ii, jj, kk, gp_layers_z  !< Iterator variables
-        integer           :: xp, yp, zp                        !< periodicities
-        integer           :: count, count_i, local_idx
-        integer           :: patch_id, encoded_patch_id, neighborhood_patch_id
-        logical           :: is_gp
-        integer           :: a, b                              !< insertion-sort indices
-        logical           :: less                              !< lexicographic comparison result
-        type(ghost_point) :: tmp                               !< insertion-sort scratch element
+        integer :: i, j, k, ii, jj, kk, gp_layers_z  !< Iterator variables
+        integer :: count, count_i, local_idx
+        logical :: is_gp
 
         count = 0
         count_i = 0
         gp_layers_z = gp_layers
         if (p == 0) gp_layers_z = 0
 
-        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, is_gp, local_idx, patch_id, encoded_patch_id, neighborhood_patch_id, &
-                            & xp, yp, zp]', copyin='[count, count_i, glb_bounds, ib_markers%sf]', firstprivate='[gp_layers, &
-                            & gp_layers_z]', present='[ghost_points]', collapse=3)
+        ! The atomic capture below assigns array slots in thread-completion order, so the ghost-point LIST order is nondeterministic
+        ! on the GPU and differs from the CPU's serial order. An order-sensitive consumer downstream (e.g. the surface-force
+        ! reduction) then produces a backend-dependent result, which the discrete image-point stencil amplifies -> the moving
+        ! AMR-IB golden diverges across backends. AMR therefore gathers in lexicographic (i,j,k) order directly, slab by slab
+        ! (s_find_ghost_points_ordered); non-AMR runs keep the original (unsorted) order.
+        if (amr) then
+            call s_find_ghost_points_ordered()
+            return
+        end if
+
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, is_gp, local_idx]', copyin='[count, count_i, glb_bounds, &
+                            & ib_markers%sf]', firstprivate='[gp_layers, gp_layers_z]', present='[ghost_points]', collapse=3)
         do i = 0, m
             do j = 0, n
                 do k = 0, p
@@ -1005,30 +1050,7 @@ contains
                             local_idx = count
                             $:END_GPU_ATOMIC_CAPTURE()
 
-                            ghost_points(local_idx)%loc = [i, j, k]
-                            encoded_patch_id = ib_markers%sf(i, j, k)
-                            call s_decode_patch_periodicity(encoded_patch_id, patch_id, xp, yp, zp)
-                            call s_get_neighborhood_idx(patch_id, neighborhood_patch_id)
-                            ghost_points(local_idx)%ib_patch_id = neighborhood_patch_id
-                            ghost_points(local_idx)%x_periodicity = xp
-                            ghost_points(local_idx)%y_periodicity = yp
-                            ghost_points(local_idx)%z_periodicity = zp
-                            ghost_points(local_idx)%slip = patch_ib(neighborhood_patch_id)%slip
-
-                            #:for X, ID, IDX in [('x', 1, 'i'), ('y', 2, 'j'), ('z', 3, 'k')]
-                                ghost_points(local_idx)%DB(${ID}$) = 0
-                                if (${ID}$ <= num_dims) then  ! Onlyrun the numeher of dimensions present
-                                    if (ib_bc_${X}$%beg /= BC_PERIODIC) then
-                                        if ((${X}$_cc(${IDX}$) - d${X}$(${IDX}$)) < glb_bounds(${ID}$)%beg) then
-                                            ! if the grid cell is in a wall on the "left"
-                                            ghost_points(local_idx)%DB(${ID}$) = -1
-                                        else if ((${X}$_cc(${IDX}$) + d${X}$(${IDX}$)) > glb_bounds(${ID}$)%end) then
-                                            ! if the grid cell is in a wall on the "right"
-                                            ghost_points(local_idx)%DB(${ID}$) = 1
-                                        end if
-                                    end if
-                                end if
-                            #:endfor
+                            call s_fill_ghost_point(local_idx, i, j, k)
                         end if
                     end if
                 end do
@@ -1036,36 +1058,88 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
-        ! The atomic capture above assigns array slots in thread-completion order, so the ghost-point LIST order is nondeterministic
-        ! on the GPU and differs from the CPU's serial order. An order-sensitive consumer downstream (e.g. the surface-force
-        ! reduction) then produces a backend-dependent result, which the discrete image-point stencil amplifies -> the moving
-        ! AMR-IB golden diverges across backends. Reorder into deterministic lexicographic (i,j,k) order with a single-thread
-        ! ON-DEVICE insertion sort (num_gps ~ O(1e2); the single-trip outer loop pins it to one thread). Sorting on the device is
-        ! deliberate: a host round-trip here needs a GPU_UPDATE of the declare-target ghost_points, which fails Cray OpenACC's
-        ! present-table lookup and aborts CCE OpenMP-offload with lib-4425 in the AMR fine path (this routine runs mid-swap, see
-        ! s_ibm_swap_to_fine). Only moving AMR-IB rebuilds the list on-device per substep, so only it needs the ordering; non-AMR
-        ! runs keep the original (unsorted) order.
-        if (.not. amr) return
-        $:GPU_PARALLEL_LOOP(private='[a, b, tmp, less]')
-        do local_idx = 1, 1
-            do a = 2, num_gps
-                tmp = ghost_points(a)
-                b = a - 1
-                do
-                    if (b < 1) exit
-                    less = tmp%loc(1) < ghost_points(b)%loc(1) .or. (tmp%loc(1) == ghost_points(b)%loc(1) .and. (tmp%loc(2) &
-                                   & < ghost_points(b)%loc(2) .or. (tmp%loc(2) == ghost_points(b)%loc(2) .and. tmp%loc(3) &
-                                   & < ghost_points(b)%loc(3))))
-                    if (.not. less) exit
-                    ghost_points(b + 1) = ghost_points(b)
-                    b = b - 1
+    end subroutine s_find_ghost_points
+
+    !> Gather the ghost points in lexicographic (i,j,k) order: count them per i-slab, scan the counts into slab offsets, then fill
+    !! each slab's range serially in (j,k) order. This is the order a serial sweep produces, reached in parallel over slabs and
+    !! linear in the cell count. (A single-thread on-device insertion sort did the same job but is quadratic in the list length,
+    !! thousands of points for one fine-grid body, which made the moving-body rebuild cost seconds per block per stage.)
+    subroutine s_find_ghost_points_ordered()
+
+        integer :: i, j, k, ii, jj, kk, gp_layers_z, slab_n, run, c
+        logical :: is_gp
+
+        gp_layers_z = gp_layers
+        if (p == 0) gp_layers_z = 0
+        slab_n = m
+
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, is_gp, c]', copyin='[ib_markers%sf]', firstprivate='[gp_layers, &
+                            & gp_layers_z]', present='[gp_slab]')
+        do i = 0, m
+            c = 0
+            do j = 0, n
+                do k = 0, p
+                    if (ib_markers%sf(i, j, k) /= 0) then
+                        is_gp = .false.
+                        marker_search: do ii = i - gp_layers, i + gp_layers
+                            do jj = j - gp_layers, j + gp_layers
+                                do kk = k - gp_layers_z, k + gp_layers_z
+                                    if (ib_markers%sf(ii, jj, kk) == 0) then
+                                        is_gp = .true.
+                                        exit marker_search
+                                    end if
+                                end do
+                            end do
+                        end do marker_search
+                        if (is_gp) c = c + 1
+                    end if
                 end do
-                ghost_points(b + 1) = tmp
+            end do
+            gp_slab(i) = c
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+        ! exclusive scan of the slab counts: one thread over m+1 entries
+        $:GPU_PARALLEL_LOOP(private='[i, run, c]', firstprivate='[slab_n]', present='[gp_slab]')
+        do k = 1, 1
+            run = 0
+            do i = 0, slab_n
+                c = gp_slab(i)
+                gp_slab(i) = run
+                run = run + c
             end do
         end do
         $:END_GPU_PARALLEL_LOOP()
 
-    end subroutine s_find_ghost_points
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, is_gp, c]', copyin='[ib_markers%sf, glb_bounds]', &
+                            & firstprivate='[gp_layers, gp_layers_z]', present='[ghost_points, gp_slab]')
+        do i = 0, m
+            c = gp_slab(i)
+            do j = 0, n
+                do k = 0, p
+                    if (ib_markers%sf(i, j, k) /= 0) then
+                        is_gp = .false.
+                        marker_search2: do ii = i - gp_layers, i + gp_layers
+                            do jj = j - gp_layers, j + gp_layers
+                                do kk = k - gp_layers_z, k + gp_layers_z
+                                    if (ib_markers%sf(ii, jj, kk) == 0) then
+                                        is_gp = .true.
+                                        exit marker_search2
+                                    end if
+                                end do
+                            end do
+                        end do marker_search2
+                        if (is_gp) then
+                            c = c + 1
+                            call s_fill_ghost_point(c, i, j, k)
+                        end if
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_find_ghost_points_ordered
 
     !> Compute the interpolation coefficients for image points
     subroutine s_compute_interpolation_coeffs()
@@ -2201,6 +2275,65 @@ contains
         end do
 
     end subroutine s_ibm_alloc_fine
+
+    !> Ghost points stored for fine slot islot: zero for a block that holds no immersed body.
+    impure integer function f_ibm_fine_gps(islot) result(n)
+
+        integer, intent(in) :: islot
+
+        n = ib_fine(islot)%num_gps
+
+    end function f_ibm_fine_gps
+
+    !> Add to cnt(1:num_gbl_ibs) the number of ghost points each body has in the active ghost-point list (the fine slot's, when the
+    !! fine IB globals are swapped in). The count runs on the device, since ghost_points never crosses to the host.
+    impure subroutine s_ibm_tally_gps_by_body(cnt)
+
+        integer(kind=8), intent(inout) :: cnt(:)
+        integer, allocatable           :: dcnt(:)
+        integer                        :: a, gid, ng
+
+        if (num_gps == 0) return
+        allocate (dcnt(size(cnt))); dcnt = 0
+        ng = num_gps
+        $:GPU_PARALLEL_LOOP(private='[a, gid]', copy='[dcnt]', firstprivate='[ng]', &
+                            & extraOmpArgs=("defaultmap(present:allocatable)" if MFC_COMPILER == "LLVMFlang" else None))
+        do a = 1, ng
+            gid = patch_ib(ghost_points(a)%ib_patch_id)%gbl_patch_id
+            $:GPU_ATOMIC(atomic='update')
+            dcnt(gid) = dcnt(gid) + 1
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+        cnt = cnt + int(dcnt, 8)
+        deallocate (dcnt)
+
+    end subroutine s_ibm_tally_gps_by_body
+
+    !> Abort if any one body has ghost points on more than one rank. The fine image-point stencil is exact only when a body's whole
+    !! fine state lives on one rank, which the one-block-per-body regrid guarantees; a body split across ranks would get a wrong
+    !! surface state. Counts are per global body, so bodies on different ranks are fine.
+    impure subroutine s_ibm_check_bodies_on_one_rank(cnt)
+
+        integer(kind=8), intent(in)  :: cnt(:)
+        integer(kind=8), allocatable :: flag(:), tot(:)
+        integer                      :: ierr, b
+
+        allocate (flag(size(cnt)), tot(size(cnt)))
+        flag = merge(1_8, 0_8, cnt > 0_8)
+        tot = flag
+#ifdef MFC_MPI
+        call MPI_ALLREDUCE(flag, tot, size(flag), MPI_INTEGER8, MPI_SUM, MPI_COMM_WORLD, ierr)
+#endif
+        do b = 1, size(tot)
+            if (tot(b) > 1_8) then
+                if (proc_rank == 0) write (0, '(A,I0,A,I0,A)') ' [amr] immersed body ', b, ' has ghost points on ', tot(b), ' ranks'
+                call s_mpi_abort('amr with ib: an immersed body straddles a rank boundary, where the fine-IB ' &
+                                 & // 'image-point stencil is not yet decomposition-exact; keep each body within a single ' &
+                                 & // 'rank subdomain (use fewer ranks or reposition it).')
+            end if
+        end do
+
+    end subroutine s_ibm_check_bodies_on_one_rank
 
     !> Load ib_markers_fine for the next fine RHS pass: member ibm's stored fine markers (interior 0:mext(:, ibm)) land at offset
     !! (ibm - 1)*w along dimension sd; the rest of the installed frame (0:m, 0:n, 0:p - the grid globals must already be swapped to

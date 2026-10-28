@@ -23,7 +23,8 @@ module m_amr_advance
     use m_rhs, only: s_compute_rhs
     use m_phase_timing
     use m_ibm, only: s_ibm_setup_fine, s_ibm_swap_to_fine, s_ibm_restore_from_fine, s_ibm_correct_state, s_ibm_load_fine_markers, &
-        & s_update_mib, moving_immersed_boundary_flag, num_gps
+        & s_update_mib, moving_immersed_boundary_flag, num_gps, f_ibm_fine_gps, s_ibm_tally_gps_by_body, &
+        & s_ibm_check_bodies_on_one_rank
     use m_amr_state
     use m_amr_distribution
     use m_amr_store
@@ -44,33 +45,28 @@ contains
     !! amr .and. ib.
     impure subroutine s_amr_setup_ib()
 
-        integer         :: islot, save_cur
-        integer(kind=8) :: my_ib_gps, nrank_ib
+        integer                      :: islot, save_cur
+        integer(kind=8), allocatable :: body_gps(:)
 
         if (.not. amr .or. .not. ib) return
         save_cur = amr_cur
-        my_ib_gps = 0_8
+        allocate (body_gps(max(num_gbl_ibs, 1))); body_gps = 0_8
         do islot = 1, amr_num_blocks
             call s_amr_select_slot(islot)
             if (.not. amr_rank_owns_block) cycle
             call s_amr_swap_to_fine()
             call s_ibm_swap_to_fine(islot, gps_on_device=.false.)
             call s_ibm_setup_fine()
-            my_ib_gps = my_ib_gps + int(num_gps, 8)
+            call s_ibm_tally_gps_by_body(body_gps)
             call s_ibm_restore_from_fine(islot)
             call s_amr_restore_coarse()
         end do
         call s_amr_select_slot(save_cur)
 
-        ! The fine-IB image-point stencil is not decomposition-exact across a rank seam. If the body's fine ghost points appear on
+        ! The fine-IB image-point stencil is not decomposition-exact across a rank seam. If one body's fine ghost points appear on
         ! more than one rank (the body straddles a coarse/fine rank boundary), abort rather than return a wrong body-surface state.
-        ! A body wholly within one rank is decomposition-exact.
-        call s_mpi_allreduce_integer_sum(merge(1_8, 0_8, my_ib_gps > 0_8), nrank_ib)
-        if (nrank_ib > 1_8) then
-            call s_mpi_abort('amr with ib: the immersed body straddles a rank boundary, where the ' &
-                             & // 'fine-IB image-point stencil is not yet decomposition-exact; keep the ' &
-                             & // 'body within a single rank subdomain (use fewer ranks or reposition it).')
-        end if
+        ! A body wholly within one rank is decomposition-exact, whatever the other bodies do.
+        call s_ibm_check_bodies_on_one_rank(body_gps)
 
     end subroutine s_amr_setup_ib
 
@@ -87,6 +83,9 @@ contains
 
         if (.not. ib) return
         if (.not. amr_rank_owns_block) return
+        ! the swap moves the whole marker field through the host four times per block per stage, and the correction of a block
+        ! with no ghost point (no body in it) is a no-op
+        if (f_ibm_fine_gps(amr_cur) == 0) return
         call s_amr_swap_to_fine()
         call s_ibm_swap_to_fine(amr_cur, gps_on_device=.true.)
         loc_cur = amr_loc_of(amr_cur)
@@ -106,10 +105,11 @@ contains
     impure subroutine s_amr_update_mib_fine()
 
         integer :: i, blo(3), bhi(3)
-        logical :: inside
+        logical :: inside, moving_here
 
         if (.not. ib) return
         if (.not. amr_rank_owns_block) return
+        moving_here = .false.
         ! A moving body must stay inside its block (a body overlapping the block edge gets silently clipped forcing, so abort
         ! instead). Under dynamic regrid the expansion contained it with margin max(amr_buf,4) and body + image-point stencil reach
         ! (2 coarse cells) must remain contained between regrids; on a static block the user's placement is authoritative
@@ -123,12 +123,20 @@ contains
                 if (.not. f_amr_boxes_overlap(blo, bhi, amr_slots(amr_cur)%region%lo, amr_slots(amr_cur)%region%hi)) cycle
                 inside = all((blo >= amr_slots(amr_cur)%region%lo .and. bhi <= amr_slots(amr_cur)%region%hi) .or. .not. amr_dim)
                 if (.not. inside) then
+                    write (0, '(A,I0,A,3ES11.3,A,3ES11.3,A,6I6,A,6I6)') ' [amr] body ', i, ' at ', patch_ib(i)%x_centroid, &
+                           & patch_ib(i)%y_centroid, patch_ib(i)%z_centroid, ' vel ', patch_ib(i)%vel(1:3), ' bbox(lo,hi) ', blo, &
+                           & bhi, ' block(lo,hi) ', amr_slots(amr_cur)%region%lo, amr_slots(amr_cur)%region%hi
                     call s_mpi_abort('amr with moving ib: the body reached the fine-block boundary; ' &
                                      & // 'under dynamic regrid reduce amr_regrid_int or increase amr_buf, ' &
                                      & // 'for a static block enlarge it to contain the trajectory')
                 end if
+                moving_here = .true.
             end do
         end if
+        ! the recompute clears and refills the whole slot for every body, so a block with no moving body over it (a tile of the
+        ! refined front, or a block holding only static bodies) would pay for the full rebuild three times a step to reproduce
+        ! the state it already has
+        if (.not. moving_here) return
         call s_amr_swap_to_fine()
         call s_ibm_swap_to_fine(amr_cur, gps_on_device=.true.)
         call s_update_mib(num_ibs)
