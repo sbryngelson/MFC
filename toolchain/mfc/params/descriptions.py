@@ -124,6 +124,7 @@ DESCRIPTIONS = {
     "amr_block_beg": "Refined-block start cell index per axis (level-0 index space; 0-based, inclusive). Required when amr = T",
     "amr_block_end": "Refined-block end cell index per axis (level-0 index space; 0-based, inclusive; block covers beg..end). Required when amr = T",
     "amr_regrid_int": "Steps between AMR regrid events (0 = static block)",
+    "amr_tag_abs": "Tag on the largest absolute density face jump (AMReX/PeleC dengrad) instead of the relative central difference; amr_tag_eps is then a density",
     "amr_tag_eps": "Density-gradient tagging threshold: a cell is tagged when max over axes of |rho(i+1)-rho(i-1)|/(2 rho_i) exceeds it (dimensionless; halves per grid-doubling for a smooth field)",
     "amr_buf": "Coarse-cell padding around tagged cells when regridding",
     "amr_snap": "Regrid hysteresis in coarse cells per face: a new box this close to a live same-level block takes its box (0 = off)",

@@ -519,15 +519,14 @@ contains
                 do ci = tg_lo(1), tg_hi(1)
                     ! total density gradient (sum of the continuity variables): degenerates to the single-fluid tagger, immune to
                     ! trace-fluid noise. Matched-density composition-only interfaces are invisible (documented limit).
-                    r0 = max(abs(f_amr_rho_tot_sf(q_cons_base, ci, cj, ck)), 1.e-30_wp)
-                    g = abs(f_amr_rho_tot_sf(q_cons_base, ci + 1, cj, ck) - f_amr_rho_tot_sf(q_cons_base, ci - 1, cj, ck))
-                    if (n_glb > 0) g = max(g, abs(f_amr_rho_tot_sf(q_cons_base, ci, cj + 1, ck) - f_amr_rho_tot_sf(q_cons_base, &
-                        & ci, cj - 1, ck)))
-                    if (p_glb > 0) g = max(g, abs(f_amr_rho_tot_sf(q_cons_base, ci, cj, ck + 1) - f_amr_rho_tot_sf(q_cons_base, &
-                        & ci, cj, ck - 1)))
-                    ! 2*r0 normalizes the 2-cell central difference (rho at i+1..i-1); the 2 is the stencil span, not the
-                    ! refinement ratio
-                    if (g/(2._wp*r0) > amr_tag_eps) tag_grid(ci, cj, ck) = .true.
+                    r0 = f_amr_rho_tot_sf(q_cons_base, ci, cj, ck)
+                    g = f_amr_tag_ind(f_amr_rho_tot_sf(q_cons_base, ci + 1, cj, ck), r0, f_amr_rho_tot_sf(q_cons_base, ci - 1, &
+                                      & cj, ck))
+                    if (n_glb > 0) g = max(g, f_amr_tag_ind(f_amr_rho_tot_sf(q_cons_base, ci, cj + 1, ck), r0, &
+                        & f_amr_rho_tot_sf(q_cons_base, ci, cj - 1, ck)))
+                    if (p_glb > 0) g = max(g, f_amr_tag_ind(f_amr_rho_tot_sf(q_cons_base, ci, cj, ck + 1), r0, &
+                        & f_amr_rho_tot_sf(q_cons_base, ci, cj, ck - 1)))
+                    if (g > amr_tag_eps) tag_grid(ci, cj, ck) = .true.
                     ! the acoustic source support stays coarse (its spatials are coarse cell indices): suppress tags there so
                     ! the clusterer splits around the source
                     if (acoustic_source .and. tag_grid(ci, cj, ck)) then
@@ -1814,15 +1813,14 @@ contains
                             fj = (cj - olo(2))*rr + d2
                             do d1 = 0, rr - 1
                                 fi = (ci - olo(1))*rr + d1
-                                r0 = max(abs(f_amr_rho_tot_st(amr_loc_of(ob), fi, fj, fk)), 1.e-30_wp)
-                                g = abs(f_amr_rho_tot_st(amr_loc_of(ob), min(fi + 1, fm1), fj, &
-                                        & fk) - f_amr_rho_tot_st(amr_loc_of(ob), max(fi - 1, 0), fj, fk))
-                                if (n_glb > 0) g = max(g, abs(f_amr_rho_tot_st(amr_loc_of(ob), fi, min(fj + 1, fm2), &
-                                    & fk) - f_amr_rho_tot_st(amr_loc_of(ob), fi, max(fj - 1, 0), fk)))
-                                if (p_glb > 0) g = max(g, abs(f_amr_rho_tot_st(amr_loc_of(ob), fi, fj, min(fk + 1, &
-                                    & fm3)) - f_amr_rho_tot_st(amr_loc_of(ob), fi, fj, max(fk - 1, 0))))
-                                ! 2*r0 normalizes the 2-cell central difference; the 2 is the stencil span, not amr_ref_ratio
-                                if (g/(2._wp*r0) > amr_tag_eps) tagged = .true.
+                                r0 = f_amr_rho_tot_st(amr_loc_of(ob), fi, fj, fk)
+                                g = f_amr_tag_ind(f_amr_rho_tot_st(amr_loc_of(ob), min(fi + 1, fm1), fj, fk), r0, &
+                                                  & f_amr_rho_tot_st(amr_loc_of(ob), max(fi - 1, 0), fj, fk))
+                                if (n_glb > 0) g = max(g, f_amr_tag_ind(f_amr_rho_tot_st(amr_loc_of(ob), fi, min(fj + 1, fm2), &
+                                    & fk), r0, f_amr_rho_tot_st(amr_loc_of(ob), fi, max(fj - 1, 0), fk)))
+                                if (p_glb > 0) g = max(g, f_amr_tag_ind(f_amr_rho_tot_st(amr_loc_of(ob), fi, fj, min(fk + 1, &
+                                    & fm3)), r0, f_amr_rho_tot_st(amr_loc_of(ob), fi, fj, max(fk - 1, 0))))
+                                if (g > amr_tag_eps) tagged = .true.
                             end do
                         end do
                     end do
@@ -1861,4 +1859,18 @@ contains
 
         end function f_amr_rho_tot_${RSFX}$
     #:endfor
+
+    !> Tag indicator in one direction from the densities at i+1, i, i-1: the 2-cell central difference over 2*rho_i (dimensionless;
+    !! the 2 is the stencil span, not amr_ref_ratio), or with amr_tag_abs the larger absolute face jump (the AMReX/PeleC dengrad).
+    pure real(wp) function f_amr_tag_ind(rp, r0, rm) result(v)
+        real(wp), intent(in) :: rp, r0, rm
+
+        if (amr_tag_abs) then
+            v = max(abs(rp - r0), abs(r0 - rm))
+        else
+            v = abs(rp - rm)/(2._wp*max(abs(r0), 1.e-30_wp))
+        end if
+
+    end function f_amr_tag_ind
+
 end module m_amr_regrid
