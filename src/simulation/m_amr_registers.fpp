@@ -538,6 +538,9 @@ contains
             ! step-integral flux for the once-per-step state correction (stage 1 overwrites = implicit zero, cf. creg below).
             if (amr_block_level(amr_cur) >= 2) then
                 coef = rk3_w(stage); accum = (stage > 1)
+            else if (amr_sub_on) then
+                ! subcycled: the level's dt-weighted step integral, accumulated over both substeps of the parent step
+                coef = rk3_w(stage)*dt; accum = .not. (amr_sub_first .and. stage == 1)
             else
                 coef = 1._wp; accum = .false.  ! overwrite each stage (default)
             end if
@@ -582,7 +585,12 @@ contains
                     & amr_region_hi - sidx, tlo - sidx, thi - sidx, own_lo(id), own_hi(id))
             end do
             call s_amr_select_slot(save_cur)
-            call s_amr_capture_total(amr_reg_n, id, .false., 1._wp, .false.)
+            ! subcycled: the coarse step's dt-weighted flux integral (state reflux after the fine substeps); else this stage's
+            if (amr_sub_on) then
+                call s_amr_capture_total(amr_reg_n, id, .false., rk3_w(stage)*dt, stage > 1)
+            else
+                call s_amr_capture_total(amr_reg_n, id, .false., 1._wp, .false.)
+            end if
         end if
 
     end subroutine s_amr_capture_boundary_flux

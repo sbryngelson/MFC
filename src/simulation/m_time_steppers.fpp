@@ -33,7 +33,7 @@ module m_time_steppers
     use m_derived_variables
     use m_constants, only: model_eqns_6eq, time_stepper_rk1, time_stepper_rk2, time_stepper_rk3, dflt_T_guess
     use m_active_box, only: s_grow_active_box, s_check_active_box_envelope, ab_x, ab_y, ab_z, ab_active
-    use m_amr_stage, only: s_amr_stage_begin, s_amr_stage_fine, s_amr_l0_stage_update, s_amr_step_fold
+    use m_amr_stage, only: s_amr_stage_begin, s_amr_stage_fine, s_amr_l0_stage_update, s_amr_step_fold, s_amr_subcycle_fine
 
     implicit none
 
@@ -479,6 +479,7 @@ contains
 
         ! Adaptive dt: initial stage
         if (adap_dt) call s_adaptive_dt_bubble(1)
+        amr_sub_on = amr .and. amr_subcycle  ! level 0's stages capture its dt-weighted face fluxes for the state reflux
 
         do s = 1, nstage
             call system_clock(stage_t0)
@@ -526,8 +527,9 @@ contains
                 end if
             end if
 
-            call s_amr_stage_fine(s, t_step, rk_coef(s,:), q_cons_ts(1)%vf, q_T_sf, q_prim_vf, bc_type, rhs_vf, pb_ts(1)%sf, &
-                                  & rhs_pb, mv_ts(1)%sf, rhs_mv)
+            ! subcycled: level 0 steps alone; the fine levels follow after its step (s_amr_subcycle_fine)
+            if (.not. amr_sub_on) call s_amr_stage_fine(s, t_step, rk_coef(s,:), q_cons_ts(1)%vf, q_T_sf, q_prim_vf, bc_type, &
+                & rhs_vf, pb_ts(1)%sf, rhs_pb, mv_ts(1)%sf, rhs_mv)
 
             ! TWIN of the AMR fine-block RK update: this coarse rk_coef stage combination (q = (c1*q + c2*q_stor + c3*dt*rhs)/c4)
             ! is mirrored by s_amr_fine_rk_update_batch in m_amr_advance - change the algebra here and it must follow, else fine
@@ -652,6 +654,9 @@ contains
             call nvtxEndRange
         end if
 
+        if (amr_sub_on) call s_amr_subcycle_fine(q_cons_ts(1)%vf, q_cons_ts(stor)%vf, rk_coef, q_T_sf, bc_type, pb_ts(1)%sf, &
+            & rhs_pb, mv_ts(1)%sf, rhs_mv, t_step)
+        amr_sub_on = .false.
         if (amr) call s_amr_step_fold(q_cons_ts(1)%vf)
 
 #ifdef MFC_DEBUG

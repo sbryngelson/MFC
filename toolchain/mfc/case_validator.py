@@ -2057,6 +2057,17 @@ class CaseValidator:
             "multi-level AMR (amr_max_level > 1) needs amr_max_blocks >= 2 " "(at least one level-1 block plus one nested level-2 block)",
         )
         self.prohibit(amr_ref_ratio is not None and amr_ref_ratio not in (2, 4), "amr_ref_ratio must be 2 or 4")
+        if self.get("amr_subcycle", "F") == "T":
+            self.prohibit(amr_ref_ratio not in (None, 2), "amr_subcycle requires amr_ref_ratio = 2")
+            self.prohibit(amr_max_level is not None and amr_max_level > 1, "amr_subcycle supports one refined level (amr_max_level = 1)")
+            self.prohibit(self.get("l0_ntile", 0) not in (0, None), "amr_subcycle does not support L0 tiles (l0_ntile)")
+            self.prohibit(igr, "amr_subcycle does not support IGR")
+            self.prohibit(self.get("chemistry", "F") == "T", "amr_subcycle does not support chemistry")
+            self.prohibit(self.get("bubbles_lagrange", "F") == "T", "amr_subcycle does not support Lagrangian bubbles")
+            self.prohibit(self.get("time_stepper") not in (None, 3), "amr_subcycle requires the SSP-RK3 time stepper (time_stepper = 3)")
+            moving = [self.get(f"patch_ib({i})%moving_ibm", 0) for i in range(1, 1001) if self.get(f"patch_ib({i})%moving_ibm") is not None]
+            moving += [self.get(f"particle_cloud({i})%moving_ibm", 0) for i in range(1, 11) if self.get(f"particle_cloud({i})%moving_ibm") is not None]
+            self.prohibit(any(m not in (0, None) for m in moving), "amr_subcycle does not support moving immersed boundaries yet")
         self.prohibit(
             amr_ref_ratio is not None and amr_ref_ratio != 2 and amr_max_level is not None and amr_max_level > 1,
             "amr_ref_ratio /= 2 is only supported at amr_max_level = 1",

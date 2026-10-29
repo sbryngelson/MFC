@@ -197,6 +197,7 @@ contains
             done(i) = .true.
             g = amr_my_blk(i)
             if (amr_block_level(g) == 0) cycle  ! L0 tile slots are advanced by s_l0_advance_stage
+            if (amr_adv_level > 0 .and. amr_block_level(g) /= amr_adv_level) cycle  ! subcycling: one level at a time
             amr_bat_n = 1; amr_bat_blk(1) = g
             do j = i + 1, amr_n_my
                 if (amr_bat_n == amr_bat_max) exit
@@ -210,7 +211,8 @@ contains
                 amr_bat_n = amr_bat_n + 1; amr_bat_blk(amr_bat_n) = h; done(j) = .true.
             end do
             ! no fine block left undone -> this batch's restore must push the coarse grid state (the coarse stage reads it)
-            last_batch = .not. any(.not. done .and. amr_block_level(amr_my_blk(1:amr_n_my)) /= 0)
+            last_batch = .not. any(.not. done .and. amr_block_level(amr_my_blk(1:amr_n_my)) /= 0 .and. (amr_adv_level == 0 &
+                                   & .or. amr_block_level(amr_my_blk(1:amr_n_my)) == amr_adv_level))
             ! the batch frame: leader selected (swap, capture and RK read amr_cur / the slot's extents), members' store columns
             call s_amr_select_slot(g)
             amr_bat_ext = [amr_slots(g)%m, amr_slots(g)%n, amr_slots(g)%p]

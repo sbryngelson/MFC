@@ -311,6 +311,13 @@ module m_global_parameters
     integer :: n_el_bubs_loc, n_el_bubs_glb  !< Number of Lagrangian bubbles (local and global)
     logical :: moving_lag_bubbles
     logical :: lag_pressure_force
+
+    !> Subcycled AMR advance state (amr_subcycle): set by the subcycled driver, read by the flux capture and the batched advance.
+    !! amr_sub_on: a subcycled step is in progress (captures carry rk3_w * the level's dt and accumulate); amr_sub_first: the
+    !! current fine substep is the first of its parent step (its stage 1 restarts the fine registers); amr_adv_level: the level the
+    !! batched fine advance is restricted to (0: every refined level).
+    logical :: amr_sub_on = .false., amr_sub_first = .false.
+    integer :: amr_adv_level = 0
     logical :: lag_gravity_force
     integer :: lag_vel_model, lag_drag_model
     $:GPU_DECLARE(create='[n_el_bubs_loc, n_el_bubs_glb]')
@@ -636,6 +643,7 @@ contains
         amr_buf = 3
         amr_snap = 0
         amr_device_pack = .false.
+        amr_subcycle = .false.
         ! A small default would cap the global box count, so real refinement would bind immediately and
         ! silently truncate the refined region (the clusterer/tiler warn, but the answer has already
         ! changed). amr_max_blocks sizes replicated metadata only - slots are allocated lazily for owned

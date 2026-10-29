@@ -20,7 +20,11 @@ module m_amr_stage
     implicit none
 
     private
-    public :: s_amr_stage_begin, s_amr_stage_fine, s_amr_l0_stage_update, s_amr_step_fold
+    public :: s_amr_stage_begin, s_amr_stage_fine, s_amr_l0_stage_update, s_amr_step_fold, s_amr_subcycle_fine
+
+    !> Subcycling: the coarse state interpolated in time for the fine ghost fills (allocated on first use).
+    type(vector_field) :: amr_qlerp
+    logical            :: amr_qlerp_ready = .false.
 
 contains
 
@@ -95,6 +99,86 @@ contains
         call s_amr_select_slot(1)  ! the next stage's coarse RHS captures creg into slot 1
 
     end subroutine s_amr_stage_fine
+
+    !> Subcycled fine advance (amr_subcycle, one refined level): after level 0's step (q_old = its step-start state, q_new = its end
+    !! state, coarse registers holding its dt-weighted face-flux integral) level 1 takes two substeps of dt/2. Each stage fills the
+    !! fine ghosts from the coarse state interpolated linearly in time to the stage time and advances the level-1 blocks through the
+    !! batched path with dt/2, accumulating the fine registers over both substeps; then the registers correct the coarse state
+    !! (Berger-Colella) and the caller's fold restricts.
+    impure subroutine s_amr_subcycle_fine(q_new, q_old, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
+
+        type(scalar_field), dimension(sys_size), intent(inout)     :: q_new, q_old
+        real(wp), intent(in)                                       :: coefs(:,:)
+        type(scalar_field), intent(inout)                          :: q_T_sf
+        type(integer_field), dimension(1:num_dims,1:2), intent(in) :: bc_type
+        real(stp), dimension(:,:,:,:,:), intent(inout)             :: pb_in, mv_in
+        real(wp), dimension(:,:,:,:,:), intent(inout)              :: rhs_pb, rhs_mv
+        integer, intent(in)                                        :: t_step
+        real(wp), parameter                                        :: c_stage(3) = [0._wp, 1._wp, 0.5_wp]
+        real(wp)                                                   :: dt0, theta
+        integer                                                    :: k, s, i
+
+        if (.not. amr_qlerp_ready) then
+            @:ALLOCATE(amr_qlerp%vf(1:sys_size))
+            do i = 1, sys_size
+                @:ALLOCATE(amr_qlerp%vf(i)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
+                           & idwbuff(3)%beg:idwbuff(3)%end))
+            end do
+            @:ACC_SETUP_VFs(amr_qlerp)
+            amr_qlerp_ready = .true.
+        end if
+        call s_phase_tic(PH_HALO)
+        call s_amr_exchange_coarse_cons_halo(q_old)
+        call s_amr_exchange_coarse_cons_halo(q_new)
+        call s_phase_toc(PH_HALO)
+        dt0 = dt
+        dt = 0.5_wp*dt0
+        $:GPU_UPDATE(device='[dt]')
+        amr_adv_level = 1
+        do k = 0, 1
+            amr_sub_first = k == 0
+            do s = 1, 3
+                theta = 0.5_wp*(real(k, wp) + c_stage(s))
+                call s_amr_lerp_coarse(q_old, q_new, theta)
+                call s_amr_fine_fine_post()
+                call s_amr_stage_fill_wave(amr_qlerp%vf)
+                call s_phase_tic(PH_SEAM)
+                call s_amr_fine_fine_drain()
+                call s_phase_toc(PH_SEAM)
+                call s_amr_fine_stage_advance_batched(s, coefs(s,:), bc_type, q_T_sf, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
+            end do
+        end do
+        amr_adv_level = 0
+        dt = dt0
+        $:GPU_UPDATE(device='[dt]')
+        call s_phase_tic(PH_REFLUX)
+        call s_amr_reflux_faces_wave()
+        call s_amr_apply_reflux(q_new)
+        call s_phase_toc(PH_REFLUX)
+        call s_amr_select_slot(1)
+
+    end subroutine s_amr_subcycle_fine
+
+    !> amr_qlerp = (1 - theta) q_old + theta q_new over the whole buffered coarse domain.
+    impure subroutine s_amr_lerp_coarse(q_old, q_new, theta)
+
+        type(scalar_field), dimension(sys_size), intent(in) :: q_old, q_new
+        real(wp), intent(in)                                :: theta
+        integer                                             :: i, j, k, l
+
+        $:GPU_PARALLEL_LOOP(collapse=4)
+        do i = 1, sys_size
+            do l = idwbuff(3)%beg, idwbuff(3)%end
+                do k = idwbuff(2)%beg, idwbuff(2)%end
+                    do j = idwbuff(1)%beg, idwbuff(1)%end
+                        amr_qlerp%vf(i)%sf(j, k, l) = (1._wp - theta)*q_old(i)%sf(j, k, l) + theta*q_new(i)%sf(j, k, l)
+                    end do
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_amr_lerp_coarse
 
     impure subroutine s_amr_zero_rhs(rhs_vf)
 

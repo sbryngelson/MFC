@@ -127,6 +127,7 @@ DESCRIPTIONS = {
     "amr_tag_eps": "Density-gradient tagging threshold: a cell is tagged when max over axes of |rho(i+1)-rho(i-1)|/(2 rho_i) exceeds it (dimensionless; halves per grid-doubling for a smooth field)",
     "amr_buf": "Coarse-cell padding around tagged cells when regridding",
     "amr_snap": "Regrid hysteresis in coarse cells per face: a new box this close to a live same-level block takes its box (0 = off)",
+    "amr_subcycle": "Time subcycling: each refined level takes two steps per step of its parent (dt is the level-0 step); default F advances every level at dt",
     "amr_device_pack": "Pack/unpack the per-stage coarse-patch gather (F1/F2) as ONE fused device kernel per family per stage over the plan's flat transfer list, not one launch per transfer",
     "amr_max_blocks": "Number of fixed refined-block slots preallocated for multi-block AMR (each sized max-block; N slots ~ N x device memory)",
     "amr_max_grid_size": "Absolute cap on a refined block's coarse-cell extent per dim; 0 (default) derives it from the decomposition. Set it to make the box set rank-independent",
