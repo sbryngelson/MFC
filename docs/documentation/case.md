@@ -1286,6 +1286,7 @@ with local \f$c_p\f$ and conductivity \f$\lambda\f$ and central differences in \
 The controller above still sets the source total \f$\dot q V_f\f$; \f$\beta\f$ is the root of \f$\dot q V_f = \beta(A_1 + \beta A_2)\f$, with \f$A_1 = \sum \rho c_p u_1 \psi\,dV\f$ and \f$A_2 = \sum \lambda\psi\,dV\f$ (the conduction terms integrate to about zero), that tends to \f$\dot q V_f/A_1\f$ as \f$A_2 \to 0\f$.
 At steady state, \f$\beta\f$ is the streamwise decay rate of \f$T - T_s\f$ and the walls' heat equals \f$-\dot q V_f\f$.
 \f$\beta\f$, \f$A_1\f$ and \f$A_2\f$ are written as columns 7-9 of `mean_temp.dat`.
+Known issue: in flows with streamlines of very different speed (e.g. periodic particle arrays), \f$\beta\f$ taken directly from the controller's source total can exceed the eigenvalue while the thermal field develops, so the fastest streamlines are over-amplified and the gas there cools without bound. Do not use `mean_temp_wall` for such flows until this is fixed; the plane channel (`examples/2D_thermal_channel`) is unaffected.
 
 ### 14. Magnetohydrodynamics (MHD)
 
