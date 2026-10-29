@@ -264,6 +264,8 @@ contains
         ! grow 1.25x with the increment capped at 16 slots: a proportional increment is itself store-scaled, and at a large cap
         ! the +25% transient is what tips a near-limit device over. The +8 floor keeps early growth cheap when oldcap is tiny.
         newcap = max(oldcap + max(min(oldcap/4, 16), 8), nloc)
+        ! tile clustering: hundreds of small columns per rank; doubling keeps the growth (and its device fragmentation) to a few
+        if (amr_tile_cluster) newcap = max(2*oldcap, nloc)
 
         @:AMR_MBUF_BOUNDS()
 
