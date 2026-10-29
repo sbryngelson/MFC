@@ -171,7 +171,7 @@ contains
 
     end subroutine s_amr_fine_rk_update
 
-    !> Batched fine advance: the owned fine blocks are advanced in batches of up to amr_bat_max blocks of the same (level, extent),
+    !> Batched fine advance: the owned fine blocks are advanced in batches of up to amr_bat_lim blocks of the same (level, extent),
     !! stacked two ghost shells apart along the last active dimension in the bridge, so one s_compute_rhs call and one RK kernel
     !! cover the batch. The per-cell arithmetic is the per-block path's; blocks are independent (each advance writes only its own
     !! store column and register slots), so the grouping order is free. The stacked members read the batch leader's coordinate
@@ -185,23 +185,26 @@ contains
         real(stp), dimension(:,:,:,:,:), intent(inout) :: pb_in, mv_in
         real(wp), dimension(:,:,:,:,:), intent(inout) :: rhs_pb, rhs_mv
         integer :: i, j, g, h, ibm, nb
+        integer, allocatable :: ord(:), my(:)
         logical, allocatable :: done(:)
         logical :: last_batch
         integer :: h_bat_blk_ibm  !< plain scalars for device routines (NVHPC -Minline)
         real(wp) :: h_coefs_1, h_coefs_2, h_coefs_3, h_coefs_4, h_merge_1_wp_dt_igr
 
         call s_amr_refresh_my_blocks()
-        allocate (done(amr_n_my)); done = .false.
+        allocate (done(amr_n_my), ord(amr_n_my)); done = .false.
+        call s_amr_batch_order(ord)
+        my = amr_my_blk(ord)
         do i = 1, amr_n_my
             if (done(i)) cycle
             done(i) = .true.
-            g = amr_my_blk(i)
+            g = my(i)
             if (amr_block_level(g) == 0) cycle  ! L0 tile slots are advanced by s_l0_advance_stage
             if (amr_adv_level > 0 .and. amr_block_level(g) /= amr_adv_level) cycle  ! subcycling: one level at a time
             amr_bat_n = 1; amr_bat_blk(1) = g
             do j = i + 1, amr_n_my
-                if (amr_bat_n == amr_bat_max) exit
-                h = amr_my_blk(j)
+                if (amr_bat_n == amr_bat_lim) exit
+                h = my(j)
                 if (done(j) .or. amr_block_level(h) /= amr_block_level(g)) cycle
                 ! padded membership: no larger than the leader in any dim, and the padding wastes <= amr_bat_pad of its cells
                 if (amr_slots(h)%m > amr_slots(g)%m .or. amr_slots(h)%n > amr_slots(g)%n .or. amr_slots(h)%p > amr_slots(g)%p) cycle
@@ -211,8 +214,8 @@ contains
                 amr_bat_n = amr_bat_n + 1; amr_bat_blk(amr_bat_n) = h; done(j) = .true.
             end do
             ! no fine block left undone -> this batch's restore must push the coarse grid state (the coarse stage reads it)
-            last_batch = .not. any(.not. done .and. amr_block_level(amr_my_blk(1:amr_n_my)) /= 0 .and. (amr_adv_level == 0 &
-                                   & .or. amr_block_level(amr_my_blk(1:amr_n_my)) == amr_adv_level))
+            last_batch = .not. any(.not. done .and. amr_block_level(my) /= 0 .and. (amr_adv_level == 0 .or. amr_block_level(my) &
+                                   & == amr_adv_level))
             ! the batch frame: leader selected (swap, capture and RK read amr_cur / the slot's extents), members' store columns
             call s_amr_select_slot(g)
             amr_bat_ext = [amr_slots(g)%m, amr_slots(g)%n, amr_slots(g)%p]
@@ -285,6 +288,27 @@ contains
         deallocate (done)
 
     end subroutine s_amr_fine_stage_advance_batched
+
+    !> The order the batched advance groups the owned blocks in: as owned, or under amr_tile_cluster (many box shapes) largest
+    !! first, so a batch leader can take the smaller blocks the padding allowance admits.
+    impure subroutine s_amr_batch_order(ord)
+
+        integer, intent(out)    :: ord(:)
+        integer(8), allocatable :: key(:)
+        integer                 :: i, g
+
+        if (.not. amr_tile_cluster) then
+            ord = [(i, i=1, size(ord))]
+            return
+        end if
+        allocate (key(size(ord)))
+        do i = 1, size(ord)
+            g = amr_my_blk(i)
+            key(i) = -int(amr_slots(g)%m + 1, 8)*int(amr_slots(g)%n + 1, 8)*int(amr_slots(g)%p + 1, 8)
+        end do
+        call s_amr_sort_by_key(key, size(ord), ord)
+
+    end subroutine s_amr_batch_order
 
     !> RHS pass of a fine-block RK stage: step-entry backup, swap grid globals to the block, s_compute_rhs (fills amr_slots%rhs +
     !! captures the block's freg / its children's creg), restore coarse globals. Leaves the per-slot rhs ready for the RK pass (or,

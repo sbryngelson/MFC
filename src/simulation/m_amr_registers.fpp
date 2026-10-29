@@ -590,6 +590,7 @@ contains
             ! its dense register slot (a child of an owned block is always mapped, s_amr_reg_prepare clause (b) is this loop's
             ! twin); both faces always owned (the parent spans the whole child footprint).
             do ibm = 1, max(1, amr_bat_n)
+                if (amr_block_level(save_cur) >= amr_max_level) exit  ! the finest level has no children to scan for
                 call s_amr_bat_member(ibm, ko, ext)
                 do kc = 1, amr_num_blocks
                     if (.not. f_amr_is_child(kc, amr_cur)) cycle

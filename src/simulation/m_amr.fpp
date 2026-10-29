@@ -60,7 +60,7 @@ contains
 #ifdef MFC_GPU
         amr_fw_dev = rdma_mpi .and. XA_NH == 0
 #endif
-        amr_br_batch = amr_bat_max
+        amr_br_batch = amr_bat_lim
 
         ! Fine-block cap = the case amr_max_blocks; the shared pool adds the L0 tile prefix (l0_slot_off, 0 when l0_ntile=0)
         ! ahead of it, so both AMR fine blocks and any L0 tiles draw from one amr_slots allocation.

@@ -403,8 +403,10 @@ module m_global_parameters
     !> Batched fine advance: the batch being advanced - amr_bat_n members (0 outside a batch), their block ids, their shared
     !! extents, the stacking dimension (the last active one) and the stack stride (block width + two ghost shells). Member i sits at
     !! offset (i-1)*amr_bat_w along amr_bat_sd in the bridge and in every solver scratch array; the flux capture in m_amr_registers
-    !! reads these to place each member's faces.
-    integer, parameter :: amr_bat_max = 8
+    !! reads these to place each member's faces. amr_bat_lim (<= amr_bat_max, the table capacity) is the batch size: 8, or under
+    !! amr_tile_cluster as many blocks as fill the slab 8 blocks of the 64-cell cap would.
+    integer, parameter :: amr_bat_max = 64
+    integer            :: amr_bat_lim = 8
     integer            :: amr_bat_n = 0, amr_bat_blk(amr_bat_max) = 0, amr_bat_ext(3) = 0, amr_bat_sd = 3, amr_bat_w = 0
     !> A block may join a batch led by a larger block when padding it to the leader's extent wastes at most amr_bat_pad of its own
     !! cells. Members may be smaller than the leader; amr_bat_mext holds each member's own extents so the bridge load clamps its
@@ -1124,7 +1126,7 @@ contains
         end if
 
         if (amr) then
-            ! the batched fine advance runs one s_compute_rhs over up to amr_bat_max same-extent blocks stacked along the last
+            ! the batched fine advance runs one s_compute_rhs over up to amr_bat_lim same-extent blocks stacked along the last
             ! active dimension, each with its ghost shell: the scratch must hold that slab. A block is bounded by amr_maxc_fit
             ! (m_amr), which is the pinned cap or, derived, the minimum over ranks of the local half-extent; this rank's own
             ! half-extent bounds both, so the slab is sized from it without the reduction.
@@ -1138,7 +1140,9 @@ contains
                 end select
                 cap = (cap + 1)/amr_ref_ratio
                 if (amr_max_grid_size > 0) cap = min(cap, amr_max_grid_size)
-                idwbuff_alloc(sd)%end = max(idwbuff_alloc(sd)%end, amr_bat_max*(amr_ref_ratio*cap + 2*buff_size) - buff_size - 1)
+                if (amr_tile_cluster) amr_bat_lim = min(amr_bat_max, max(8, &
+                    & 8*(64*amr_ref_ratio + 2*buff_size)/(amr_ref_ratio*cap + 2*buff_size)))
+                idwbuff_alloc(sd)%end = max(idwbuff_alloc(sd)%end, amr_bat_lim*(amr_ref_ratio*cap + 2*buff_size) - buff_size - 1)
             end block
         end if
 

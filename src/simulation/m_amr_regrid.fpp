@@ -21,6 +21,7 @@ module m_amr_regrid
     use m_mpi_common, only: s_mpi_allreduce_min, s_mpi_allreduce_max
     use m_amr_wave
     use m_amr_cluster, only: s_amr_cluster, s_amr_tile_cluster
+    use m_amr_distribution, only: s_amr_sort_by_key
     use m_amr, only: amr_slots, amr_cons_st, amr_stor_st, amr_loc_of, amr_slot_live, amr_my_blk, amr_n_my, &
         & s_amr_refresh_my_blocks, amr_maxc_fit, amr_seam_pairs_dirty, amr_mesh_epoch, amr_cpat_mar, s_amr_alloc_slot, &
         & s_amr_alloc_slot_stash, s_amr_prereserve_stash, s_amr_free_slot, s_amr_reduce_xchg_flag, s_amr_reconcile_slots, &
@@ -145,17 +146,24 @@ contains
     !> Invariant check: same-level boxes are pairwise disjoint. Guaranteed by the cluster partition + merge threshold + IB
     !! overlap-merge; relied on by the rebuild's overlap carry-forward and by per-peer unpack reordering in the exchange plans, so
     !! it is enforced here rather than assumed. All levels share the global coarse index space (see the cap formula in
-    !! s_amr_check_box_caps), so the interval test is valid across parents. O(nboxes^2) host integer compares per regrid; a sorted
-    !! sweep would replace it if box counts grow.
+    !! s_amr_check_box_caps), so the interval test is valid across parents. A sweep in x-lo order compares each box only with the
+    !! boxes starting inside its x range, so tile clustering's thousands of small boxes stay cheap.
     impure subroutine s_amr_check_box_disjoint(boxes, nboxes, box_level)
 
         type(t_box), intent(in) :: boxes(:)
         integer, intent(in)     :: nboxes, box_level(:)
-        integer                 :: k, kk
+        integer(8), allocatable :: key(:)
+        integer, allocatable    :: ord(:)
+        integer                 :: i, j, k, kk
 
-        do k = 1, nboxes
+        allocate (ord(nboxes)); key = [(int(boxes(k)%lo(1), 8), k=1, nboxes)]
+        call s_amr_sort_by_key(key, nboxes, ord)
+        do i = 1, nboxes
+            k = ord(i)
             if (box_level(k) < 1) cycle
-            do kk = k + 1, nboxes
+            do j = i + 1, nboxes
+                kk = ord(j)
+                if (boxes(kk)%lo(1) > boxes(k)%hi(1)) exit
                 if (box_level(kk) /= box_level(k)) cycle
                 if (all(boxes(k)%lo <= boxes(kk)%hi .and. boxes(kk)%lo <= boxes(k)%hi)) then
                     if (proc_rank == 0) print '(A,I0,A,I0,A,I0)', ' [amr] same-level box overlap: level ', box_level(k), &
@@ -467,7 +475,8 @@ contains
         call s_amr_report_mem('shaped')
         if (nboxes == 0) return  ! every box was confined to the domain margin
         call s_amr_regrid_nest_children(boxes, nboxes, box_level)
-        if (amr_snap > 0) call s_amr_regrid_snap_boxes(boxes, nboxes, box_level)
+        ! lattice boxes move by whole tiles, never by the few cells a snap absorbs
+        if (amr_snap > 0 .and. .not. amr_tile_cluster) call s_amr_regrid_snap_boxes(boxes, nboxes, box_level)
         call s_amr_check_box_caps(boxes, nboxes, box_level)  ! invariant: no box may exceed its level's slot cap
         call s_amr_check_box_disjoint(boxes, nboxes, box_level)  ! invariant: same-level boxes are pairwise disjoint
         if (rank_time_wrt .and. proc_rank == 0) call s_amr_report_coverage(boxes, nboxes, box_level)
