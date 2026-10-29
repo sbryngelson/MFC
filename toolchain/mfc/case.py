@@ -50,7 +50,7 @@ class Case:
         self.params = copy.deepcopy(params)
         for key, val in self.params.items():
             self.params[key] = self.__normalize_named_value(key, val)
-        # ib_flux_wall left unset: on for an array of fixed, no-slip, non-blowing inert bodies (zero face mass flux)
+        # ib_flux_wall left unset: on when every body is fixed, no-slip and non-blowing (reacting or inert)
         if "ib_flux_wall" not in self.params and ib_flux_wall_issue(self.params, auto=True) is None:
             self.params["ib_flux_wall"] = "T"
 

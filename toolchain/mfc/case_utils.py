@@ -24,9 +24,9 @@ def remove_higher_dimensional_keys(case: dict, ndims: int) -> dict:
 
 
 def ib_flux_wall_issue(p: dict, auto: bool):
-    """First reason ib_flux_wall cannot apply to case p, or None. auto: the unset default, which needs every body to be a fixed,
-    no-slip, non-blowing inert one; otherwise an explicit T, which needs fixed, non-blowing reacting bodies and at least one wall
-    (an inert body that moves, slips or blows keeps the ghost-state wall)."""
+    """First reason ib_flux_wall cannot apply to case p, or None. auto: the unset default, which needs every body to be fixed,
+    no-slip and non-blowing (reacting or inert); otherwise an explicit T, which needs fixed, non-blowing reacting bodies and at
+    least one wall (an inert body that moves, slips or blows keeps the ghost-state wall)."""
     on = lambda k: str(p.get(k, "F")) == "T"  # noqa: E731
     num = lambda k, d: p.get(k, d) or d  # noqa: E731
     try:
@@ -49,8 +49,8 @@ def ib_flux_wall_issue(p: dict, auto: bool):
             fixed = int(num(f"patch_ib({i})%moving_ibm", 0)) == 0
             blow = float(num(f"patch_ib({i})%v_blow", 0.0)) > 0 or int(num(f"patch_ib({i})%inj_species", 0)) > 0
             if int(num(f"patch_ib({i})%surface_reaction", 0)) == 1:
-                if auto:
-                    return f"patch_ib({i}) reacts (set ib_flux_wall = T explicitly)"
+                if auto and on(f"patch_ib({i})%slip"):
+                    return f"patch_ib({i}) slips"
                 if not fixed:
                     return f"ib_flux_wall: reacting patch_ib({i}) must be fixed (moving_ibm = 0)"
                 if blow:
