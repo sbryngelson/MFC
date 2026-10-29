@@ -4179,21 +4179,31 @@ contains
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
         real(wp), parameter                                 :: ib_wall_safety = 0.9_wp
-        real(wp)                                            :: dt_loc, use, th, rhoY
+        real(wp), parameter                                 :: ib_wall_share = 1.e-6_wp  !< trace consumption not limited
+        real(wp)                                            :: dt_loc, use, th, rhoY, tot
         integer                                             :: j, k, l, q
 
         call s_ib_wall_src_buffers()
         dt_loc = dt
-        $:GPU_PARALLEL_LOOP(private='[j, k, l, q, use, th, rhoY]', collapse=3, copyin='[dt_loc]')
+        $:GPU_PARALLEL_LOOP(private='[j, k, l, q, use, th, rhoY, tot]', collapse=3, copyin='[dt_loc]')
         do l = 0, p
             do k = 0, n
                 do j = 0, m
                     th = 1._wp
                     if (ib_markers%sf(j, k, l) == 0) then
                         if (f_wall_face_sum(ib_wall_src, j, k, l, 0) > 0._wp) then
+                            tot = 0._wp
                             $:GPU_LOOP(parallelism='[seq]')
                             do q = 1, num_species
-                                use = dt_loc*f_wall_face_sum(ib_wall_src, j, k, l, q)
+                                tot = tot + f_wall_face_sum(ib_wall_src, j, k, l, q)
+                            end do
+                            ! A species carrying a negligible share of the consumption (a radical the cell holds almost none
+                            ! of) would otherwise set theta ~ 0 and starve the whole wall
+                            $:GPU_LOOP(parallelism='[seq]')
+                            do q = 1, num_species
+                                use = f_wall_face_sum(ib_wall_src, j, k, l, q)
+                                if (.not. use > ib_wall_share*tot) cycle
+                                use = dt_loc*use
                                 rhoY = q_cons_vf(eqn_idx%species%beg + q - 1)%sf(j, k, l)
                                 if (use > ib_wall_safety*rhoY) th = min(th, ib_wall_safety*max(rhoY, 0._wp)/use)
                             end do
