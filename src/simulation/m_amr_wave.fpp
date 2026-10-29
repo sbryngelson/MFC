@@ -47,8 +47,9 @@ module m_amr_wave
     end type t_amr_wave_side
 
     !> the pooled waves' send/receive sides. The fill and restrict waves run one at a time and share amr_wsend/amr_wrecv (and the
-    !! amr_fw_sq/rq pools); the seam wave is posted before the fills and drained after them, so it keeps its own pair.
-    type(t_amr_wave_side), public :: amr_wsend, amr_wrecv, amr_wseam_snd, amr_wseam_rcv
+    !! amr_fw_sq/rq pools); the seam wave is posted before the fills and drained after them, so it keeps its own pair, plus one for
+    !! the level-1 ghost pieces (amr_tile_cluster).
+    type(t_amr_wave_side), public :: amr_wsend, amr_wrecv, amr_wseam_snd, amr_wseam_rcv, amr_wpc_snd, amr_wpc_rcv
 
     !> An open wave: its tag band and request list; sends carry -1 in reqw, receives their planned word count (checked after the
     !! wait under MFC_DEBUG). The seam wave stays open across the fill waves, so it is a second instance.

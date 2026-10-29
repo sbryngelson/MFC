@@ -2087,6 +2087,13 @@ class CaseValidator:
             amr_blocking_factor is not None and amr_blocking_factor < 1,
             "amr_blocking_factor must be >= 1 (1 = no minimum box size; the default is 4)",
         )
+        if self.get("amr_tile_cluster", "F") == "T":
+            # lattice boxes touch or lie a tile apart; a one-cell gap would give two blocks one outside reflux cell
+            self.prohibit((amr_blocking_factor or 4) < 2, "amr_tile_cluster requires amr_blocking_factor >= 2")
+            self.prohibit(self.get("ib", "F") == "T", "amr_tile_cluster does not support immersed boundaries yet")
+            self.prohibit(self.get("l0_ntile", 0) not in (0, None), "amr_tile_cluster does not support L0 tiles (l0_ntile)")
+            self.prohibit(self.get("acoustic_source", "F") == "T", "amr_tile_cluster does not support acoustic sources")
+            self.prohibit(self.get("bubbles_lagrange", "F") == "T", "amr_tile_cluster does not support Lagrangian bubbles")
         self.prohibit(recon_type is not None and recon_type != 1 and not igr, "amr requires WENO reconstruction (recon_type = 1) or the IGR solver")
         # unset is a failure too: the Fortran default is the dflt_int sentinel, which is not 3
         self.prohibit(time_stepper != 3, "amr requires time_stepper = 3 (SSP-RK3)")

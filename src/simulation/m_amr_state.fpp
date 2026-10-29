@@ -117,6 +117,11 @@ module m_amr_state
     integer, allocatable :: amr_seam_pairs(:,:)
     integer              :: amr_num_seam_pairs, amr_seam_pairs_nblk
     logical              :: amr_seam_pairs_dirty
+    !> amr_tile_cluster: the level-1 ghost pieces (8, n) = (receiving block, sending block, global fine lo(1:3), hi(1:3)), rebuilt
+    !! with the seam list; their wire pools; the same-rank copy plan (s_amr_pieces_post) and the wire plan scratch
+    integer, allocatable  :: amr_pcs(:,:), amr_pc_pl(:,:), amr_pc_pre(:), amr_pcw_pl(:,:), amr_pcw_pre(:)
+    integer               :: amr_num_pcs = 0, amr_pc_nsame = 0
+    real(wp), allocatable :: amr_pc_sq(:), amr_pc_rq(:)
     !! amr_mesh_epoch lives in m_global_parameters (m_amr_registers keys its participation-map rebuild on it and cannot use
     !! m_amr); it is use-associated here and re-exported.
     !> Tag base of the clusterer's narrow-node reductions (amr_tag_narrow + mod(epoch, 50)), above the per-box tag space
@@ -678,18 +683,28 @@ contains
 
         integer, allocatable, intent(inout) :: a(:,:)
         integer, intent(in)                 :: n
+
+        call s_amr_size_rows(a, 3, n)
+
+    end subroutine s_amr_size_int3
+
+    !> s_amr_size_int for a table of n columns of r ints.
+    impure subroutine s_amr_size_rows(a, r, n)
+
+        integer, allocatable, intent(inout) :: a(:,:)
+        integer, intent(in)                 :: r, n
         integer, allocatable                :: tmp(:,:)
 
         if (.not. allocated(a)) then
-            allocate (a(3, max(n, 64)))
+            allocate (a(r, max(n, 64)))
             return
         end if
         if (size(a, 2) >= n) return
         call move_alloc(a, tmp)
-        allocate (a(3, max(n, 2*size(tmp, 2))))
+        allocate (a(r, max(n, 2*size(tmp, 2))))
         a(:,1:size(tmp, 2)) = tmp
 
-    end subroutine s_amr_size_int3
+    end subroutine s_amr_size_rows
 
     !> Wire pools, preserving on grow. dev keeps the pool device-resident across (re)allocation: the old image is deleted from the
     !! device before it is freed and the new one created after; contents never survive a wave, so nothing is copied.

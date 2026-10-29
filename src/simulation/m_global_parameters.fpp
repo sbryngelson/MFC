@@ -642,6 +642,7 @@ contains
         amr_place_owner = .false.
         amr_buf = 3
         amr_snap = 0
+        amr_tile_cluster = .false.
         amr_device_pack = .false.
         amr_subcycle = .false.
         amr_prolong = 1

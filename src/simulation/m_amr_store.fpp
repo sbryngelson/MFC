@@ -130,6 +130,7 @@ contains
         deallocate (amr_slot_live)
         call s_amr_st_finalize()
         if (allocated(amr_seam_pairs)) deallocate (amr_seam_pairs)
+        if (allocated(amr_pcs)) deallocate (amr_pcs)
         if (allocated(amr_ovl_gather)) deallocate (amr_ovl_gather)
         if (allocated(amr_ovl_scatter)) deallocate (amr_ovl_scatter)
         deallocate (amr_ovl_gather_n, amr_ovl_scatter_n, amr_slots, amr_block_owner, amr_block_level, amr_owner_cut, amr_fine_cut)

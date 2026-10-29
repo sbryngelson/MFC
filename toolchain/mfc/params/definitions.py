@@ -733,6 +733,7 @@ def _load():
     _r("amr_place_owner", LOG)
     _r("amr_buf", INT)
     _r("amr_snap", INT)
+    _r("amr_tile_cluster", LOG)
     _r("amr_device_pack", LOG)
     _r("amr_subcycle", LOG)
     _r("amr_prolong", INT)
@@ -1513,6 +1514,7 @@ _nv(
     "amr_place_owner",
     "amr_buf",
     "amr_snap",
+    "amr_tile_cluster",
     "amr_device_pack",
     "amr_subcycle",
     "amr_prolong",

@@ -23,7 +23,7 @@ module m_amr_cluster
     implicit none
 
     private
-    public :: s_amr_cluster
+    public :: s_amr_cluster, s_amr_tile_cluster
 
 contains
 
@@ -775,5 +775,93 @@ contains
         end function f_mrg_qmina
 
     end subroutine s_amr_cluster
+
+    !> Tile clustering (amr_tile_cluster): mark every amr_blocking_factor lattice tile an amr_buf-padded tag reaches (one OR
+    !! reduction of the global tile mask), then cover the marked tiles of each amr_maxc_fit chunk with greedy maximal boxes (an x
+    !! run, grown in y, then z, while the whole run or slab is marked). The boxes are lattice-aligned and disjoint, so two of them
+    !! touch or lie amr_blocking_factor apart, and they are already padded. The debug seed MFC_AMR_TILE_SEED (lo(1:3) hi(1:3) per
+    !! box, coarse cells) replaces the tags with fixed boxes.
+    impure subroutine s_amr_tile_cluster(tags, ntag, boxes, nboxes)
+
+        integer, intent(in)                   :: tags(:,:), ntag
+        type(t_box), allocatable, intent(out) :: boxes(:)
+        integer, intent(out)                  :: nboxes
+        logical, allocatable                  :: mk(:,:,:)
+        integer                               :: bf, gx(3), nt(3), mb(3), lo(3), hi(3), a(3), b(3), c1(3), t, cx, cy, cz, x, y, z
+
+#ifdef MFC_MPI
+        integer :: ierr
+#endif
+
+        allocate (boxes(amr_max_fine)); nboxes = 0
+        if (f_amr_tile_seed(boxes, nboxes)) return
+        bf = amr_blocking_factor; gx = [m_glb, n_glb, p_glb]
+        nt = merge(gx/bf + 1, 1, amr_dim)
+        allocate (mk(0:nt(1) - 1,0:nt(2) - 1,0:nt(3) - 1)); mk = .false.
+        do t = 1, ntag
+            lo = merge(max(tags(:,t) - amr_buf, 0)/bf, 0, amr_dim); hi = merge(min(tags(:,t) + amr_buf, gx)/bf, 0, amr_dim)
+            mk(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)) = .true.
+        end do
+#ifdef MFC_MPI
+        call MPI_ALLREDUCE(MPI_IN_PLACE, mk, size(mk), MPI_LOGICAL, MPI_LOR, MPI_COMM_WORLD, ierr)
+#endif
+        mb = merge(max(amr_maxc_fit/bf, 1), 1, amr_dim)
+        do cz = 0, nt(3) - 1, mb(3)
+            do cy = 0, nt(2) - 1, mb(2)
+                do cx = 0, nt(1) - 1, mb(1)
+                    c1 = min([cx, cy, cz] + mb, nt) - 1
+                    do z = cz, c1(3)
+                        do y = cy, c1(2)
+                            do x = cx, c1(1)
+                                if (.not. mk(x, y, z)) cycle
+                                a = [x, y, z]; b = a
+                                do while (b(1) < c1(1))
+                                    if (.not. mk(b(1) + 1, y, z)) exit
+                                    b(1) = b(1) + 1
+                                end do
+                                do while (b(2) < c1(2))
+                                    if (.not. all(mk(x:b(1),b(2) + 1, z))) exit
+                                    b(2) = b(2) + 1
+                                end do
+                                do while (b(3) < c1(3))
+                                    if (.not. all(mk(x:b(1),y:b(2),b(3) + 1))) exit
+                                    b(3) = b(3) + 1
+                                end do
+                                mk(x:b(1),y:b(2),z:b(3)) = .false.
+                                if (nboxes == amr_max_fine) then
+                                    if (proc_rank == 0) print '(A,I0)', ' [amr] WARNING: tile clustering capped at ', amr_max_fine
+                                    return
+                                end if
+                                nboxes = nboxes + 1
+                                boxes(nboxes)%lo = merge(a*bf, 0, amr_dim)
+                                boxes(nboxes)%hi = merge(min((b + 1)*bf - 1, gx), 0, amr_dim)
+                            end do
+                        end do
+                    end do
+                end do
+            end do
+        end do
+
+    end subroutine s_amr_tile_cluster
+
+    !> The debug seed of s_amr_tile_cluster: true (with the boxes) when MFC_AMR_TILE_SEED is set.
+    impure logical function f_amr_tile_seed(boxes, nboxes) result(seeded)
+
+        type(t_box), intent(inout) :: boxes(:)
+        integer, intent(inout)     :: nboxes
+        character(len=4096)        :: env
+        integer                    :: ln, st, v(6*64), k
+
+        call get_environment_variable('MFC_AMR_TILE_SEED', env, ln, st)
+        seeded = st == 0 .and. ln > 0
+        if (.not. seeded) return
+        v = -1
+        read (env, *, iostat=st) v
+        do k = 1, size(v)/6
+            if (v(6*k) < 0) exit
+            nboxes = nboxes + 1; boxes(nboxes)%lo = v(6*k - 5:6*k - 3); boxes(nboxes)%hi = v(6*k - 2:6*k)
+        end do
+
+    end function f_amr_tile_seed
 
 end module m_amr_cluster

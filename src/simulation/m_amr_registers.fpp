@@ -81,6 +81,11 @@ module m_amr_registers
     real(wp), allocatable :: a_mlo(:), a_mhi(:)
     $:GPU_DECLARE(create='[a_ol, a_oh, a_ta, a_tb, a_b1l, a_b1h, a_b2l, a_b2h, a_lo, a_hi, a_act, a_mlo, a_mhi]')
 
+    !> amr_tile_cluster: this rank's coarse cells (0:m, 0:n, 0:p) under a level-1 block. A level-1 face whose outside cell is
+    !! covered is fine-fine (the ghost pieces match its flux on both sides), so the apply skips the correction there. 0:0 when off.
+    logical, allocatable :: l1cov(:,:,:)
+    $:GPU_DECLARE(create='[l1cov]')
+
 contains
 
     #:def REG_GROW(A, L2, U2, L3, U3)
@@ -227,8 +232,26 @@ contains
         call s_amr_reg_reserve(amr_reg_n)
         call s_amr_zero_registers(.true., 1, amr_reg_n)
         call s_amr_zero_registers(.false., 1, amr_reg_n)
+        if (amr_tile_cluster) call s_amr_l1cov_build()
 
     end subroutine s_amr_reg_prepare
+
+    !> Mark this rank's coarse cells covered by a level-1 block (l1cov).
+    impure subroutine s_amr_l1cov_build()
+
+        integer :: g, lo(3), hi(3)
+
+        l1cov = .false.
+        do g = 1, amr_num_blocks
+            if (amr_block_level(g) /= 1) cycle
+            lo = merge(max(amr_region_lo_all(:,g) - amr_sidx, 0), 0, amr_dim)
+            hi = merge(min(amr_region_hi_all(:,g) - amr_sidx, amr_ext), 0, amr_dim)
+            if (any(lo > hi)) cycle
+            l1cov(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)) = .true.
+        end do
+        $:GPU_UPDATE(device='[l1cov]')
+
+    end subroutine s_amr_l1cov_build
 
     !> The faces of the current block (amr_region_lo/hi, set on every rank by s_amr_select_slot) whose outside coarse layer lies in
     !! the coarse subdomain [sidx, sidx + ext] with transverse overlap: the faces that subdomain's rank refluxes. With clip,
@@ -250,7 +273,7 @@ contains
             s_lo(d) = tvd .and. amr_region_lo(d) - 1 >= sidx(d) .and. amr_region_lo(d) - 1 <= sidx(d) + ext(d)
             s_hi(d) = tvd .and. amr_region_hi(d) + 1 >= sidx(d) .and. amr_region_hi(d) + 1 <= sidx(d) + ext(d)
             ! nested so the O(blocks) seam search runs only for a face that survived the box tests
-            if (clip) then
+            if (clip .and. .not. amr_tile_cluster) then
                 if (s_lo(d)) then
                     if (f_amr_face_is_seam(d, -1)) s_lo(d) = .false.
                 end if
@@ -289,7 +312,8 @@ contains
 
     !> True iff the current block's face on `side` (+1 high / -1 low) in dim d is shared with an adjacent sub-block (max_grid_size
     !! tiling), i.e. another block's opposite face is exactly one cell away with matching transverse extents. Such a seam is
-    !! fine-fine, not a c/f boundary. Reads the replicated block list (amr_region_*_all); no tiling means no match.
+    !! fine-fine, not a c/f boundary. Reads the replicated block list (amr_region_*_all); no tiling means no match. Not consulted
+    !! under amr_tile_cluster, whose apply skips covered outside cells one by one (l1cov).
     pure logical function f_amr_face_is_seam(d, side) result(seam)
 
         integer, intent(in) :: d, side
@@ -347,6 +371,11 @@ contains
         @:ALLOCATE(a_b1l(1:amr_max_blocks), a_b1h(1:amr_max_blocks), a_b2l(1:amr_max_blocks))
         @:ALLOCATE(a_b2h(1:amr_max_blocks), a_lo(1:amr_max_blocks), a_hi(1:amr_max_blocks), a_act(1:amr_max_blocks))
         @:ALLOCATE(a_mlo(1:amr_max_blocks), a_mhi(1:amr_max_blocks))
+        if (amr_tile_cluster) then
+            @:ALLOCATE(l1cov(0:m, 0:n, 0:p))
+        else
+            @:ALLOCATE(l1cov(0:0, 0:0, 0:0))
+        end if
         ! participation-local register index (host-only ints; the register reals are what the dense map shrinks)
         allocate (amr_reg_of(1:amr_max_blocks))
         amr_reg_of = 0; amr_reg_n = 0; amr_reg_cur = 0
@@ -629,10 +658,11 @@ contains
 
     ! Batched over the level-1 blocks, one kernel per face direction (mirror of the capture-side batching,
     ! s_amr_capture_batch), since per-launch overhead rather than arithmetic dominates a per-block form.
-    ! Same-side corrections of distinct blocks are disjoint (same-level blocks never overlap), so with the low and high faces in
-    ! separate launches the batched kernel is race-free and order-fixed for any block spacing. Host precompute walks the slots
-    ! with select_slot + s_amr_reflux_face_flags; the a_* descriptors are pushed once per direction. Per direction d the
-    ! transverse dims are (ta, tb) and the fine-face register holds rr children per active transverse dim.
+    ! Block corrections are disjoint (the merge invariant keeps blocks >= buff_size apart; tile-clustered level-1 blocks touch
+    ! or lie a blocking factor apart, so a direction's outside cells are distinct), so the batched kernel is
+    ! equivalent to a per-block loop. Host precompute walks the slots with select_slot + s_amr_reflux_face_flags; the
+    ! a_* descriptors are pushed once per direction. Per direction d the transverse dims are (ta, tb) and the fine-face
+    ! register holds rr children per active transverse dim.
     #:for D, TA, TB, DX, IDX in [(1, 2, 3, 'dx', 'a_ol(k), i2, i3'), (2, 1, 3, 'dy', 'i2, a_ol(k), i3'), (3, 1, 2, 'dz', &
                                   & 'i2, i3, a_ol(k)')]
         !> Reflux correction for the faces normal to direction ${D}$. Called only when amr_dim(${D}$).
@@ -641,13 +671,14 @@ contains
             type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf
             integer                                                :: eq, c1, c2, c1w, c2w, k, save_cur, nact, gmax1, gmax2
             integer                                                :: f10, f20, dd1, dd2, nch, rr, dd1_hi, dd2_hi, sreg
-            integer                                                :: bla, bha, blb, bhb, side
+            integer                                                :: bla, bha, blb, bhb
             integer                                                :: i2, i3, sidx(3), ext(3), tlo(3), thi(3)
-            logical                                                :: dta, dtb, own_lo(3), own_hi(3)
-            real(wp)                                               :: fb
+            logical                                                :: dta, dtb, own_lo(3), own_hi(3), tcl, wl, wh
+            real(wp)                                               :: fblo, fbhi
 
             rr = amr_ref_ratio
             save_cur = amr_cur
+            tcl = amr_tile_cluster
             dta = amr_dim(${TA}$); dtb = amr_dim(${TB}$)
             nch = rr**count([dta, dtb])
             dd1_hi = merge(rr - 1, 0, dta); dd2_hi = merge(rr - 1, 0, dtb)
@@ -675,46 +706,39 @@ contains
             call s_amr_select_slot(save_cur)
             if (nact > 0) then
                 $:GPU_UPDATE(device='[a_ol, a_oh, a_ta, a_tb, a_b1l, a_b1h, a_b2l, a_b2h, a_lo, a_hi, a_act, a_mlo, a_mhi]')
-                ! low faces, then high faces: one block's high outside cell can be another's low outside cell (a one-cell gap),
-                ! so a single launch over both would race on it
-                do side = 0, 1
-                    $:GPU_PARALLEL_LOOP(collapse=4, private='[c1, c2, f10, f20, dd1, dd2, fb, i2, i3]')
-                    do k = 1, amr_reg_n
-                        do c2w = 0, gmax2
-                            do c1w = 0, gmax1
-                                do eq = 1, sys_size
-                                    if (.not. a_act(k)) cycle
-                                    if (.not. merge(a_hi(k), a_lo(k), side == 1)) cycle
-                                    c1 = a_b1l(k) + c1w; c2 = a_b2l(k) + c2w
-                                    if (c1 > a_b1h(k) .or. c2 > a_b2h(k)) cycle
-                                    f10 = 0; if (dta) f10 = rr*c1
-                                    f20 = 0; if (dtb) f20 = rr*c2
-                                    fb = 0._wp
-                                    do dd2 = 0, dd2_hi
-                                        do dd1 = 0, dd1_hi
-                                            if (side == 0) then
-                                                fb = fb + freg(${D}$)%lo(eq, f10 + dd1, f20 + dd2, k)
-                                            else
-                                                fb = fb + freg(${D}$)%hi(eq, f10 + dd1, f20 + dd2, k)
-                                            end if
-                                        end do
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[c1, c2, f10, f20, dd1, dd2, fblo, fbhi, i2, i3, wl, wh]')
+                do k = 1, amr_reg_n
+                    do c2w = 0, gmax2
+                        do c1w = 0, gmax1
+                            do eq = 1, sys_size
+                                if (.not. a_act(k)) cycle
+                                c1 = a_b1l(k) + c1w; c2 = a_b2l(k) + c2w
+                                if (c1 > a_b1h(k) .or. c2 > a_b2h(k)) cycle
+                                f10 = 0; if (dta) f10 = rr*c1
+                                f20 = 0; if (dtb) f20 = rr*c2
+                                fblo = 0._wp; fbhi = 0._wp
+                                do dd2 = 0, dd2_hi
+                                    do dd1 = 0, dd1_hi
+                                        fblo = fblo + freg(${D}$)%lo(eq, f10 + dd1, f20 + dd2, k)
+                                        fbhi = fbhi + freg(${D}$)%hi(eq, f10 + dd1, f20 + dd2, k)
                                     end do
-                                    fb = fb/real(nch, wp)
-                                    i2 = a_ta(k) + c1; i3 = a_tb(k) + c2
-                                    if (side == 0) then
-                                        rhs_vf(eq)%sf(${IDX}$) = rhs_vf(eq)%sf(${IDX}$) + (creg(${D}$)%lo(eq, c1, c2, &
-                                               & k) - fb)/a_mlo(k)
-                                    else
-                                        rhs_vf(eq)%sf(${IDX.replace('a_ol', 'a_oh')}$) &
-                                               & = rhs_vf(eq)%sf(${IDX.replace('a_ol', 'a_oh')}$) + (fb - creg(${D}$)%hi(eq, c1, &
-                                               & c2, k))/a_mhi(k)
-                                    end if
                                 end do
+                                fblo = fblo/real(nch, wp); fbhi = fbhi/real(nch, wp)
+                                i2 = a_ta(k) + c1; i3 = a_tb(k) + c2
+                                ! tile clustering: no correction where another level-1 block covers the outside cell
+                                wl = a_lo(k); wh = a_hi(k)
+                                if (wl .and. tcl) wl = .not. l1cov(${IDX}$)
+                                if (wh .and. tcl) wh = .not. l1cov(${IDX.replace('a_ol', 'a_oh')}$)
+                                if (wl) rhs_vf(eq)%sf(${IDX}$) = rhs_vf(eq)%sf(${IDX}$) + (creg(${D}$)%lo(eq, c1, c2, &
+                                    & k) - fblo)/a_mlo(k)
+                                if (wh) rhs_vf(eq)%sf(${IDX.replace('a_ol', 'a_oh')}$) &
+                                    & = rhs_vf(eq)%sf(${IDX.replace('a_ol', 'a_oh')}$) + (fbhi - creg(${D}$)%hi(eq, c1, c2, &
+                                    & k))/a_mhi(k)
                             end do
                         end do
                     end do
-                    $:END_GPU_PARALLEL_LOOP()
                 end do
+                $:END_GPU_PARALLEL_LOOP()
             end if
 
         end subroutine s_amr_apply_reflux_d${D}$
@@ -830,7 +854,7 @@ contains
             @:DEALLOCATE(creg(d)%lo, creg(d)%hi, freg(d)%lo, freg(d)%hi)
         end do
         @:DEALLOCATE(bjlo, bjhi, bo1, bo2, bt1lo, bt1hi, bt2lo, bt2hi, bclo, bchi, bactive)
-        @:DEALLOCATE(a_ol, a_oh, a_ta, a_tb, a_b1l, a_b1h, a_b2l, a_b2h, a_lo, a_hi, a_act, a_mlo, a_mhi)
+        @:DEALLOCATE(a_ol, a_oh, a_ta, a_tb, a_b1l, a_b1h, a_b2l, a_b2h, a_lo, a_hi, a_act, a_mlo, a_mhi, l1cov)
         if (allocated(amr_reg_of)) deallocate (amr_reg_of)
         amr_reg_n = 0; amr_reg_cur = 0
 

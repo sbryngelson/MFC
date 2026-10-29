@@ -128,6 +128,7 @@ DESCRIPTIONS = {
     "amr_tag_abs": "Tag on the largest absolute density face jump (AMReX/PeleC dengrad) instead of the relative central difference; amr_tag_eps is then a density",
     "amr_tag_eps": "Density-gradient tagging threshold: a cell is tagged when max over axes of |rho(i+1)-rho(i-1)|/(2 rho_i) exceeds it (dimensionless; halves per grid-doubling for a smooth field)",
     "amr_buf": "Coarse-cell padding around tagged cells when regridding",
+    "amr_tile_cluster": "Level-1 boxes from blocking-factor tiles: any disjoint layout (partial faces, L-shapes, edge/corner contact) instead of merged bounding boxes",
     "amr_snap": "Regrid hysteresis in coarse cells per face: a new box this close to a live same-level block takes its box (0 = off)",
     "amr_subcycle": "Time subcycling: each refined level takes two steps per step of its parent (dt is the level-0 step); default F advances every level at dt",
     "amr_prolong": "Fine ghost and regrid-seed prolongation: 1 (default) minmod-limited linear, 2 conservative quartic with an MC-limited linear fallback near discontinuities (amr_ref_ratio = 2)",

@@ -597,6 +597,7 @@ contains
         do pass = 1, 2
             np = 0
             do xb = 1, amr_num_blocks
+                if (amr_tile_cluster .and. amr_block_level(xb) == 1) cycle  ! the general pieces serve level 1
                 nm = 0
                 do d = 1, num_dims
                     clo = amr_region_lo_all(:,xb)
@@ -635,6 +636,7 @@ contains
             end if
         end do
         deallocate (mkey, ord)
+        if (amr_tile_cluster) call s_amr_build_pieces()
         ! per-block P2P overlap-rank lists by O(overlap) inversion (gather: rank coarse range vs the amr_cpat_mar-padded patch box;
         ! scatter: rank interior vs the region box), rank-ascending so iterating a list gives the same MPI send/recv order as a
         ! 0..num_procs-1 scan. The clamped interior-frame coord range reproduces both frames (see s_amr_coord_range). Bounded
@@ -670,7 +672,7 @@ contains
         integer :: xb, yb, d, rX, rY, cnt, xm(3), tsz, fmul, idx, lo, hi
         integer :: r, sblk, sdlo, sdhi, ublk, udlo, udhi, eblk, edlo, edhi
 
-        amr_sw_nsame = 0
+        amr_sw_nsame = 0; amr_pc_nsame = 0
         if (.not. amr .and. l0_ntile == 0) return
         if (amr_num_blocks < 2) return
 
@@ -727,6 +729,7 @@ contains
             call s_amr_wave_hdr_pack(amr_wseam_snd, amr_sw_sq, idx, XA_F6W_SND)
         end do
         call s_amr_wave_send(amr_wave_seam, amr_wseam_snd, amr_sw_sq, XA_F6W_SND, .false.)
+        if (amr_tile_cluster) call s_amr_pieces_post()
 
     end subroutine s_amr_fine_fine_post
 
@@ -734,7 +737,7 @@ contains
 
         integer :: idx, lo, hi
 
-        if (f_amr_wave_nreq(amr_wave_seam) == 0 .and. amr_sw_nsame == 0) return
+        if (f_amr_wave_nreq(amr_wave_seam) == 0 .and. amr_sw_nsame == 0 .and. amr_pc_nsame == 0) return
         call s_amr_wave_wait(amr_wave_seam)
         do idx = 1, amr_wseam_rcv%nx
             call s_amr_wave_slice(amr_wseam_rcv, idx, lo, hi)
@@ -747,6 +750,7 @@ contains
         end do
         if (amr_sw_nsame > 0) call s_amr_fine_seam_exchange(amr_sw_nsame, amr_sw_plx(1:amr_sw_nsame), amr_sw_ply(1:amr_sw_nsame), &
             & amr_sw_pd(1:amr_sw_nsame), amr_sw_pxhi(1:amr_sw_nsame), amr_sw_pfm(:,1:amr_sw_nsame), buff_size)
+        if (amr_tile_cluster) call s_amr_pieces_drain()
         call s_amr_select_slot(1)
 
     end subroutine s_amr_fine_fine_drain
@@ -758,6 +762,215 @@ contains
         call s_amr_fine_fine_drain()
 
     end subroutine s_amr_fine_fine_halo
+
+    !> Flat-index decode shared by the fused exchange kernels (amr_device_pack, the level-1 pieces): binary-search the plan prefix
+    !! for the transfer t that owns flat element e, then invert its linear buffer index into (i, g3, g2, g1). One text, so the
+    !! kernels cannot drift from each other or from the per-transfer index map.
+    #:def FX_DECODE()
+        lo = t0; hi = t1
+        do while (lo < hi)
+            md = (lo + hi)/2
+            if (pre(md + 1) < e) then; lo = md + 1; else; hi = md; end if
+        end do
+        t = lo
+        r = e - pre(t) - 1
+        n1 = pl(4, t); n2 = pl(5, t); n3 = pl(6, t)
+        g1 = pl(1, t) + mod(r, n1); g2 = pl(2, t) + mod(r/n1, n2); g3 = pl(3, t) + mod(r/(n1*n2), n3)
+        i = r/(n1*n2*n3) + 1
+    #:enddef
+
+    !> amr_tile_cluster: the level-1 ghost pieces, isect(grow(b, buff_size), interior(s)) in global level-1 fine cells for every
+    !! ordered pair of level-1 blocks within ghost reach (b receives, s sends; faces, edges and corners alike), b then s ascending,
+    !! so both ends of a cross-rank piece enumerate it in the same order. Blocks are binned by lo corner on a grid as wide as the
+    !! largest block plus the ghost reach, so each block tests only the 3**d neighbouring bins.
+    impure subroutine s_amr_build_pieces()
+
+        integer, allocatable :: hd(:), nx(:), cand(:)
+        integer              :: rr, w, nb(3), bb(3), b, s, k, nc, j, x, y, z, plo(3), phi(3)
+
+        rr = amr_ref_ratio
+        w = 1
+        do k = 1, amr_num_blocks
+            if (amr_block_level(k) == 1) w = max(w, maxval(amr_region_hi_all(:,k) - amr_region_lo_all(:,k) + 1, mask=amr_dim))
+        end do
+        w = w + (buff_size + rr - 1)/rr
+        nb = merge([m_glb, n_glb, p_glb]/w + 1, 1, amr_dim)
+        allocate (hd(product(nb)), nx(amr_num_blocks), cand(amr_num_blocks)); hd = 0
+        do k = amr_num_blocks, 1, -1
+            if (amr_block_level(k) /= 1) cycle
+            bb = merge(amr_region_lo_all(:,k)/w, 0, amr_dim)
+            j = 1 + bb(1) + nb(1)*(bb(2) + nb(2)*bb(3))
+            nx(k) = hd(j); hd(j) = k
+        end do
+        amr_num_pcs = 0
+        do b = 1, amr_num_blocks
+            if (amr_block_level(b) /= 1) cycle
+            bb = merge(amr_region_lo_all(:,b)/w, 0, amr_dim)
+            nc = 0
+            do z = max(bb(3) - 1, 0), min(bb(3) + 1, nb(3) - 1)
+                do y = max(bb(2) - 1, 0), min(bb(2) + 1, nb(2) - 1)
+                    do x = max(bb(1) - 1, 0), min(bb(1) + 1, nb(1) - 1)
+                        s = hd(1 + x + nb(1)*(y + nb(2)*z))
+                        do while (s /= 0)
+                            if (s /= b) then
+                                nc = nc + 1; cand(nc) = s
+                            end if
+                            s = nx(s)
+                        end do
+                    end do
+                end do
+            end do
+            do k = 2, nc  ! ascending s
+                s = cand(k); j = k - 1
+                do while (j >= 1)
+                    if (cand(j) <= s) exit
+                    cand(j + 1) = cand(j); j = j - 1
+                end do
+                cand(j + 1) = s
+            end do
+            do k = 1, nc
+                s = cand(k)
+                plo = merge(max(rr*amr_region_lo_all(:,b) - buff_size, rr*amr_region_lo_all(:,s)), 0, amr_dim)
+                phi = merge(min(rr*amr_region_hi_all(:,b) + rr - 1 + buff_size, rr*amr_region_hi_all(:,s) + rr - 1), 0, amr_dim)
+                if (any(plo > phi)) cycle
+                amr_num_pcs = amr_num_pcs + 1
+                call s_amr_size_rows(amr_pcs, 8, amr_num_pcs)
+                amr_pcs(:,amr_num_pcs) = [b, s, plo, phi]
+            end do
+        end do
+
+    end subroutine s_amr_build_pieces
+
+    !> amr_tile_cluster: post the level-1 ghost pieces on the open seam wave, after its pair transfers (both ends order a peer's two
+    !! messages alike). A piece whose blocks this rank both owns is copied at drain; the others travel one message per peer, each
+    !! transfer named by its piece index and global fine box on both ends.
+    impure subroutine s_amr_pieces_post()
+
+        integer :: idx, rb, rs, nw
+
+        call s_amr_wave_reset(amr_wpc_snd); call s_amr_wave_reset(amr_wpc_rcv)
+        call s_amr_size_rows(amr_pc_pl, 11, amr_num_pcs); call s_amr_size_int(amr_pc_pre, amr_num_pcs + 1)
+        amr_pc_pre(1) = 0
+        do idx = 1, amr_num_pcs
+            rb = amr_block_owner(amr_pcs(1, idx)); rs = amr_block_owner(amr_pcs(2, idx))
+            if (proc_rank /= rb .and. proc_rank /= rs) cycle
+            nw = sys_size*product(amr_pcs(6:8,idx) - amr_pcs(3:5,idx) + 1)
+            if (rb == rs) then
+                amr_pc_nsame = amr_pc_nsame + 1
+                ! row 7 the sender's column, row 8 the receiver's
+                call s_amr_pc_row(amr_pc_pl(:,amr_pc_nsame), idx, 2, amr_loc_of(amr_pcs(2, idx)))
+                amr_pc_pl(8, amr_pc_nsame) = amr_loc_of(amr_pcs(1, idx))
+                amr_pc_pl(9:11,amr_pc_nsame) = merge(amr_ref_ratio*(amr_region_lo_all(:,amr_pcs(2, idx)) - amr_region_lo_all(:, &
+                          & amr_pcs(1, idx))), 0, amr_dim)
+                amr_pc_pre(amr_pc_nsame + 1) = amr_pc_pre(amr_pc_nsame) + nw
+            else if (proc_rank == rs) then
+                call s_amr_wave_add(amr_wpc_snd, rb, idx, amr_pcs(3:5,idx), amr_pcs(6:8,idx), nw)
+            else
+                call s_amr_wave_add(amr_wpc_rcv, rs, idx, amr_pcs(3:5,idx), amr_pcs(6:8,idx), nw)
+            end if
+        end do
+        call s_amr_wave_close(amr_wpc_snd, amr_pc_sq, .false.)
+        call s_amr_wave_close(amr_wpc_rcv, amr_pc_rq, .false.)
+        call s_amr_wave_post(amr_wave_seam, amr_wpc_rcv, amr_pc_rq, XA_F6W_RCV, .false.)
+        call s_amr_pc_wire(amr_wpc_snd, amr_pc_sq, 2, .true.)
+        call s_amr_wave_send(amr_wave_seam, amr_wpc_snd, amr_pc_sq, XA_F6W_SND, .false.)
+
+    end subroutine s_amr_pieces_post
+
+    !> Unpack the received pieces and copy the same-rank ones (the seam wave has been waited on).
+    impure subroutine s_amr_pieces_drain()
+
+        if (amr_wpc_rcv%nx > 0) call s_amr_pc_wire(amr_wpc_rcv, amr_pc_rq, 1, .false.)
+        if (amr_pc_nsame > 0) call s_amr_pc_copy(amr_pc_nsame, amr_pc_pl(:,1:amr_pc_nsame), amr_pc_pre(1:amr_pc_nsame + 1))
+
+    end subroutine s_amr_pieces_drain
+
+    !> Plan row of piece idx in the frame of its block amr_pcs(side, idx) (1 = receiver, 2 = sender): local box corner (1:3),
+    !! extents (4:6), payload offset off (7) and that block's store column (8).
+    impure subroutine s_amr_pc_row(row, idx, side, off)
+
+        integer, intent(out) :: row(:)
+        integer, intent(in)  :: idx, side, off
+        integer              :: k
+
+        k = amr_pcs(side, idx)
+        row(1:3) = amr_pcs(3:5,idx) - merge(amr_ref_ratio*amr_region_lo_all(:,k), 0, amr_dim)
+        row(4:6) = amr_pcs(6:8,idx) - amr_pcs(3:5,idx) + 1
+        row(7) = off; row(8) = amr_loc_of(k)
+
+    end subroutine s_amr_pc_row
+
+    !> Pack (send side, every header after the fused copyout) or unpack (receive side, headers checked first) one side's piece
+    !! transfers between the flat store and its wire pool in one launch.
+    impure subroutine s_amr_pc_wire(w, pool, side, pack)
+
+        type(t_amr_wave_side), intent(in) :: w
+        real(wp), intent(inout)           :: pool(:)
+        integer, intent(in)               :: side
+        logical, intent(in)               :: pack
+        integer                           :: t
+
+        if (w%nx == 0) return
+        call s_amr_size_rows(amr_pcw_pl, 11, w%nx); call s_amr_size_int(amr_pcw_pre, w%nx + 1)
+        amr_pcw_pre(1) = 0
+        do t = 1, w%nx
+            call s_amr_pc_row(amr_pcw_pl(:,t), w%blk(t), side, w%off(t) + XA_NH)
+            amr_pcw_pre(t + 1) = amr_pcw_pre(t) + w%cnt(t)
+            if (.not. pack) call s_amr_wave_hdr_check(w, pool, t, XA_F6W_SND)
+        end do
+        call s_amr_pc_wire_kernel(w%nx, amr_pcw_pl(:,1:w%nx), amr_pcw_pre(1:w%nx + 1), pool(1:w%words), pack)
+        if (pack) then
+            do t = 1, w%nx
+                call s_amr_wave_hdr_pack(w, pool, t, XA_F6W_SND)
+            end do
+        end if
+
+    end subroutine s_amr_pc_wire
+
+    impure subroutine s_amr_pc_wire_kernel(nt, pl, pre, buf, pack)
+
+        integer, intent(in)                 :: nt
+        integer, intent(in), contiguous     :: pl(:,:), pre(:)
+        real(wp), intent(inout), contiguous :: buf(:)
+        logical, intent(in)                 :: pack
+        integer                             :: e, t, t0, t1, lo, hi, md, r, n1, n2, n3, i, g1, g2, g3
+
+        t0 = 1; t1 = nt
+        if (pack) then
+            $:GPU_PARALLEL_LOOP(copyin='[pl, pre]', copyout='[buf]', private='[t, lo, hi, md, r, n1, n2, n3, i, g1, g2, g3]')
+            do e = pre(t0) + 1, pre(t1 + 1)
+                @:FX_DECODE()
+                buf(pl(7, t) + 1 + r) = real(amr_cons_st(g1, g2, g3, i, pl(8, t)), wp)
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        else
+            $:GPU_PARALLEL_LOOP(copyin='[pl, pre, buf]', private='[t, lo, hi, md, r, n1, n2, n3, i, g1, g2, g3]')
+            do e = pre(t0) + 1, pre(t1 + 1)
+                @:FX_DECODE()
+                amr_cons_st(g1, g2, g3, i, pl(8, t)) = real(buf(pl(7, t) + 1 + r), stp)
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        end if
+
+    end subroutine s_amr_pc_wire_kernel
+
+    !> Same-rank pieces in one launch: sender cells (store column pl(7)) to the receiver's ghosts (column pl(8), offset pl(9:11)).
+    !! Reads are block interiors and writes ghost cells, so no piece observes another's store.
+    impure subroutine s_amr_pc_copy(nt, pl, pre)
+
+        integer, intent(in)             :: nt
+        integer, intent(in), contiguous :: pl(:,:), pre(:)
+        integer                         :: e, t, t0, t1, lo, hi, md, r, n1, n2, n3, i, g1, g2, g3
+
+        t0 = 1; t1 = nt
+        $:GPU_PARALLEL_LOOP(copyin='[pl, pre]', private='[t, lo, hi, md, r, n1, n2, n3, i, g1, g2, g3]')
+        do e = pre(t0) + 1, pre(t1 + 1)
+            @:FX_DECODE()
+            amr_cons_st(g1 + pl(9, t), g2 + pl(10, t), g3 + pl(11, t), i, pl(8, t)) = amr_cons_st(g1, g2, g3, i, pl(7, t))
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_amr_pc_copy
 
     !> Ring clip: decompose the hollow shell of patch [plo:phi] minus its open core [clo:chi] (same integer frame; collapsed dims
     !! pass plo=phi=clo=chi=0 so they never cut the core) into at most 6 disjoint slabs in a fixed order: x-low/x-high spanning the
@@ -872,22 +1085,6 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
     end subroutine s_amr_gather_own_shell_device
-
-    !> Flat-index decode shared by the three fused exchange kernels (amr_device_pack): binary-search the plan prefix for the
-    !! transfer t that owns flat element e, then invert its linear buffer index into (i, g3, g2, g1). One text, so the three kernels
-    !! cannot drift from each other or from the per-transfer index map.
-    #:def FX_DECODE()
-        lo = t0; hi = t1
-        do while (lo < hi)
-            md = (lo + hi)/2
-            if (pre(md + 1) < e) then; lo = md + 1; else; hi = md; end if
-        end do
-        t = lo
-        r = e - pre(t) - 1
-        n1 = pl(4, t); n2 = pl(5, t); n3 = pl(6, t)
-        g1 = pl(1, t) + mod(r, n1); g2 = pl(2, t) + mod(r/n1, n2); g3 = pl(3, t) + mod(r/(n1*n2), n3)
-        i = r/(n1*n2*n3) + 1
-    #:enddef
 
     !> Fused-pack plan (amr_device_pack) for transfers 1:nt of a wave's send or recv table: the slab corner, its extents, its
     !! absolute payload offset in the wire pool (the side's transfer offsets), and the exclusive element prefix amr_fx_pre
