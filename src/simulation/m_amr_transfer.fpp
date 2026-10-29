@@ -34,7 +34,8 @@ module m_amr_transfer
 
     private
     public :: s_amr_freg_wave, s_amr_reduce_xchg_flag, s_amr_reflux_faces_wave, s_amr_reflux_to_parent, s_amr_restrict_to_parent, &
-        & s_amr_restrict_wave, s_interpolate_coarse_to_fine, s_populate_amr_fine, s_restrict_fine_to_coarse, s_set_amr_fine_geometry
+        & s_amr_restrict_wave, s_amr_sync_level, s_interpolate_coarse_to_fine, s_populate_amr_fine, s_restrict_fine_to_coarse, &
+        & s_set_amr_fine_geometry
 
 contains
 
@@ -820,6 +821,47 @@ contains
 
     end subroutine s_amr_restrict_to_parent
 
+    !> Sync level lev >= 2 into its parents: restrict its blocks into the covered parent cells, then state-reflux each into its
+    !! parent with the registers (step-integral fluxes, scaled by dt_reflux; 1 when the registers already carry dt).
+    impure subroutine s_amr_sync_level(lev, dt_reflux)
+
+        integer, intent(in)  :: lev
+        real(wp), intent(in) :: dt_reflux
+        integer              :: k, io, ifc, ko, kf
+
+        call s_phase_tic(PH_RESTR)
+        call s_amr_restrict_parent_wave(lev)
+        call s_phase_toc(PH_RESTR)
+        ! s_amr_reflux_to_parent returns unless `own_child .or. own_parent`: own_child = amr_rank_owns_block, the
+        ! multi-owner amr_owns_all notion (amr_own_blk, not amr_my_blk); own_parent = the level-lev children of my parents,
+        ! i.e. amr_fch_blk plus the ones I own myself, already in amr_own_blk. The two lists overlap, and a duplicate visit
+        ! would reflux twice, so walk their union: both lists are ascending, and a two-cursor merge from the tails visits each
+        ! block once, in descending block order (the parent registers accumulate in that order).
+        io = amr_n_own; ifc = amr_n_fch
+        do
+            do while (io >= 1)
+                if (amr_block_level(amr_own_blk(io)) == lev) exit
+                io = io - 1
+            end do
+            do while (ifc >= 1)
+                if (amr_block_level(amr_fch_blk(ifc)) == lev) exit
+                ifc = ifc - 1
+            end do
+            ko = 0; kf = 0
+            if (io >= 1) ko = amr_own_blk(io)
+            if (ifc >= 1) kf = amr_fch_blk(ifc)
+            k = max(ko, kf)
+            if (k == 0) exit
+            if (ko == k) io = io - 1
+            if (kf == k) ifc = ifc - 1
+            call s_amr_select_slot(k)
+            call s_phase_tic(PH_RESTR)
+            call s_amr_reflux_to_parent(dt_reflux)
+            call s_phase_toc(PH_RESTR)
+        end do
+
+    end subroutine s_amr_sync_level
+
     !> The lock-step restrict fold as plan-based waves, on the lock-step np>1 path: per level (finest first) the split-ownership
     !! child->parent folds are one aggregated message per (child-owner, parent-owner) peer (s_amr_restrict_parent_wave), followed by
     !! the per-box reflux-to-parent applies (their freg was already exchanged by s_amr_freg_wave); then the level-1 -> L0
@@ -832,41 +874,15 @@ contains
 
         type(scalar_field), dimension(sys_size), intent(inout) :: coarse_tgt
         real(wp), intent(in)                                   :: dt_reflux
-        integer                                                :: lev, k, io, ifc, ko, kf
+        integer                                                :: lev
 
         call s_amr_refresh_lists()
-        do lev = amr_max_level, 2, -1
-            call s_phase_tic(PH_RESTR)
-            call s_amr_restrict_parent_wave(lev)
-            call s_phase_toc(PH_RESTR)
-            ! s_amr_reflux_to_parent returns unless `own_child .or. own_parent`: own_child = amr_rank_owns_block, the
-            ! multi-owner amr_owns_all notion (amr_own_blk, not amr_my_blk); own_parent = the level-lev children of my parents,
-            ! i.e. amr_fch_blk plus the ones I own myself, already in amr_own_blk. The two lists overlap, and a duplicate visit
-            ! would reflux twice, so walk their union: both lists are ascending, and a two-cursor merge from the tails visits each
-            ! block once, in descending block order (the parent registers accumulate in that order).
-            io = amr_n_own; ifc = amr_n_fch
-            do
-                do while (io >= 1)
-                    if (amr_block_level(amr_own_blk(io)) == lev) exit
-                    io = io - 1
-                end do
-                do while (ifc >= 1)
-                    if (amr_block_level(amr_fch_blk(ifc)) == lev) exit
-                    ifc = ifc - 1
-                end do
-                ko = 0; kf = 0
-                if (io >= 1) ko = amr_own_blk(io)
-                if (ifc >= 1) kf = amr_fch_blk(ifc)
-                k = max(ko, kf)
-                if (k == 0) exit
-                if (ko == k) io = io - 1
-                if (kf == k) ifc = ifc - 1
-                call s_amr_select_slot(k)
-                call s_phase_tic(PH_RESTR)
-                call s_amr_reflux_to_parent(dt_reflux)
-                call s_phase_toc(PH_RESTR)
+        ! under subcycling the levels >= 2 were synced after each of their parent's substeps
+        if (.not. amr_subcycle) then
+            do lev = amr_max_level, 2, -1
+                call s_amr_sync_level(lev, dt_reflux)
             end do
-        end do
+        end if
         call s_phase_tic(PH_RESTR)
         call s_amr_restrict_l1_wave(coarse_tgt)
         call s_phase_toc(PH_RESTR)

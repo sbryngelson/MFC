@@ -318,8 +318,11 @@ module m_global_parameters
     !! batched fine advance is restricted to (0: every refined level).
     logical :: amr_sub_on = .false., amr_sub_first = .false.
     integer :: amr_adv_level = 0
-    logical :: lag_gravity_force
-    integer :: lag_vel_model, lag_drag_model
+    !> Parent time fraction for level >= 2 ghost fills under subcycling: the parent block's data is packed as (1 - amr_par_theta) *
+    !! its substep-start backup + amr_par_theta * its current state; 1 reads the current state only.
+    real(wp) :: amr_par_theta = 1._wp
+    logical  :: lag_gravity_force
+    integer  :: lag_vel_model, lag_drag_model
     $:GPU_DECLARE(create='[n_el_bubs_loc, n_el_bubs_glb]')
     $:GPU_DECLARE(create='[moving_lag_bubbles, lag_vel_model, lag_drag_model]')
     $:GPU_DECLARE(create='[lag_pressure_force, lag_gravity_force]')

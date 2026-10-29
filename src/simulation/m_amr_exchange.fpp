@@ -37,6 +37,20 @@ module m_amr_exchange
 
 contains
 
+    !> Parent value for a level >= 2 ghost fill: the current state, or (subcycling, th < 1) its blend with the substep-start backup.
+    pure real(wp) function f_amr_par_val(g1, g2, g3, i, qp, th) result(v)
+        $:GPU_ROUTINE(parallelism='[seq]')
+        integer, intent(in)  :: g1, g2, g3, i, qp
+        real(wp), intent(in) :: th
+
+        if (th < 1._wp) then
+            v = th*real(amr_cons_st(g1, g2, g3, i, qp), wp) + (1._wp - th)*real(amr_stor_st(g1, g2, g3, i, qp), wp)
+        else
+            v = real(amr_cons_st(g1, g2, g3, i, qp), wp)
+        end if
+
+    end function f_amr_par_val
+
     !> Sub-box variants of the parent-patch pack/copy for the ring-clipped parent-fill wave (the wave ships q_cons). Bounds are
     !! patch-local cell ranges; the buffer holds the sub-box in the same (g1 fastest, sys_size outermost) layout as the full-patch
     !! kernels, so both wire sides agree by construction.
@@ -46,17 +60,19 @@ contains
         integer, intent(in)                 :: bl(3), bh(3)
         real(wp), intent(inout), contiguous :: buf(:)
         integer                             :: i, g1, g2, g3, o1, o2, o3, n1, n2, n3, l1, l2, l3, u1, u2, u3
+        real(wp)                            :: th
 
         o1 = amr_cpat_off(1); o2 = amr_cpat_off(2); o3 = amr_cpat_off(3)
         l1 = bl(1); l2 = bl(2); l3 = bl(3); u1 = bh(1); u2 = bh(2); u3 = bh(3)
         n1 = u1 - l1 + 1; n2 = u2 - l2 + 1; n3 = u3 - l3 + 1
-        $:GPU_PARALLEL_LOOP(collapse=4, copyout='[buf]')
+        th = amr_par_theta
+        $:GPU_PARALLEL_LOOP(collapse=4, copyout='[buf]', copyin='[th]')
         do i = 1, sys_size
             do g3 = l3, u3
                 do g2 = l2, u2
                     do g1 = l1, u1
-                        buf(1 + (g1 - l1) + n1*((g2 - l2) + n2*((g3 - l3) + n3*(i - 1)))) = real(amr_cons_st(g1 + o1, g2 + o2, &
-                            & g3 + o3, i, qp), wp)
+                        buf(1 + (g1 - l1) + n1*((g2 - l2) + n2*((g3 - l3) + n3*(i - 1)))) = f_amr_par_val(g1 + o1, g2 + o2, &
+                            & g3 + o3, i, qp, th)
                     end do
                 end do
             end do
@@ -70,15 +86,17 @@ contains
         integer, intent(in) :: qp  !< parent's flat-store slot
         integer, intent(in) :: bl(3), bh(3)
         integer             :: i, g1, g2, g3, o1, o2, o3, l1, l2, l3, u1, u2, u3
+        real(wp)            :: th
 
         o1 = amr_cpat_off(1); o2 = amr_cpat_off(2); o3 = amr_cpat_off(3)
         l1 = bl(1); l2 = bl(2); l3 = bl(3); u1 = bh(1); u2 = bh(2); u3 = bh(3)
-        $:GPU_PARALLEL_LOOP(collapse=4)
+        th = amr_par_theta
+        $:GPU_PARALLEL_LOOP(collapse=4, copyin='[th]')
         do i = 1, sys_size
             do g3 = l3, u3
                 do g2 = l2, u2
                     do g1 = l1, u1
-                        amr_cg(i)%sf(g1, g2, g3) = amr_cons_st(g1 + o1, g2 + o2, g3 + o3, i, qp)
+                        amr_cg(i)%sf(g1, g2, g3) = f_amr_par_val(g1 + o1, g2 + o2, g3 + o3, i, qp, th)
                     end do
                 end do
             end do
@@ -926,11 +944,13 @@ contains
         integer, intent(in), contiguous     :: pl(:,:), pre(:)
         real(wp), intent(inout), contiguous :: buf(:)
         integer                             :: e, t, lo, hi, md, r, n1, n2, n3, i, g1, g2, g3
+        real(wp)                            :: th
 
-        $:GPU_PARALLEL_LOOP(copyin='[pl, pre]', copyout='[buf]', private='[t, lo, hi, md, r, n1, n2, n3, i, g1, g2, g3]')
+        th = amr_par_theta
+        $:GPU_PARALLEL_LOOP(copyin='[pl, pre, th]', copyout='[buf]', private='[t, lo, hi, md, r, n1, n2, n3, i, g1, g2, g3]')
         do e = pre(t0) + 1, pre(t1 + 1)
             @:FX_DECODE()
-            buf(pl(7, t) + 1 + r) = real(amr_cons_st(g1 + pl(9, t), g2 + pl(10, t), g3 + pl(11, t), i, pl(8, t)), wp)
+            buf(pl(7, t) + 1 + r) = f_amr_par_val(g1 + pl(9, t), g2 + pl(10, t), g3 + pl(11, t), i, pl(8, t), th)
         end do
         $:END_GPU_PARALLEL_LOOP()
 

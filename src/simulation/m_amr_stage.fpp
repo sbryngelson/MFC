@@ -100,11 +100,11 @@ contains
 
     end subroutine s_amr_stage_fine
 
-    !> Subcycled fine advance (amr_subcycle, one refined level): after level 0's step (q_old = its step-start state, q_new = its end
-    !! state, coarse registers holding its dt-weighted face-flux integral) level 1 takes two substeps of dt/2. Each stage fills the
-    !! fine ghosts from the coarse state interpolated linearly in time to the stage time and advances the level-1 blocks through the
-    !! batched path with dt/2, accumulating the fine registers over both substeps; then the registers correct the coarse state
-    !! (Berger-Colella) and the caller's fold restricts.
+    !> Subcycled fine advance (amr_subcycle): after level 0's step (q_old = its step-start state, q_new = its end state, coarse
+    !! registers holding its dt-weighted face-flux integral) level 1 takes two substeps of dt/2. Each stage fills the fine ghosts
+    !! from the coarse state interpolated linearly in time to the stage time and advances the level-1 blocks through the batched
+    !! path with dt/2, accumulating the fine registers over both substeps; after each level-1 substep level 2 (if any) takes its two
+    !! substeps (s_amr_subcycle_l2). Then the registers correct the coarse state (Berger-Colella) and the caller's fold restricts.
     impure subroutine s_amr_subcycle_fine(q_new, q_old, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
 
         type(scalar_field), dimension(sys_size), intent(inout)     :: q_new, q_old
@@ -134,9 +134,9 @@ contains
         dt0 = dt
         dt = 0.5_wp*dt0
         $:GPU_UPDATE(device='[dt]')
-        amr_adv_level = 1
         do k = 0, 1
             amr_sub_first = k == 0
+            amr_adv_level = 1
             do s = 1, 3
                 theta = 0.5_wp*(real(k, wp) + c_stage(s))
                 call s_amr_lerp_coarse(q_old, q_new, theta)
@@ -147,6 +147,8 @@ contains
                 call s_phase_toc(PH_SEAM)
                 call s_amr_fine_stage_advance_batched(s, coefs(s,:), bc_type, q_T_sf, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
             end do
+            if (amr_max_level >= 2) call s_amr_subcycle_l2(q_new, q_old, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, &
+                & t_step, 0.5_wp*real(k + 1, wp), dt0)
         end do
         amr_adv_level = 0
         dt = dt0
@@ -158,6 +160,53 @@ contains
         call s_amr_select_slot(1)
 
     end subroutine s_amr_subcycle_fine
+
+    !> Level 2's two substeps of dt0/4 after a level-1 substep ending at coarse time fraction th_end. The level-1 ghosts are first
+    !! refilled at th_end (the level-2 parent patches can reach into them); each level-2 stage then fills from its parents blended
+    !! between their substep-start backup and end state (amr_par_theta), and finally level 2 is synced into level 1.
+    impure subroutine s_amr_subcycle_l2(q_new, q_old, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, t_step, th_end, dt0)
+
+        type(scalar_field), dimension(sys_size), intent(inout)     :: q_new, q_old
+        real(wp), intent(in)                                       :: coefs(:,:)
+        type(scalar_field), intent(inout)                          :: q_T_sf
+        type(integer_field), dimension(1:num_dims,1:2), intent(in) :: bc_type
+        real(stp), dimension(:,:,:,:,:), intent(inout)             :: pb_in, mv_in
+        real(wp), dimension(:,:,:,:,:), intent(inout)              :: rhs_pb, rhs_mv
+        integer, intent(in)                                        :: t_step
+        real(wp), intent(in)                                       :: th_end, dt0
+        real(wp), parameter                                        :: c_stage(3) = [0._wp, 1._wp, 0.5_wp]
+        integer                                                    :: j, s
+
+        call s_amr_lerp_coarse(q_old, q_new, th_end)
+        call s_amr_fine_fine_post()
+        call s_amr_stage_fill_wave(amr_qlerp%vf)
+        call s_phase_tic(PH_SEAM)
+        call s_amr_fine_fine_drain()
+        call s_phase_toc(PH_SEAM)
+        dt = 0.25_wp*dt0
+        $:GPU_UPDATE(device='[dt]')
+        amr_adv_level = 2
+        do j = 0, 1
+            amr_sub_first = j == 0
+            do s = 1, 3
+                amr_par_theta = 0.5_wp*(real(j, wp) + c_stage(s))
+                call s_amr_fine_fine_post()
+                call s_amr_parent_fill_wave(2)
+                call s_phase_tic(PH_SEAM)
+                call s_amr_fine_fine_drain()
+                call s_phase_toc(PH_SEAM)
+                call s_amr_fine_stage_advance_batched(s, coefs(s,:), bc_type, q_T_sf, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
+            end do
+        end do
+        amr_par_theta = 1._wp
+        dt = 0.5_wp*dt0
+        $:GPU_UPDATE(device='[dt]')
+        call s_phase_tic(PH_RESTR)
+        call s_amr_freg_wave()
+        call s_amr_sync_level(2, 1._wp)
+        call s_phase_toc(PH_RESTR)
+
+    end subroutine s_amr_subcycle_l2
 
     !> amr_qlerp = (1 - theta) q_old + theta q_new over the whole buffered coarse domain.
     impure subroutine s_amr_lerp_coarse(q_old, q_new, theta)
@@ -245,13 +294,15 @@ contains
         integer                                                :: islot
 
         call s_phase_tic(PH_RESTR)
-        call s_amr_freg_wave()  ! the split-ownership level>=2 freg exchange: the registers are final after the advance
+        ! the split-ownership level>=2 freg exchange: the registers are final after the advance (subcycling synced level 2 already)
+        if (.not. amr_subcycle) call s_amr_freg_wave()
         call s_phase_toc(PH_RESTR)
         if (num_procs > 1) then
             call s_amr_restrict_wave(q_cons, dt)
         else
             do islot = amr_num_blocks, 1, -1
                 if (amr_block_level(islot) == 0) cycle  ! L0 tile slots advance separately
+                if (amr_subcycle .and. amr_block_level(islot) >= 2) cycle  ! synced after each level-1 substep
                 call s_amr_select_slot(islot)
                 call s_phase_tic(PH_RESTR)
                 call s_restrict_fine_to_coarse(q_cons)

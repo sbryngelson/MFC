@@ -536,7 +536,9 @@ contains
             ! holds amr_bat_n same-extent blocks, member ibm at offset ko along amr_bat_sd; each member's faces go into its own
             ! register slot. L2->L1 reflux: the parent is already RK-updated by reflux time, so freg must hold the rk3_w-weighted
             ! step-integral flux for the once-per-step state correction (stage 1 overwrites = implicit zero, cf. creg below).
-            if (amr_block_level(amr_cur) >= 2) then
+            if (amr_block_level(amr_cur) >= 2 .and. amr_sub_on) then
+                coef = rk3_w(stage)*dt; accum = .not. (amr_sub_first .and. stage == 1)
+            else if (amr_block_level(amr_cur) >= 2) then
                 coef = rk3_w(stage); accum = (stage > 1)
             else if (amr_sub_on) then
                 ! subcycled: the level's dt-weighted step integral, accumulated over both substeps of the parent step
@@ -567,7 +569,8 @@ contains
                 end do
             end do
             if (amr_bat_n > 0) call s_amr_select_slot(save_cur)
-            call s_amr_capture_total(amr_reg_n, id, .false., rk3_w(stage), stage > 1)
+            ! children's coarse side: the parent's step integral (dt-weighted under subcycling, applied with dt_reflux = 1)
+            call s_amr_capture_total(amr_reg_n, id, .false., rk3_w(stage)*merge(dt, 1._wp, amr_sub_on), stage > 1)
         else
             ! coarse branch: a face's capture runs on the rank owning the coarse cells just outside it (its flux_rsx_vf covers
             ! that face; at a rank-interior face the same rank also holds the inside cells). This rank fills creg over its owned
