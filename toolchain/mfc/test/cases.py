@@ -4153,6 +4153,29 @@ def list_cases() -> typing.List[TestCaseBuilder]:
             mods={"m": 24, "n": 24, "parallel_io": "F", "t_stop": 2.0e-5, "t_save": 2.0e-5, "ib_flux_wall": "T", "ib_heat_wrt": "T"},
         )
     )
+    # ib_flux_wall on a moving inert body under ib_cutvol_gcl: impermeable faces in the body's frame. The body crosses about two
+    # cells, so the remap and the flux-wall area refresh after each move are exercised.
+    cases.append(
+        define_case_f(
+            "2D -> Chemistry -> IBM -> Moving Circle -> ib_cutvol_gcl -> Flux Wall",
+            "examples/2D_ibm_reacting_surface/case.py",
+            mods={
+                "m": 24,
+                "n": 24,
+                "parallel_io": "F",
+                "t_stop": 2.0e-5,
+                "t_save": 2.0e-5,
+                "ib_heat_wrt": "T",
+                "ib_cutvol": "T",
+                "ib_cutvol_gcl": "T",
+                "ib_flux_wall": "T",
+                "ib_mass_relax": 0,
+                "patch_ib(1)%surface_reaction": 0,
+                "patch_ib(1)%moving_ibm": 1,
+                "patch_ib(1)%vel(1)": -50.0,
+            },
+        )
+    )
     # The initial conductive layer around the lumped body: it starts at its initial Twall like a prescribed wall.
     cases.append(
         define_case_f(

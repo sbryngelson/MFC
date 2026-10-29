@@ -25,8 +25,9 @@ def remove_higher_dimensional_keys(case: dict, ndims: int) -> dict:
 
 def ib_flux_wall_issue(p: dict, auto: bool):
     """First reason ib_flux_wall cannot apply to case p, or None. auto: the unset default, which needs every body to be fixed,
-    no-slip and non-blowing (reacting or inert); otherwise an explicit T, which needs fixed, non-blowing reacting bodies and at
-    least one wall (an inert body that moves, slips or blows keeps the ghost-state wall)."""
+    no-slip and non-blowing (reacting or inert), without ib_cutvol; otherwise an explicit T, which needs fixed, non-blowing
+    reacting bodies and at least one wall (an inert body that slips or blows keeps the ghost-state wall, and one that moves
+    does too unless ib_cutvol_gcl is on)."""
     on = lambda k: str(p.get(k, "F")) == "T"  # noqa: E731
     num = lambda k, d: p.get(k, d) or d  # noqa: E731
     try:
@@ -38,7 +39,7 @@ def ib_flux_wall_issue(p: dict, auto: bool):
             (int(num("riemann_solver", 2)) != 2, "ib_flux_wall requires riemann_solver = 2 (HLLC)"),
             (on("cyl_coord"), "ib_flux_wall requires Cartesian coordinates"),
             (int(num("num_particle_clouds", 0)) > 0, "ib_flux_wall is not supported with particle clouds"),
-            (on("ib_cutvol"), "ib_flux_wall is not supported with ib_cutvol"),
+            (on("ib_cutvol") and (auto or not on("ib_cutvol_gcl")), "ib_flux_wall with ib_cutvol requires ib_cutvol_gcl (and is opt-in)"),
             (on("bubbles_euler"), "ib_flux_wall is not supported with bubbles"),
         ]
         for bad, msg in config:
@@ -56,7 +57,7 @@ def ib_flux_wall_issue(p: dict, auto: bool):
                 if blow:
                     return f"ib_flux_wall: reacting patch_ib({i}) cannot also blow (v_blow, inj_species)"
                 walls += 1
-            elif fixed and not blow and not on(f"patch_ib({i})%slip"):
+            elif (fixed or on("ib_cutvol_gcl")) and not blow and not on(f"patch_ib({i})%slip"):
                 walls += 1
             elif auto:
                 return f"patch_ib({i}) moves, slips or blows"

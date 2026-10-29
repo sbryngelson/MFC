@@ -1893,6 +1893,7 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
         call s_update_mib(num_ibs)
+        if (ib_flux_wall) call s_ib_flux_wall_area()
         call s_cutvol_fields()
         if (ib_cutvol_gcl) then
             call s_cutvol_gcl_remap(q_cons_vf, dt_step, bc_type, pb_in, mv_in, q_T_sf)
@@ -2175,7 +2176,7 @@ contains
         if (ib_markers_cv%sf(i, j, k) /= 0) ib_cv_ex(cvx_v)%sf(i, j, k) = 0._wp
         @:CV_END_BAND()
         $:END_GPU_PARALLEL_LOOP()
-        call s_cutvol_halo()
+        call s_ib_buffers(ib_cv_ex, cvx_y)
 
         ! (1) kept cells gather the covered cells' volume
         $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, q, gs, g, acc]', collapse=3, copyin='[kz]')
@@ -2228,7 +2229,7 @@ contains
         @:CV_END_BAND()
         $:END_GPU_PARALLEL_LOOP()
         call s_populate_variables_buffers(bc_type, q_cons_vf, pb_in, mv_in, q_T_sf)
-        call s_cutvol_halo()
+        call s_ib_buffers(ib_cv_ex, cvx_y)
 
         ! (3) sweep s, mismatch m = r (geo - v - s) (a giver keeps half its v), transport plan tau(d -> c) = y_d x_c by
         ! iterative proportional fitting, then the transfers, each clamped to the receiver's need and the giver's excess
@@ -2269,7 +2270,7 @@ contains
             call s_cutvol_ipf_half(cvx_y, cvx_x)
             call s_cutvol_ipf_half(cvx_x, cvx_y)
         end do
-        call s_cutvol_halo()
+        call s_ib_buffers(ib_cv_ex, cvx_y)
         call s_cutvol_ipf(cvx_y, cvx_x, buff_size - cv_reach, kz, .true.)  ! each giver within its excess
         $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, q, gs, g, acc]', collapse=3, copyin='[kz]')
         @:CV_BAND(2)
@@ -2352,7 +2353,7 @@ contains
             integer, intent(in) :: dst, src
 
             if (wv(src) < cv_reach) then
-                call s_cutvol_halo()
+                call s_ib_buffers(ib_cv_ex, cvx_y)
                 wv = buff_size
             end if
             wv(dst) = min(wv(src) - cv_reach, wm)
@@ -2452,48 +2453,6 @@ contains
         in = l1 > 0 .and. ((t == 1 .and. l1 == 1) .or. (t == 2 .and. li <= 1) .or. (t == 3 .and. li <= 2))
 
     end function f_cutvol_tier
-
-    !> ib_cutvol_gcl: refresh the halo of ib_cv_ex across rank and periodic boundaries (other boundaries keep their values)
-    impure subroutine s_cutvol_halo()
-
-        integer :: d, loc, edge, i, j, k, g
-
-        do d = 1, num_dims
-            do loc = -1, 1, 2
-                select case (d)
-                case (1); edge = merge(bc_x%beg, bc_x%end, loc == -1)
-                case (2); edge = merge(bc_y%beg, bc_y%end, loc == -1)
-                case default; edge = merge(bc_z%beg, bc_z%end, loc == -1)
-                end select
-                if (edge >= 0) then
-                    call s_mpi_sendrecv_variables_buffers(ib_cv_ex, d, loc, cvx_y)
-                else if (edge == BC_PERIODIC) then
-                    ! (j, k): the transverse indices, as in the MPI exchange
-                    $:GPU_PARALLEL_LOOP(private='[i, j, k, g]', collapse=3, copyin='[d, loc]')
-                    do k = merge(0, -buff_size, d < 3), merge(p, n + buff_size, d < 3)
-                        do j = merge(0, -buff_size, d == 1), merge(n, m + buff_size, d == 1)
-                            do g = 1, buff_size
-                                do i = cvx_v, cvx_y
-                                    if (d == 1) then
-                                        if (loc == -1) ib_cv_ex(i)%sf(-g, j, k) = ib_cv_ex(i)%sf(m + 1 - g, j, k)
-                                        if (loc == 1) ib_cv_ex(i)%sf(m + g, j, k) = ib_cv_ex(i)%sf(g - 1, j, k)
-                                    else if (d == 2) then
-                                        if (loc == -1) ib_cv_ex(i)%sf(j, -g, k) = ib_cv_ex(i)%sf(j, n + 1 - g, k)
-                                        if (loc == 1) ib_cv_ex(i)%sf(j, n + g, k) = ib_cv_ex(i)%sf(j, g - 1, k)
-                                    else
-                                        if (loc == -1) ib_cv_ex(i)%sf(j, k, -g) = ib_cv_ex(i)%sf(j, k, p + 1 - g)
-                                        if (loc == 1) ib_cv_ex(i)%sf(j, k, p + g) = ib_cv_ex(i)%sf(j, k, g - 1)
-                                    end if
-                                end do
-                            end do
-                        end do
-                    end do
-                    $:END_GPU_PARALLEL_LOOP()
-                end if
-            end do
-        end do
-
-    end subroutine s_cutvol_halo
 
     !> ib_cutvol_gcl: the RHS divides by alpha at the stage's output time t (fraction of the step), alpha(t) = alpha - (1 - t) s
     subroutine s_cutvol_stage_alpha(t)
@@ -4861,7 +4820,7 @@ contains
     !! area.
     impure subroutine s_ib_flux_wall_setup()
 
-        integer  :: i, j, k, l, q
+        integer  :: j, k, l, q
         real(wp) :: area, area_glb, vol
 
         @:ALLOCATE(ib_wall_src(1:ibw_a))
@@ -4887,16 +4846,7 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
-        $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', present='[ghost_points]')
-        do i = 1, num_gps
-            j = ghost_points(i)%loc(1); k = ghost_points(i)%loc(2); l = ghost_points(i)%loc(3)
-            if (ghost_points(i)%layer == 1 .and. sum(abs(ghost_points(i)%levelset_norm)) > 0._wp &
-                & .and. f_flux_wall_body(ghost_points(i)%ib_patch_id)) then
-                ib_wall_src(ibw_a)%sf(j, k, l) = sqrt(sum(ghost_points(i)%levelset_norm**2))/sum(abs(ghost_points(i)%levelset_norm))
-            end if
-        end do
-        $:END_GPU_PARALLEL_LOOP()
-        call s_ib_wall_src_buffers()
+        call s_ib_flux_wall_area()
 
         area = 0._wp
         $:GPU_PARALLEL_LOOP(private='[j, k, l, vol]', collapse=3, reduction='[[area]]', reductionOp='[+]')
@@ -4917,6 +4867,34 @@ contains
 
     end subroutine s_ib_flux_wall_setup
 
+    !> ib_flux_wall: each first-layer ghost's wall area per face area (0 elsewhere), from the current ghost points; again after
+    !! every move of an ib_cutvol body
+    subroutine s_ib_flux_wall_area()
+
+        integer :: i, j, k, l
+
+        $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3)
+        do l = idwbuff(3)%beg, idwbuff(3)%end
+            do k = idwbuff(2)%beg, idwbuff(2)%end
+                do j = idwbuff(1)%beg, idwbuff(1)%end
+                    ib_wall_src(ibw_a)%sf(j, k, l) = 0._wp
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', present='[ghost_points]')
+        do i = 1, num_gps
+            j = ghost_points(i)%loc(1); k = ghost_points(i)%loc(2); l = ghost_points(i)%loc(3)
+            if (ghost_points(i)%layer == 1 .and. sum(abs(ghost_points(i)%levelset_norm)) > 0._wp &
+                & .and. f_flux_wall_body(ghost_points(i)%ib_patch_id)) then
+                ib_wall_src(ibw_a)%sf(j, k, l) = sqrt(sum(ghost_points(i)%levelset_norm**2))/sum(abs(ghost_points(i)%levelset_norm))
+            end if
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+        call s_ib_buffers(ib_wall_src, ibw_a)
+
+    end subroutine s_ib_flux_wall_area
+
     !> ib_flux_wall, before each RHS: fill ib_wall_src's buffer cells and set each fluid cell's positivity factor, the largest theta
     !! <= 1 for which its wall faces take at most ib_wall_safety of any species in one forward-Euler step of size dt (each SSP-RK
     !! stage is a convex combination of such steps). Conservative: the body books the scaled flux.
@@ -4928,7 +4906,7 @@ contains
         real(wp)                                            :: dt_loc, use, th, rhoY, tot
         integer                                             :: j, k, l, q
 
-        call s_ib_wall_src_buffers()
+        call s_ib_buffers(ib_wall_src, ibw_a)
         dt_loc = dt
         $:GPU_PARALLEL_LOOP(private='[j, k, l, q, use, th, rhoY, tot]', collapse=3, copyin='[dt_loc]')
         do l = 0, p
@@ -4963,15 +4941,15 @@ contains
     end subroutine s_ib_flux_wall_prepare
 
     !> ib_flux_wall: whether body pid's faces carry the wall's own fluxes: a reacting body (fixed and not blowing, case validator)
-    !! or a fixed, no-slip, non-blowing inert one
+    !! or a no-slip, non-blowing inert one, fixed or (under ib_cutvol_gcl, whose faces are in the body frame) moving
     function f_flux_wall_body(pid) result(on)
 
         $:GPU_ROUTINE(function_name='f_flux_wall_body', parallelism='[seq]', cray_inline=True)
         integer, intent(in) :: pid
         logical             :: on
 
-        on = patch_ib(pid)%inj_species == 0 .and. (patch_ib(pid)%surface_reaction == 1 .or. (patch_ib(pid)%moving_ibm == 0 &
-                      & .and. .not. patch_ib(pid)%slip .and. patch_ib(pid)%v_blow <= 0._wp))
+        on = patch_ib(pid)%inj_species == 0 .and. (patch_ib(pid)%surface_reaction == 1 .or. ((patch_ib(pid)%moving_ibm == 0 &
+                      & .or. ib_cutvol_gcl) .and. .not. patch_ib(pid)%slip .and. patch_ib(pid)%v_blow <= 0._wp))
 
     end function f_flux_wall_body
 
@@ -5003,12 +4981,14 @@ contains
 
     end function f_wall_face_sum
 
-    !> ib_flux_wall: fill ib_wall_src's buffer cells from the neighbouring ranks or the periodic image; they stay zero (no reacting
-    !! wall) at other domain boundaries
-    impure subroutine s_ib_wall_src_buffers()
+    !> Fill the buffer cells of the IB fields f(1:nf) (ib_flux_wall's ib_wall_src, ib_cutvol_gcl's ib_cv_ex) from the neighbouring
+    !! ranks or the periodic image; other domain boundaries keep their values
+    impure subroutine s_ib_buffers(f, nf)
 
-        integer, dimension(3) :: lo, hi, c, dst, src_c
-        integer               :: d, loc, edge, nd, j, k, l, q
+        type(scalar_field), dimension(:), intent(inout) :: f
+        integer, intent(in)                             :: nf
+        integer, dimension(3)                           :: lo, hi, c, dst, src_c
+        integer                                         :: d, loc, edge, nd, j, k, l, q
 
         do d = 1, num_dims
             do loc = -1, 1, 2
@@ -5021,7 +5001,7 @@ contains
                     edge = merge(bc_z%beg, bc_z%end, loc == -1); nd = p
                 end select
                 if (edge >= 0) then
-                    call s_mpi_sendrecv_variables_buffers(ib_wall_src, d, loc, ibw_a)
+                    call s_mpi_sendrecv_variables_buffers(f, d, loc, nf)
                 else if (edge == BC_PERIODIC) then
                     lo = [idwbuff(1)%beg, idwbuff(2)%beg, idwbuff(3)%beg]
                     hi = [idwbuff(1)%end, idwbuff(2)%end, idwbuff(3)%end]
@@ -5038,8 +5018,8 @@ contains
                                     dst(d) = nd + c(d); src_c(d) = c(d) - 1
                                 end if
                                 $:GPU_LOOP(parallelism='[seq]')
-                                do q = 1, ibw_a
-                                    ib_wall_src(q)%sf(dst(1), dst(2), dst(3)) = ib_wall_src(q)%sf(src_c(1), src_c(2), src_c(3))
+                                do q = 1, nf
+                                    f(q)%sf(dst(1), dst(2), dst(3)) = f(q)%sf(src_c(1), src_c(2), src_c(3))
                                 end do
                             end do
                         end do
@@ -5049,7 +5029,7 @@ contains
             end do
         end do
 
-    end subroutine s_ib_wall_src_buffers
+    end subroutine s_ib_buffers
 
     !> ib_flux_wall: the species mass fluxes a converged surface solve sends into the gas, W_k omega_k, and the energy they carry,
     !! sum_k mdot_k (h_k(T_s) + v_n^2/2), per unit wall area
