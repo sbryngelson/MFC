@@ -3812,7 +3812,7 @@ def list_cases() -> typing.List[TestCaseBuilder]:
         }
         cases.append(define_case_d(stack, "IBM Hot Cylinder", hot_cyl, override_tol=10 ** (-6)))
         # The same wall with its sub-grid conduction columns (patch_ib%wall_column) and their heat booking; the columns'
-        # time-step limit needs an adaptive step
+        # time-step limit needs an adaptive step, and a small fraction makes it bind for the first steps (6 of 33)
         cases.append(
             define_case_d(
                 stack,
@@ -3820,6 +3820,7 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                 {
                     **hot_cyl,
                     "patch_ib(1)%wall_column": "T",
+                    "wall_column_dt_frac": 1.0e-3,
                     "ib_heat_wrt": "T",
                     "cfl_adap_dt": "T",
                     "cfl_target": 0.02,
