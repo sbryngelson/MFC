@@ -1169,7 +1169,8 @@ contains
     !! cell sizes h = dV^(1/d) of the surface fill a band of volume ~2hA, so dV/(2h) each sums to the area A (a length in 2D)
     !! whatever the surface's orientation to the grid. The band lies inside the solid, where a layer at depth s has area A (1 -
     !! s/R)^(d-1) on a curved surface; for circles, spheres and cylinders the weight is scaled back by (R/(R - s))^(d-1), which
-    !! removes that bias (sampled on random lattice offsets: < 0.1% mean, 0.3% spread for a sphere at R = 12h).
+    !! removes that bias (sampled on random lattice offsets: < 0.1% mean, 0.3% spread for a sphere at R = 12h). Under ib_flux_wall a
+    !! flux-wall body records only the ghosts that set the face fluxes, weighted by their faces' wall area.
     subroutine s_record_gp_surface(i, gp, T_s, mdot_s, reacting)
 
         $:GPU_ROUTINE(parallelism='[seq]')
@@ -1178,24 +1179,43 @@ contains
         type(ghost_point), intent(in) :: gp
         real(wp), intent(in)          :: T_s, mdot_s
         logical, intent(in)           :: reacting
-        real(wp)                      :: d, dV, h, R
+        real(wp)                      :: d, dV, h, R, a, area
         real(wp), dimension(3)        :: length
+        integer, dimension(3)         :: nb
+        integer                       :: dir, sgn
 
-        d = abs(real(gp%levelset, kind=wp))
-        dV = dx(gp%loc(1))*dy(gp%loc(2))
-        if (num_dims == 3) dV = dV*dz(gp%loc(3))
-        h = dV**(1._wp/real(num_dims, wp))
-        if (.not. (d > 0._wp .and. d <= 2._wp*h)) return
+        if (ib_flux_wall .and. f_flux_wall_body(gp%ib_patch_id)) then
+            ! The faces carry the wall's fluxes: only a first-layer ghost (area share a > 0) sets them, and stands for a times its
+            ! fluid faces' area, so the records sum to the face totals
+            a = ib_wall_src(ibw_a)%sf(gp%loc(1), gp%loc(2), gp%loc(3))
+            if (.not. a > 0._wp) return
+            do dir = 1, num_dims
+                do sgn = -1, 1, 2
+                    nb = gp%loc
+                    nb(dir) = nb(dir) + sgn
+                    if (ib_markers%sf(nb(1), nb(2), nb(3)) == 0) then
+                        call s_wc_face_metric(gp%loc, dir, nb, area, h)
+                        gp_surf(1, i) = gp_surf(1, i) + a*area
+                    end if
+                end do
+            end do
+        else
+            d = abs(real(gp%levelset, kind=wp))
+            dV = dx(gp%loc(1))*dy(gp%loc(2))
+            if (num_dims == 3) dV = dV*dz(gp%loc(3))
+            h = dV**(1._wp/real(num_dims, wp))
+            if (.not. (d > 0._wp .and. d <= 2._wp*h)) return
 
-        gp_surf(1, i) = dV/(2._wp*h)
-        R = patch_ib(gp%ib_patch_id)%radius
-        select case (patch_ib(gp%ib_patch_id)%geometry)
-        case (2, 8)
-            gp_surf(1, i) = gp_surf(1, i)*(R/(R - d))**(num_dims - 1)
-        case (10)  ! curved side only; the flat caps need no correction
-            length = [patch_ib(gp%ib_patch_id)%length_x, patch_ib(gp%ib_patch_id)%length_y, patch_ib(gp%ib_patch_id)%length_z]
-            if (abs(gp%levelset_norm(f_cylinder_axis(length))) < 0.5_wp) gp_surf(1, i) = gp_surf(1, i)*R/(R - d)
-        end select
+            gp_surf(1, i) = dV/(2._wp*h)
+            R = patch_ib(gp%ib_patch_id)%radius
+            select case (patch_ib(gp%ib_patch_id)%geometry)
+            case (2, 8)
+                gp_surf(1, i) = gp_surf(1, i)*(R/(R - d))**(num_dims - 1)
+            case (10)  ! curved side only; the flat caps need no correction
+                length = [patch_ib(gp%ib_patch_id)%length_x, patch_ib(gp%ib_patch_id)%length_y, patch_ib(gp%ib_patch_id)%length_z]
+                if (abs(gp%levelset_norm(f_cylinder_axis(length))) < 0.5_wp) gp_surf(1, i) = gp_surf(1, i)*R/(R - d)
+            end select
+        end if
 
         gp_surf(2, i) = T_s
         gp_surf(3, i) = 0._wp
@@ -1361,6 +1381,10 @@ contains
         $:GPU_PARALLEL_LOOP(private='[i, g, q_in]', copyin='[dt_step]')
         do i = 1, num_ibs
             g = patch_ib(i)%gbl_patch_id
+            ! A flux-wall body gasifies exactly its face mass (the positivity factor included), which the gas receives
+            if (ib_flux_wall) then
+                if (f_flux_wall_body(i)) ib_heat(4, g) = ib_heat(3, g)
+            end if
             q_in = ib_heat(2, g)
             if (patch_ib(i)%thermal_bc == 3) q_in = q_in + patch_ib(i)%cp_solid*(patch_ib(i)%Twall - T_ref)*ib_heat(4, g)
             patch_ib(i)%mdot = ib_heat(4, g)
@@ -4092,7 +4116,7 @@ contains
     !! area.
     impure subroutine s_ib_flux_wall_setup()
 
-        integer  :: i, j, k, l, q, pid
+        integer  :: i, j, k, l, q
         real(wp) :: area, area_glb, vol
 
         @:ALLOCATE(ib_wall_src(1:ibw_a))
@@ -4118,14 +4142,11 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
-        $:GPU_PARALLEL_LOOP(private='[i, j, k, l, pid]', present='[ghost_points]')
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', present='[ghost_points]')
         do i = 1, num_gps
             j = ghost_points(i)%loc(1); k = ghost_points(i)%loc(2); l = ghost_points(i)%loc(3)
-            ! A reacting body (fixed: case validator), or a fixed, no-slip, non-blowing inert one, whose zero source carries no mass
-            pid = ghost_points(i)%ib_patch_id
             if (ghost_points(i)%layer == 1 .and. sum(abs(ghost_points(i)%levelset_norm)) > 0._wp &
-                & .and. patch_ib(pid)%inj_species == 0 .and. (patch_ib(pid)%surface_reaction == 1 &
-                & .or. (patch_ib(pid)%moving_ibm == 0 .and. .not. patch_ib(pid)%slip .and. patch_ib(pid)%v_blow <= 0._wp))) then
+                & .and. f_flux_wall_body(ghost_points(i)%ib_patch_id)) then
                 ib_wall_src(ibw_a)%sf(j, k, l) = sqrt(sum(ghost_points(i)%levelset_norm**2))/sum(abs(ghost_points(i)%levelset_norm))
             end if
         end do
@@ -4185,6 +4206,19 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
     end subroutine s_ib_flux_wall_prepare
+
+    !> ib_flux_wall: whether body pid's faces carry the wall's own fluxes: a reacting body (fixed and not blowing, case validator)
+    !! or a fixed, no-slip, non-blowing inert one
+    function f_flux_wall_body(pid) result(on)
+
+        $:GPU_ROUTINE(function_name='f_flux_wall_body', parallelism='[seq]', cray_inline=True)
+        integer, intent(in) :: pid
+        logical             :: on
+
+        on = patch_ib(pid)%inj_species == 0 .and. (patch_ib(pid)%surface_reaction == 1 .or. (patch_ib(pid)%moving_ibm == 0 &
+                      & .and. .not. patch_ib(pid)%slip .and. patch_ib(pid)%v_blow <= 0._wp))
+
+    end function f_flux_wall_body
 
     !> ib_flux_wall: sum over the reacting-wall faces of fluid cell (j, k, l) of the wall area per cell volume, times species q's
     !! consumption rate max(-mdot_q, 0) (q > 0) or 1 (q = 0)
