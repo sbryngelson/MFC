@@ -335,12 +335,20 @@ contains
 
     end subroutine s_amr_patch_box
 
+    !> How many parent cells inside a child's footprint the ghost prolongation reads: 1 for limited linear, 2 for the quartic.
+    pure integer function f_amr_prolong_reach()
+
+        f_amr_prolong_reach = merge(2, 1, amr_prolong == 2)
+
+    end function f_amr_prolong_reach
+
     pure subroutine s_amr_patch_core(k, clo, chi)
 
         integer, intent(in)  :: k
         integer, intent(out) :: clo(3), chi(3)
 
-        clo = merge(amr_region_lo_all(:,k) + 1, 0, amr_dim); chi = merge(amr_region_hi_all(:,k) - 1, 0, amr_dim)
+        clo = merge(amr_region_lo_all(:,k) + f_amr_prolong_reach(), 0, amr_dim)
+        chi = merge(amr_region_hi_all(:,k) - f_amr_prolong_reach(), 0, amr_dim)
 
     end subroutine s_amr_patch_core
 
@@ -560,6 +568,28 @@ contains
         end if
 
     end function minmod
+
+    !> Average over one half (xi < 0 left, > 0 right; |xi| = 1/4) of the middle of five cell averages q: the conservative quartic,
+    !! or MC-limited linear where either half of the quartic leaves the range of the three nearest averages widened by their
+    !! smallest second difference. Both halves are tested so the two children always share one reconstruction (their mean stays
+    !! q(0)); a smooth extremum may overshoot by about that difference, and near a discontinuity one of them is small.
+    pure real(wp) function f_amr_quartic_half(q, xi) result(v)
+        $:GPU_ROUTINE(parallelism='[seq]')
+        real(wp), intent(in) :: q(-2:2), xi
+        real(wp)             :: c, a, b, d, lo, hi
+
+        d = (3._wp*(q(-2) - q(2)) - 22._wp*(q(-1) - q(1)))/128._wp
+        c = min(abs(q(-2) - 2._wp*q(-1) + q(0)), abs(q(-1) - 2._wp*q(0) + q(1)), abs(q(0) - 2._wp*q(1) + q(2)))
+        lo = min(q(-1), q(0), q(1)) - c; hi = max(q(-1), q(0), q(1)) + c
+        if (min(q(0) - abs(d), q(0) + abs(d)) >= lo .and. q(0) + abs(d) <= hi) then
+            v = q(0) + sign(1._wp, xi)*d
+        else
+            a = q(1) - q(0); b = q(0) - q(-1)
+            v = q(0)
+            if (a*b > 0._wp) v = q(0) + sign(min(0.5_wp*abs(a + b), 2._wp*min(abs(a), abs(b))), a)*xi
+        end if
+
+    end function f_amr_quartic_half
 
     !> Allocate the pooled q_prim/rhs advance scratch (idempotent). The lockstep driver argument-associates the scratch for every
     !! block, owned or not, so it must exist on every rank, including one that never allocates a slot. Called from the one point per

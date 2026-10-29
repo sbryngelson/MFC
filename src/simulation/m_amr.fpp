@@ -223,7 +223,7 @@ contains
         type(scalar_field), allocatable :: tmp_cg(:)
         integer                         :: i
 
-        amr_cpat_mar = (buff_size + amr_ref_ratio - 1)/amr_ref_ratio + 1
+        amr_cpat_mar = (buff_size + amr_ref_ratio - 1)/amr_ref_ratio + f_amr_prolong_reach()
         amr_cpat_hi = merge(amr_maxc_fit - 1 + 2*amr_cpat_mar, 0, amr_dim)
         ! CCE OpenMP-offload leaves a bare module-scope derived-type (scalar_field) allocatable's descriptor uninitialized, so a
         ! direct allocate(amr_cg(1:sys_size)) aborts with lib-4425 at program start (a local scalar_field array and a

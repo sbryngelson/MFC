@@ -648,6 +648,7 @@ contains
         amr_snap = 0
         amr_device_pack = .false.
         amr_subcycle = .false.
+        amr_prolong = 1
         ! A small default would cap the global box count, so real refinement would bind immediately and
         ! silently truncate the refined region (the clusterer/tiler warn, but the answer has already
         ! changed). amr_max_blocks sizes replicated metadata only - slots are allocated lazily for owned

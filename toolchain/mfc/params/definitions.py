@@ -734,6 +734,7 @@ def _load():
     _r("amr_snap", INT)
     _r("amr_device_pack", LOG)
     _r("amr_subcycle", LOG)
+    _r("amr_prolong", INT)
     _r("amr_max_blocks", INT)
     _r("amr_max_grid_size", INT)
     _r("amr_max_level", INT)
@@ -1512,6 +1513,7 @@ _nv(
     "amr_snap",
     "amr_device_pack",
     "amr_subcycle",
+    "amr_prolong",
     "amr_max_blocks",
     "amr_max_grid_size",
     "amr_max_level",

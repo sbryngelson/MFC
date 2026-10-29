@@ -2057,6 +2057,8 @@ class CaseValidator:
             "multi-level AMR (amr_max_level > 1) needs amr_max_blocks >= 2 " "(at least one level-1 block plus one nested level-2 block)",
         )
         self.prohibit(amr_ref_ratio is not None and amr_ref_ratio not in (2, 4), "amr_ref_ratio must be 2 or 4")
+        self.prohibit(self.get("amr_prolong", 1) not in (1, 2), "amr_prolong must be 1 (minmod-limited linear) or 2 (quartic)")
+        self.prohibit(self.get("amr_prolong", 1) == 2 and amr_ref_ratio not in (None, 2), "amr_prolong = 2 requires amr_ref_ratio = 2")
         if self.get("amr_subcycle", "F") == "T":
             self.prohibit(amr_ref_ratio not in (None, 2), "amr_subcycle requires amr_ref_ratio = 2")
             self.prohibit(amr_max_level is not None and amr_max_level > 2, "amr_subcycle supports up to two refined levels (amr_max_level <= 2)")

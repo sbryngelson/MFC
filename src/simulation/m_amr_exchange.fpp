@@ -212,8 +212,10 @@ contains
         integer                                             :: advb, adve
         integer                                             :: s, ns
         integer                                             :: ss, g, r, n1, n2, stot, sb(3, 6), se(3, 6)
-        logical                                             :: d2, d3, multi
+        logical                                             :: d2, d3, multi, quart
         real(wp)                                            :: u0, sx, sy, sz, xix, xiy, xiz
+        integer                                             :: ky, kz, wy, wz
+        real(wp)                                            :: q5(-2:2), pl(-2:2,-2:2), ln(-2:2)
 
         ! q_coarse is the gathered block-local patch amr_cg (fine-level distribution); amr_isect_lo (global, == region_lo on
         ! the owner) + f/rr - amr_cpat_off is the patch-local coarse index. Fine indices are local to this block.
@@ -222,6 +224,7 @@ contains
         d2 = n_glb > 0; d3 = p_glb > 0
         rr = amr_slots(amr_cur)%amr_ref_ratio
         lo1 = amr_isect_lo(1); lo2 = amr_isect_lo(2); lo3 = amr_isect_lo(3)
+        quart = amr_prolong == 2; wy = merge(2, 0, d2); wz = merge(2, 0, d3)
         multi = num_fluids > 1 .and. (.not. bubbles_lagrange)  ! EL alphas sum to beta, not 1: no sum-to-one closure
         advb = eqn_idx%adv%beg; adve = eqn_idx%adv%end
         call s_amr_build_ghost_slabs(ns, sb, se)
@@ -231,7 +234,8 @@ contains
         ! span the full transverse extent, so a hull over all slabs is the whole buffered volume and masking it would throw away
         ! the O(surface) decomposition this routine exists to get.
         stot = f_amr_slab_tab_load(ns, sb, se)
-        $:GPU_PARALLEL_LOOP(collapse=2, private='[s, ss, r, n1, n2, fi, fj, fk, ci, cj, ck, xix, xiy, xiz, u0, sx, sy, sz]')
+        $:GPU_PARALLEL_LOOP(collapse=2, private='[s, ss, r, n1, n2, fi, fj, fk, ci, cj, ck, xix, xiy, xiz, u0, sx, sy, sz, ky, &
+                            & kz, q5, pl, ln]')
         do i = 1, sys_size
             do g = 0, stot - 1
                 s = 1  ! decode the flat index: ns <= 6, so a scan beats storing a per-cell slab map
@@ -257,15 +261,30 @@ contains
                     end if
                     ci = lo1 + floor(real(fi, wp)/real(rr, wp)) - ox
                     xix = (real(modulo(fi, rr), wp) - real(rr - 1, wp)*0.5_wp)/real(rr, wp)
-                    u0 = real(q_coarse(i)%sf(ci, cj, ck), wp)
-                    sx = minmod(real(q_coarse(i)%sf(ci + 1, cj, ck), wp) - u0, u0 - real(q_coarse(i)%sf(ci - 1, cj, ck), wp))
-                    sy = 0._wp
-                    if (d2) sy = minmod(real(q_coarse(i)%sf(ci, cj + 1, ck), wp) - u0, u0 - real(q_coarse(i)%sf(ci, cj - 1, ck), &
-                        & wp))
-                    sz = 0._wp
-                    if (d3) sz = minmod(real(q_coarse(i)%sf(ci, cj, ck + 1), wp) - u0, u0 - real(q_coarse(i)%sf(ci, cj, ck - 1), &
-                        & wp))
-                    amr_cons_st(fi, fj, fk, i, loc) = u0 + sx*xix + sy*xiy + sz*xiz
+                    if (quart) then
+                        ! the quartic half-cell average, one direction at a time over the 5^dim parent stencil (x, then y, z)
+                        do kz = -wz, wz
+                            do ky = -wy, wy
+                                q5 = real(q_coarse(i)%sf(ci - 2:ci + 2,cj + ky, ck + kz), wp)
+                                pl(ky, kz) = f_amr_quartic_half(q5, xix)
+                            end do
+                            ln(kz) = pl(0, kz)
+                            if (d2) ln(kz) = f_amr_quartic_half(pl(:,kz), xiy)
+                        end do
+                        u0 = ln(0)
+                        if (d3) u0 = f_amr_quartic_half(ln, xiz)
+                        amr_cons_st(fi, fj, fk, i, loc) = u0
+                    else
+                        u0 = real(q_coarse(i)%sf(ci, cj, ck), wp)
+                        sx = minmod(real(q_coarse(i)%sf(ci + 1, cj, ck), wp) - u0, u0 - real(q_coarse(i)%sf(ci - 1, cj, ck), wp))
+                        sy = 0._wp
+                        if (d2) sy = minmod(real(q_coarse(i)%sf(ci, cj + 1, ck), wp) - u0, u0 - real(q_coarse(i)%sf(ci, cj - 1, &
+                            & ck), wp))
+                        sz = 0._wp
+                        if (d3) sz = minmod(real(q_coarse(i)%sf(ci, cj, ck + 1), wp) - u0, u0 - real(q_coarse(i)%sf(ci, cj, &
+                            & ck - 1), wp))
+                        amr_cons_st(fi, fj, fk, i, loc) = u0 + sx*xix + sy*xiy + sz*xiz
+                    end if
                 end if
             end do
         end do
@@ -1186,8 +1205,9 @@ contains
     end subroutine s_amr_patch_width
 
     !> The parent-fill transfer list of a child with padded parent patch (w1, w2, w3), in the patch-local frame: the whole patch
-    !! (full) or its hollow shell (the per-stage ghost fill never reads the open interior of the parent footprint [mar+1, w-mar-1]).
-    !! Send, receive and consume all derive the list here, so the wire layout cannot drift between sides.
+    !! (full) or its hollow shell (the per-stage ghost fill never reads the open interior of the parent footprint,
+    !! f_amr_prolong_reach cells in). Send, receive and consume all derive the list here, so the wire layout cannot drift between
+    !! sides.
     impure subroutine s_amr_parent_slabs(w1, w2, w3, full, msl, tb, te)
 
         integer, intent(in)  :: w1, w2, w3
@@ -1199,7 +1219,8 @@ contains
             msl = 1; tb(:,1) = 0; te(:,1) = [w1, w2, w3]
             return
         end if
-        clo = merge(amr_cpat_mar + 1, 0, amr_dim); chi = merge([w1, w2, w3] - amr_cpat_mar - 1, 0, amr_dim)
+        clo = merge(amr_cpat_mar + f_amr_prolong_reach(), 0, amr_dim)
+        chi = merge([w1, w2, w3] - amr_cpat_mar - f_amr_prolong_reach(), 0, amr_dim)
         call s_amr_shell_slabs([0, 0, 0], [w1, w2, w3], clo, chi, msl, tb, te, scells)
 
     end subroutine s_amr_parent_slabs
