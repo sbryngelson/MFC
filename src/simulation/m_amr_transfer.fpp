@@ -383,15 +383,16 @@ contains
 
     end subroutine s_amr_reduce_xchg_flag
 
-    !> Conservative-linear prolongation for a single variable pair. Reads coarse interior/ghost from qc; writes fine interior to qf.
-    !! Minmod-limited slopes.
+    !> Conservative prolongation of one variable from the patch qc into the fine interior: minmod-limited linear, or with
+    !! amr_prolong = 2 the ghost fill's limited quartic, so new cells match the ghosts at the coarse-fine faces.
     impure subroutine s_prolong_one_var(qc, loc, ivar)
 
         type(scalar_field), intent(in) :: qc
         integer, intent(in)            :: loc, ivar  !< flat-store slot and variable of the fine target
-        integer                        :: fi, fj, fk, ci, cj, ck, ox, oy, oz, rrat, mm, nn, pp, il1, il2, il3
+        integer                        :: fi, fj, fk, ci, cj, ck, ox, oy, oz, rrat, mm, nn, pp, il1, il2, il3, ky, kz, wy, wz
         real(wp)                       :: u0, sx, sy, sz, xix, xiy, xiz
-        logical                        :: d2, d3
+        real(wp)                       :: q5(-2:2), pl(-2:2,-2:2), ln(-2:2)
+        logical                        :: d2, d3, quart
 
         ! coarse source qc is the gathered block-local patch amr_cg (fine-level distribution): amr_isect_lo is global and equals
         ! region_lo on the owner, so amr_isect_lo + f/rr - amr_cpat_off = nmar + f/rr is the patch-local coarse index.
@@ -403,7 +404,8 @@ contains
         mm = amr_slots(amr_cur)%m; nn = amr_slots(amr_cur)%n; pp = amr_slots(amr_cur)%p
         il1 = amr_isect_lo(1); il2 = amr_isect_lo(2); il3 = amr_isect_lo(3)
         d2 = n_glb > 0; d3 = p_glb > 0
-        $:GPU_PARALLEL_LOOP(collapse=3, private='[ci, cj, ck, xix, xiy, xiz, u0, sx, sy, sz]')
+        quart = amr_prolong == 2; wy = merge(2, 0, d2); wz = merge(2, 0, d3)
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[ci, cj, ck, xix, xiy, xiz, u0, sx, sy, sz, ky, kz, q5, pl, ln]')
         do fk = 0, pp
             do fj = 0, nn
                 do fi = 0, mm
@@ -413,13 +415,28 @@ contains
                     xiy = 0._wp; if (d2) xiy = (real(mod(fj, rrat), wp) - real(rrat - 1, wp)*0.5_wp)/real(rrat, wp)
                     ci = il1 + fi/rrat - ox
                     xix = (real(mod(fi, rrat), wp) - real(rrat - 1, wp)*0.5_wp)/real(rrat, wp)
-                    u0 = real(qc%sf(ci, cj, ck), wp)
-                    sx = minmod(real(qc%sf(ci + 1, cj, ck), wp) - u0, u0 - real(qc%sf(ci - 1, cj, ck), wp))
-                    sy = 0._wp
-                    if (d2) sy = minmod(real(qc%sf(ci, cj + 1, ck), wp) - u0, u0 - real(qc%sf(ci, cj - 1, ck), wp))
-                    sz = 0._wp
-                    if (d3) sz = minmod(real(qc%sf(ci, cj, ck + 1), wp) - u0, u0 - real(qc%sf(ci, cj, ck - 1), wp))
-                    amr_cons_st(fi, fj, fk, ivar, loc) = u0 + sx*xix + sy*xiy + sz*xiz
+                    if (quart) then
+                        ! twin of the quartic in s_amr_fill_fine_ghosts
+                        do kz = -wz, wz
+                            do ky = -wy, wy
+                                q5 = real(qc%sf(ci - 2:ci + 2,cj + ky, ck + kz), wp)
+                                pl(ky, kz) = f_amr_quartic_half(q5, xix)
+                            end do
+                            ln(kz) = pl(0, kz)
+                            if (d2) ln(kz) = f_amr_quartic_half(pl(:,kz), xiy)
+                        end do
+                        u0 = ln(0)
+                        if (d3) u0 = f_amr_quartic_half(ln, xiz)
+                        amr_cons_st(fi, fj, fk, ivar, loc) = u0
+                    else
+                        u0 = real(qc%sf(ci, cj, ck), wp)
+                        sx = minmod(real(qc%sf(ci + 1, cj, ck), wp) - u0, u0 - real(qc%sf(ci - 1, cj, ck), wp))
+                        sy = 0._wp
+                        if (d2) sy = minmod(real(qc%sf(ci, cj + 1, ck), wp) - u0, u0 - real(qc%sf(ci, cj - 1, ck), wp))
+                        sz = 0._wp
+                        if (d3) sz = minmod(real(qc%sf(ci, cj, ck + 1), wp) - u0, u0 - real(qc%sf(ci, cj, ck - 1), wp))
+                        amr_cons_st(fi, fj, fk, ivar, loc) = u0 + sx*xix + sy*xiy + sz*xiz
+                    end if
                 end do
             end do
         end do
@@ -427,9 +444,10 @@ contains
 
     end subroutine s_prolong_one_var
 
-    !> Conservative-linear prolongation: fill amr_fine interior from coarse (level-0), minmod-limited. Symmetric child offsets
-    !! (+/-1/4 of a coarse cell) => the amr_ref_ratio^d children average to the coarse value. Multi-fluid volume fractions take the
-    !! sum-preserving closure path instead (single-fluid runs never branch, so their prolongation is untouched).
+    !> Conservative prolongation: fill amr_fine interior from coarse (minmod-limited linear, or quartic with amr_prolong = 2).
+    !! Symmetric child offsets (+/-1/4 of a coarse cell) => the amr_ref_ratio^d children average to the coarse value. Multi-fluid
+    !! volume fractions take the sum-preserving closure path instead (single-fluid runs never branch, so their prolongation is
+    !! untouched).
     impure subroutine s_interpolate_coarse_to_fine()
 
         integer :: i
