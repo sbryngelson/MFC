@@ -40,10 +40,9 @@ module m_amr_store
     implicit none
 
     private
-    public :: s_amr_alloc_slot, s_amr_alloc_slot_stash, s_amr_bat_member_prim, s_amr_br_load, s_amr_br_load_batch, &
-        & s_amr_br_load_faces, s_amr_br_store, s_amr_br_store_faces, s_amr_copy_fine_fields, s_amr_free_slot, s_amr_alloc_pool, &
-        & s_amr_free_pool, s_amr_set_mbuf, s_amr_init_swap_buffers, s_amr_free_swap_buffers, s_amr_prereserve_stash, &
-        & s_amr_reconcile_slots, s_amr_sync_grid_state_to_device, s_amr_dev_mem
+    public :: s_amr_alloc_slot, s_amr_bat_member_prim, s_amr_br_load, s_amr_br_load_batch, s_amr_br_load_faces, s_amr_br_store, &
+        & s_amr_br_store_faces, s_amr_copy_fine_fields, s_amr_free_slot, s_amr_alloc_pool, s_amr_free_pool, s_amr_set_mbuf, &
+        & s_amr_init_swap_buffers, s_amr_free_swap_buffers, s_amr_reconcile_slots, s_amr_sync_grid_state_to_device, s_amr_dev_mem
 
 contains
 
@@ -587,47 +586,6 @@ contains
         amr_st_cap = 0
 
     end subroutine s_amr_st_finalize
-
-    !> One-shot pre-reserve before a batch of s_amr_alloc_slot_stash calls: grows the store at most once, to the batch's exact final
-    !! size, instead of once per 8-16 incrementally allocated slots. Every growth restages the whole store (s_amr_st_reserve), so a
-    !! migration wave allocating tens of replica slots would pay that restage repeatedly without this. getk(k) marks dense
-    !! fine-block index k (slot f_l0_slot(k)) for a coming stash alloc.
-    impure subroutine s_amr_prereserve_stash(getk, nblk)
-
-        integer, intent(in) :: nblk
-        logical, intent(in) :: getk(nblk)
-        integer             :: i, nneed
-
-        nneed = 0
-        do i = 1, nblk
-            if (getk(i) .and. .not. amr_slot_live(f_l0_slot(i))) nneed = nneed + 1
-        end do
-        ! mirrors the alloc loop exactly: the first amr_loc_nfree allocs pop the recycle stack and do
-        ! not raise amr_loc_n; only the remainder grow
-        call s_amr_st_reserve(amr_loc_n + max(nneed - amr_loc_nfree, 0))
-
-    end subroutine s_amr_prereserve_stash
-
-    !> Assign slot islot a dense store index without the per-block field arrays: a migration replica only ever has its amr_stor_st
-    !! slot written (receive-unpack) and read (the rebuild's overlap carry-forward), so per-slot q_prim/rhs would roughly double its
-    !! device cost across the replica set of a migration-heavy regrid. s_amr_alloc_slot upgrades a stash-only slot in place when the
-    !! same global slot becomes an owned block; s_amr_free_slot handles both flavors.
-    impure subroutine s_amr_alloc_slot_stash(islot)
-
-        integer, intent(in) :: islot
-
-        if (amr_slot_live(islot)) return
-        if (amr_loc_nfree > 0) then
-            amr_loc_of(islot) = amr_loc_free(amr_loc_nfree)
-            amr_loc_nfree = amr_loc_nfree - 1
-        else
-            amr_loc_n = amr_loc_n + 1
-            amr_loc_of(islot) = amr_loc_n
-        end if
-        amr_slot_live(islot) = .true.
-        call s_amr_st_reserve(amr_loc_n)
-
-    end subroutine s_amr_alloc_slot_stash
 
     impure subroutine s_amr_alloc_slot(islot)
 
