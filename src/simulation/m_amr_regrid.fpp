@@ -1836,6 +1836,7 @@ contains
         deallocate (last_use, held, held_hi, vpos, amr_mig_win)
         call s_amr_mig_free(amr_mig_rq)
         call s_phase_toc(PH_RG_BUILD)
+        call s_amr_report_mem('built')
         call s_phase_tic(PH_RG_REC)
 
         ! one allreduce for the whole loop; sets amr_xchg_coarse_ghosts if any block needs it

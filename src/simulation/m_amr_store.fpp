@@ -371,6 +371,8 @@ contains
         #:endfor
 
         amr_st_cap = newcap
+        if (rank_time_wrt) write (0, '(A,I0,A,I0,A,I0,A,L1,A,F8.2)') ' [amr-stgrow] rank ', proc_rank, ' cap ', oldcap, ' -> ', &
+            & newcap, ' device-staged ', dev_stage, ' free GiB before ', real(free_b, wp)/2._wp**30
 
         ! the bridge spans a bounded batch of blocks along the last active dimension (amr_br_batch), so one s_compute_rhs call
         ! can advance a whole batch instead of one block; it rides the same pool lifetime
