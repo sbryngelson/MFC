@@ -157,7 +157,7 @@ contains
 
         if (.not. amr) call s_amr_init_swap_buffers()  ! coexist: the AMR init's buffers serve the tile swaps too
         call s_amr_build_global_cb(buff_size)  ! global L0 boundaries extended into the domain ghost shell (edge tiles need it)
-        amr_cpat_mar = (buff_size + amr_ref_ratio - 1)/amr_ref_ratio + 1
+        amr_cpat_mar = f_amr_cpat_mar()
         amr_xchg_coarse_ghosts = .false.  ! tiles never prolong from a coarser level
 
         ! per-tile geometry: level-1 rr=1 blocks. Loop is rank-major then z,y,x (x fastest) so intra-rank neighbours are

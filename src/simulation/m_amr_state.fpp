@@ -265,7 +265,7 @@ module m_amr_state
     !! refreshed by one GPU_UPDATE per launch.
     integer, allocatable            :: amr_slab_tab(:,:)
     type(scalar_field), allocatable :: amr_cg(:)
-    integer                         :: amr_cpat_mar = 0  !< coarse-cell stencil reach = (buff_size+1)/2 + 1 (matches nmar)
+    integer                         :: amr_cpat_mar = 0  !< coarse-cell stencil reach (f_amr_cpat_mar)
     integer                         :: amr_cpat_hi(3) = 0  !< amr_cg upper local bounds per dim (0 in collapsed dims)
     integer                         :: amr_cpat_off(3) = 0  !< global coarse index of amr_cg local cell 0 (region_lo - amr_cpat_mar)
     integer                         :: amr_wcur = 1  !< consume cursor into the open fill wave's receive transfers (box-major)
@@ -341,6 +341,13 @@ contains
         f_amr_prolong_reach = merge(2, 1, amr_prolong == 2)
 
     end function f_amr_prolong_reach
+
+    !> Coarse-patch margin amr_cpat_mar: the coarse cells a buff_size fine ghost layer spans plus the prolongation reach.
+    pure integer function f_amr_cpat_mar()
+
+        f_amr_cpat_mar = (buff_size + amr_ref_ratio - 1)/amr_ref_ratio + f_amr_prolong_reach()
+
+    end function f_amr_cpat_mar
 
     pure subroutine s_amr_patch_core(k, clo, chi)
 
