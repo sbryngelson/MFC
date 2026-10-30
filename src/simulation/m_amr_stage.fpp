@@ -54,8 +54,8 @@ contains
     !! complete before its wave), after one coarse cons halo for every block's prolongation; phase 2 overwrites the fine-fine seam
     !! ghosts with the neighbours' stage-entry interiors (posted before the fills, drained after); phase 3 advances every owned
     !! block in batches of equal shape; phase 4 refluxes the level-1 blocks into the coarse rhs as one face wave plus one batched
-    !! apply (both order-free: disjoint register slots, disjoint corrections by the merge invariant). A level>=2 block's coarse side
-    !! is its parent, refluxed after the stage loop (s_amr_step_fold). Coexist: the deferred coarse RHS runs before the reflux so
+    !! apply (both order-free: disjoint register slots; low and high faces in separate launches). A level>=2 block's coarse side is
+    !! its parent, refluxed after the stage loop (s_amr_step_fold). Coexist: the deferred coarse RHS runs before the reflux so
     !! creg(L0) exists, and its rhs is zeroed so rhs_vf becomes the pure reflux-delta accumulator that s_l0_add_reflux_to_tiles
     !! routes to each covering tile (the tiles carry their own rhs).
     impure subroutine s_amr_stage_fine(s, t_step, coefs, q_cons, q_T_sf, q_prim_vf, bc_type, rhs_vf, pb_in, rhs_pb, mv_in, rhs_mv)

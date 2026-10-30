@@ -629,10 +629,10 @@ contains
 
     ! Batched over the level-1 blocks, one kernel per face direction (mirror of the capture-side batching,
     ! s_amr_capture_batch), since per-launch overhead rather than arithmetic dominates a per-block form.
-    ! Block corrections are disjoint (the merge invariant keeps blocks >= buff_size apart), so the batched kernel is
-    ! equivalent to a per-block loop. Host precompute walks the slots with select_slot + s_amr_reflux_face_flags; the
-    ! a_* descriptors are pushed once per direction. Per direction d the transverse dims are (ta, tb) and the fine-face
-    ! register holds rr children per active transverse dim.
+    ! Same-side corrections of distinct blocks are disjoint (same-level blocks never overlap), so with the low and high faces in
+    ! separate launches the batched kernel is race-free and order-fixed for any block spacing. Host precompute walks the slots
+    ! with select_slot + s_amr_reflux_face_flags; the a_* descriptors are pushed once per direction. Per direction d the
+    ! transverse dims are (ta, tb) and the fine-face register holds rr children per active transverse dim.
     #:for D, TA, TB, DX, IDX in [(1, 2, 3, 'dx', 'a_ol(k), i2, i3'), (2, 1, 3, 'dy', 'i2, a_ol(k), i3'), (3, 1, 2, 'dz', &
                                   & 'i2, i3, a_ol(k)')]
         !> Reflux correction for the faces normal to direction ${D}$. Called only when amr_dim(${D}$).
@@ -641,10 +641,10 @@ contains
             type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf
             integer                                                :: eq, c1, c2, c1w, c2w, k, save_cur, nact, gmax1, gmax2
             integer                                                :: f10, f20, dd1, dd2, nch, rr, dd1_hi, dd2_hi, sreg
-            integer                                                :: bla, bha, blb, bhb
+            integer                                                :: bla, bha, blb, bhb, side
             integer                                                :: i2, i3, sidx(3), ext(3), tlo(3), thi(3)
             logical                                                :: dta, dtb, own_lo(3), own_hi(3)
-            real(wp)                                               :: fblo, fbhi
+            real(wp)                                               :: fb
 
             rr = amr_ref_ratio
             save_cur = amr_cur
@@ -675,35 +675,46 @@ contains
             call s_amr_select_slot(save_cur)
             if (nact > 0) then
                 $:GPU_UPDATE(device='[a_ol, a_oh, a_ta, a_tb, a_b1l, a_b1h, a_b2l, a_b2h, a_lo, a_hi, a_act, a_mlo, a_mhi]')
-                $:GPU_PARALLEL_LOOP(collapse=4, private='[c1, c2, f10, f20, dd1, dd2, fblo, fbhi, i2, i3]')
-                do k = 1, amr_reg_n
-                    do c2w = 0, gmax2
-                        do c1w = 0, gmax1
-                            do eq = 1, sys_size
-                                if (.not. a_act(k)) cycle
-                                c1 = a_b1l(k) + c1w; c2 = a_b2l(k) + c2w
-                                if (c1 > a_b1h(k) .or. c2 > a_b2h(k)) cycle
-                                f10 = 0; if (dta) f10 = rr*c1
-                                f20 = 0; if (dtb) f20 = rr*c2
-                                fblo = 0._wp; fbhi = 0._wp
-                                do dd2 = 0, dd2_hi
-                                    do dd1 = 0, dd1_hi
-                                        fblo = fblo + freg(${D}$)%lo(eq, f10 + dd1, f20 + dd2, k)
-                                        fbhi = fbhi + freg(${D}$)%hi(eq, f10 + dd1, f20 + dd2, k)
+                ! low faces, then high faces: one block's high outside cell can be another's low outside cell (a one-cell gap),
+                ! so a single launch over both would race on it
+                do side = 0, 1
+                    $:GPU_PARALLEL_LOOP(collapse=4, private='[c1, c2, f10, f20, dd1, dd2, fb, i2, i3]')
+                    do k = 1, amr_reg_n
+                        do c2w = 0, gmax2
+                            do c1w = 0, gmax1
+                                do eq = 1, sys_size
+                                    if (.not. a_act(k)) cycle
+                                    if (.not. merge(a_hi(k), a_lo(k), side == 1)) cycle
+                                    c1 = a_b1l(k) + c1w; c2 = a_b2l(k) + c2w
+                                    if (c1 > a_b1h(k) .or. c2 > a_b2h(k)) cycle
+                                    f10 = 0; if (dta) f10 = rr*c1
+                                    f20 = 0; if (dtb) f20 = rr*c2
+                                    fb = 0._wp
+                                    do dd2 = 0, dd2_hi
+                                        do dd1 = 0, dd1_hi
+                                            if (side == 0) then
+                                                fb = fb + freg(${D}$)%lo(eq, f10 + dd1, f20 + dd2, k)
+                                            else
+                                                fb = fb + freg(${D}$)%hi(eq, f10 + dd1, f20 + dd2, k)
+                                            end if
+                                        end do
                                     end do
+                                    fb = fb/real(nch, wp)
+                                    i2 = a_ta(k) + c1; i3 = a_tb(k) + c2
+                                    if (side == 0) then
+                                        rhs_vf(eq)%sf(${IDX}$) = rhs_vf(eq)%sf(${IDX}$) + (creg(${D}$)%lo(eq, c1, c2, &
+                                               & k) - fb)/a_mlo(k)
+                                    else
+                                        rhs_vf(eq)%sf(${IDX.replace('a_ol', 'a_oh')}$) &
+                                               & = rhs_vf(eq)%sf(${IDX.replace('a_ol', 'a_oh')}$) + (fb - creg(${D}$)%hi(eq, c1, &
+                                               & c2, k))/a_mhi(k)
+                                    end if
                                 end do
-                                fblo = fblo/real(nch, wp); fbhi = fbhi/real(nch, wp)
-                                i2 = a_ta(k) + c1; i3 = a_tb(k) + c2
-                                if (a_lo(k)) rhs_vf(eq)%sf(${IDX}$) = rhs_vf(eq)%sf(${IDX}$) + (creg(${D}$)%lo(eq, c1, c2, &
-                                    & k) - fblo)/a_mlo(k)
-                                if (a_hi(k)) rhs_vf(eq)%sf(${IDX.replace('a_ol', 'a_oh')}$) &
-                                    & = rhs_vf(eq)%sf(${IDX.replace('a_ol', 'a_oh')}$) + (fbhi - creg(${D}$)%hi(eq, c1, c2, &
-                                    & k))/a_mhi(k)
                             end do
                         end do
                     end do
+                    $:END_GPU_PARALLEL_LOOP()
                 end do
-                $:END_GPU_PARALLEL_LOOP()
             end if
 
         end subroutine s_amr_apply_reflux_d${D}$
