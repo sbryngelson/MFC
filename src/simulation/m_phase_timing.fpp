@@ -16,8 +16,8 @@ module m_phase_timing
 
     private
     public :: s_phase_tic, s_phase_toc, s_phase_step_tic, s_phase_step_toc, s_phase_report, PH_HALO, PH_GATHER, PH_GFILL, &
-        & PH_SEAM, PH_RHS, PH_RK, PH_REFLUX, PH_REGRID, PH_L0, PH_COARSE, PH_SWAP, PH_RESTR, PH_RG_HALO, PH_RG_TAG, PH_RG_CLUS, &
-        & PH_RG_OWN, PH_RG_MIG, PH_RG_BUILD, PH_RG_REC
+        & PH_SEAM, PH_RHS, PH_RK, PH_REFLUX, PH_REGRID, PH_L0, PH_COARSE, PH_SWAP, PH_RESTR, PH_LERP, PH_RG_HALO, PH_RG_TAG, &
+        & PH_RG_CLUS, PH_RG_OWN, PH_RG_MIG, PH_RG_BUILD, PH_RG_REC
 
     integer, parameter          :: PH_HALO = 1       !< coarse cons halo exchange (once per stage)
     integer, parameter          :: PH_GATHER = 2     !< fill waves: coarse-patch gather into every block
@@ -31,18 +31,19 @@ module m_phase_timing
     integer, parameter          :: PH_COARSE = 10    !< coarse (base-grid) solver work
     integer, parameter          :: PH_SWAP = 11      !< per-batch grid-state swap and restore
     integer, parameter          :: PH_RESTR = 12     !< post-stage restrict + reflux-to-parent fold
-    integer, parameter          :: PH_NTOP = 12      !< the disjoint brackets above; the regrid sub-phases below nest in PH_REGRID
-    integer, parameter          :: PH_RG_HALO = 13   !< coarse halo + host copy for tagging
-    integer, parameter          :: PH_RG_TAG = 14    !< tagging
-    integer, parameter          :: PH_RG_CLUS = 15   !< clustering, shaping, nesting and box checks
-    integer, parameter          :: PH_RG_OWN = 16    !< stash and owner assignment
-    integer, parameter          :: PH_RG_MIG = 17    !< fine-state migration
-    integer, parameter          :: PH_RG_BUILD = 18  !< new-block build (fills, prolongation, overlap copy)
-    integer, parameter          :: PH_RG_REC = 19    !< slot reconcile, IB setup, seam check
-    integer, parameter          :: PH_N = 19
+    integer, parameter          :: PH_LERP = 13      !< subcycled coarse time interpolation for the level-1 fills
+    integer, parameter          :: PH_NTOP = 13      !< the disjoint brackets above; the regrid sub-phases below nest in PH_REGRID
+    integer, parameter          :: PH_RG_HALO = 14   !< coarse halo + host copy for tagging
+    integer, parameter          :: PH_RG_TAG = 15    !< tagging
+    integer, parameter          :: PH_RG_CLUS = 16   !< clustering, shaping, nesting and box checks
+    integer, parameter          :: PH_RG_OWN = 17    !< stash and owner assignment
+    integer, parameter          :: PH_RG_MIG = 18    !< fine-state migration
+    integer, parameter          :: PH_RG_BUILD = 19  !< new-block build (fills, prolongation, overlap copy)
+    integer, parameter          :: PH_RG_REC = 20    !< slot reconcile, IB setup, seam check
+    integer, parameter          :: PH_N = 20
     character(len=8), parameter :: PH_NAME(PH_N) = [character(len=8)::'halo','gather', 'gfill', 'seam', 'rhs', 'rk', 'reflux', &
-              & 'regrid', 'L0', 'coarse', 'swap', 'restr', ' rg.halo', ' rg.tag', ' rg.clus', ' rg.own', ' rg.mig', ' rg.build', &
-              & ' rg.rec']
+              & 'regrid', 'L0', 'coarse', 'swap', 'restr', 'lerp', ' rg.halo', ' rg.tag', ' rg.clus', ' rg.own', ' rg.mig', &
+              & ' rg.build', ' rg.rec']
 
     real(wp)   :: acc(PH_N) = 0._wp, wall = 0._wp  !< wall is the accumulated step-loop time the phases are budgeted against
     integer(8) :: ncall(PH_N) = 0, tic_c(PH_N) = 0, wall_c = 0

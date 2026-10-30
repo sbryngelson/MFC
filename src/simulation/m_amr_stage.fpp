@@ -211,6 +211,7 @@ contains
         real(wp), intent(in)                                :: theta
         integer                                             :: i, j, k, l
 
+        call s_phase_tic(PH_LERP)
         $:GPU_PARALLEL_LOOP(collapse=4)
         do i = 1, sys_size
             do l = idwbuff(3)%beg, idwbuff(3)%end
@@ -222,6 +223,7 @@ contains
             end do
         end do
         $:END_GPU_PARALLEL_LOOP()
+        call s_phase_toc(PH_LERP)
 
     end subroutine s_amr_lerp_coarse
 
