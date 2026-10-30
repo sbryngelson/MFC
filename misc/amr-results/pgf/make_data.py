@@ -42,8 +42,11 @@ for mode in ("sub", "lock"):
     write(f"amradd_{mode}.dat", [[n] + [a[k][i] - a[k][0] for k in CODES] for i, n in enumerate(NP)], cols)
 
 # Time to solution at 128 GPUs (largest rung complete for every code)
-write("tts_np128.dat", [[i, get(c, "sub", 128, 2), get(c, "lock", 128, 2)] for i, c in enumerate(CODES.values())],
-      ["i", "sub", "lock"])
+with open(os.path.join(OUT, "tts_np128.tex"), "w") as f:
+    for key, c in (("mfc", "MFC v2"), ("pelec", "PeleC"), ("amrex", "AMReX CNS")):
+        for mode in ("sub", "lock"):
+            v = get(c, mode, 128, 2)
+            f.write(f"\\def\\tts{key}{mode}{{{'nan' if math.isnan(v) else f'{v:.4g}'}}}\n")
 
 # What each fix bought, np64 subcycled; later rows appear once mfc-simple-v3 lands
 STEPS = [("Before fixes", "MFC v1"), ("All fixes but placement", "MFC v2 place off"), ("+ owner placement", "MFC v2"),

@@ -6,12 +6,14 @@
 \nextgroupplot[title={Lock-step weak-scaling efficiency}, ylabel={efficiency (time at 8 / time at N)}, ymin=0, ymax=1.1,
   legend pos=south west]
   \addplot[mfc2] table[x=np, y=mfc2] {data/eff_lock.dat}; \addlegendentry{MFC}
-  \addplot[mfc1] table[x=np, y=mfc1] {data/eff_lock.dat}; \addlegendentry{MFC, before fixes}
+  \ifamrex
   \addplot[amrex] table[x=np, y=amrex] {data/eff_lock.dat}; \addlegendentry{AMReX CNS}
+  \fi
 \nextgroupplot[title={Lock-step time per step}, ylabel={seconds}, ymin=0]
   \addplot[mfc2] table[x=np, y=mfc2] {data/step_lock.dat};
-  \addplot[mfc1] table[x=np, y=mfc1] {data/step_lock.dat};
+  \ifamrex
   \addplot[amrex] table[x=np, y=amrex] {data/step_lock.dat};
+  \fi
 \end{groupplot}
 \end{tikzpicture}
 \end{document}

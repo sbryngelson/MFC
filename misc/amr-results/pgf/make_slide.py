@@ -26,8 +26,7 @@ def load(path):
 v1 = load(B + "mfc-simple/results.csv")
 v2 = load(B + "mfc-simple-v2/results.csv")
 lines = [  # label, table, code, mode, style
-    ("MFC (after fixes)", v2, "MFC v2", "sub", dict(color="#1f5fbf", marker="o", lw=2.4)),
-    ("MFC (baseline)", v1, "MFC", "sub", dict(color="#1f5fbf", marker="o", lw=1.4, ls="--", mfc="white")),
+    ("MFC", v2, "MFC v2", "sub", dict(color="#1f5fbf", marker="o", lw=2.4)),
     ("AMReX CNS", v1, "AMReX CNS", "sub", dict(color="#555555", marker="s", lw=1.8)),
     ("PeleC", v1, "PeleC", "sub", dict(color="#999999", marker="^", lw=1.8)),
 ]
@@ -50,11 +49,8 @@ for lab, tab, code, mode, st in lines:
     xa, ya = series(tab, code, mode, 1)
     if xa and xa[0] == 8:
         ax[1].plot(xa, [y - ya[0] for y in ya], label=lab, **st)
-for code, tab, lab, st in (("MFC", v1, "baseline", dict(color="#1f5fbf", ls="--", marker="o", mfc="white")),
-                           ("MFC v2", v2, "after fixes", dict(color="#1f5fbf", marker="o", lw=2.4))):
-    xs, ys = series(tab, code, "sub", 0)
-    if xs:
-        ax[2].plot(xs, ys, label=f"MFC {lab}", **st)
+xs, ys = series(v2, "MFC v2", "sub", 0)
+ax[2].plot(xs, ys, label="MFC", color="#1f5fbf", marker="o", lw=2.4)
 for code, st in (("AMReX CNS", dict(color="#555555", marker="s")), ("PeleC", dict(color="#999999", marker="^"))):
     xs, ys = series(v1, code, "sub", 0)
     ax[2].plot(xs, ys, label=code, lw=1.2, **st)

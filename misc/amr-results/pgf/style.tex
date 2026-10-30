@@ -23,3 +23,7 @@
   amrex/.style={color=amrex, thick, mark=square*, mark size=2pt},
   pelec/.style={color=pelec, thick, mark=triangle*, mark size=2.6pt},
 }
+% AMReX CNS series; build with \def\noamrex{} for the PeleC-only sponsor variants
+\newif\ifamrex \amrextrue
+\ifdefined\noamrex \amrexfalse \fi
+\ifamrex\else \definecolor{pelec}{HTML}{4D4D4D} \fi

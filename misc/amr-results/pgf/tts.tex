@@ -1,14 +1,25 @@
 \documentclass[border=4pt]{standalone}
 \input{style}
+\input{data/tts_np128.tex}
 \begin{document}
 \begin{tikzpicture}
-\begin{axis}[width=8.5cm, height=6cm, ybar, bar width=14pt, ymin=0, grid=none, ymajorgrids,
+\begin{axis}[width=\ifamrex 8.5cm\else 6cm\fi, height=6cm, ybar, bar width=16pt, ymin=0, grid=none, ymajorgrids,
   title={Time to solution, 128 GPUs}, ylabel={wall seconds to the same physical time},
-  xtick={0,1,2,3}, xticklabels={MFC before,MFC after,AMReX CNS,PeleC}, xmin=-0.6, xmax=3.6,
+  xtick={0,1,2}, xticklabels={MFC,PeleC,AMReX CNS}, xmin=-0.6, xmax=\ifamrex 2.6\else 1.6\fi,
   legend pos=north east, nodes near coords, nodes near coords style={font=\scriptsize, /pgf/number format/fixed,
-  /pgf/number format/precision=0}]
-  \addplot[fill=mfc, draw=none] table[x=i, y=sub] {data/tts_np128.dat}; \addlegendentry{subcycled}
-  \addplot[fill=mfc!35, draw=none] table[x=i, y=lock] {data/tts_np128.dat}; \addlegendentry{lock-step}
+  /pgf/number format/precision=0}, enlarge y limits={upper, value=0.15}]
+  \ifamrex
+  % subcycled (solid) and lock-step (light) per code
+  \addplot[fill=mfc, draw=none, bar shift=-9pt] coordinates {(0,\ttsmfcsub)};
+  \addplot[fill=pelec, draw=none, bar shift=-9pt] coordinates {(1,\ttspelecsub)};
+  \addplot[fill=amrex, draw=none, bar shift=-9pt] coordinates {(2,\ttsamrexsub)};
+  \addplot[fill=mfc!35, draw=none, bar shift=9pt] coordinates {(0,\ttsmfclock)};
+  \addplot[fill=amrex!35, draw=none, bar shift=9pt] coordinates {(2,\ttsamrexlock)};
+  \node[font=\scriptsize, anchor=north east] at (rel axis cs:0.98,0.98) {dark: subcycled, light: lock-step};
+  \else
+  \addplot[fill=mfc, draw=none, bar shift=0pt] coordinates {(0,\ttsmfcsub)};
+  \addplot[fill=pelec, draw=none, bar shift=0pt] coordinates {(1,\ttspelecsub)};
+  \fi
 \end{axis}
 \end{tikzpicture}
 \end{document}

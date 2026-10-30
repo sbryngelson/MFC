@@ -10,8 +10,10 @@
   nodes near coords, nodes near coords style={font=\scriptsize, /pgf/number format/fixed, /pgf/number format/precision=2},
   axis lines*=left, enlarge x limits={upper, value=0.12}, clip=false, title style={yshift=8pt}]
   \addplot[fill=mfc, draw=none] table[x=s, y=i] {\fixtab};
+  \ifamrex
   \draw[amrex, thick, dashed] (axis cs:\amrexsub,-0.6) -- (axis cs:\amrexsub,\nfix+0.6)
     node[pos=0, above, font=\scriptsize, color=amrex, anchor=south east] {AMReX};
+  \fi
   \draw[pelec, thick, dashed] (axis cs:\pelecsub,-0.6) -- (axis cs:\pelecsub,\nfix+0.6)
     node[pos=0, above, font=\scriptsize, color=pelec, anchor=south west] {PeleC};
 \end{axis}

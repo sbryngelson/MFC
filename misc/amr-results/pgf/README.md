@@ -4,6 +4,8 @@ Rebuild after new results land:
 
     /lustre/orion/cfd154/scratch/sbryngelson/viz-venv/bin/python -I make_data.py
     for f in scaling_slide lockstep tts fixes convergence; do latexmk -pdf $f.tex; done
+    # PeleC-only sponsor variants (no AMReX CNS), written as *_pelec.pdf
+    for f in scaling_slide tts fixes; do latexmk -pdf -jobname=${f}_pelec -usepretex="\\def\\noamrex{}" $f.tex; done
 
 - `scaling_slide`: subcycled MFC vs AMReX CNS vs PeleC: efficiency, AMR cost added beyond 8 GPUs, s/step.
 - `lockstep`: lock-step efficiency and s/step, MFC vs AMReX CNS.
