@@ -36,3 +36,12 @@ Blast lattice (the AMReX CNS / PeleC weak-scaling case): ideal gas, periodic, 8M
 ## Movies
 `movies/spheres3d_8gpu_v2_720p.mp4`: Mach 1.5 shock through eight force-driven spheres, 8 GPUs, volumetric shocks and a cutaway of
 the refined blocks coloured by GPU.
+
+## Stills
+`stills/` (1600-px JPEG):
+- `spheres8_{flow,cut,hero}_{400,900,1700}.jpg`: the 8-sphere run (Mach 1.5, 8 GPUs) at t = 0.32, 0.72, 1.36 in three looks:
+  volumetric shock field with pressure-coloured spheres; cutaway with refined blocks outlined by GPU; close hero view.
+- `spheres8_movie_f_*.jpg`: frames from the 8-sphere movie (flow pass, a callout pause, the closing shot).
+- `curtain64_{flow,wake,cut,hero}_{144,440,904,1696}.jpg`: Mach 2.5 shock through a curtain of 64 force-driven spheres
+  (viscous, collisions on, 80 GPUs) at t = 0.49, 1.50, 3.09, 5.80: bow shocks, vortex wakes, refinement on the cut face, close view.
+- `curtain_test_midplane_slice.jpg`: mid-plane slice of the 22-sphere curtain test (8 GPUs).
