@@ -19,6 +19,7 @@ module m_weno
     use m_variables_conversion
     use m_mpi_proxy
     use m_thinc, only: s_thinc_compression
+    use m_helper_basic, only: f_optional_true
     use m_nvtx
 
     private; public :: s_initialize_weno_module, s_finalize_weno_module, s_weno, s_pack_weno_input_arr, s_compute_weno_coefficients
@@ -917,13 +918,14 @@ contains
     end subroutine s_pack_weno_input_arr
 
     !> Perform WENO reconstruction of left and right cell-boundary values from cell-averaged variables
-    subroutine s_weno(v_vf, vL_rs_vf_x, vR_rs_vf_x, weno_dir, is1_weno_d, is2_weno_d, is3_weno_d)
+    subroutine s_weno(v_vf, vL_rs_vf_x, vR_rs_vf_x, weno_dir, is1_weno_d, is2_weno_d, is3_weno_d, packed)
 
         type(scalar_field), dimension(1:), intent(in)                                          :: v_vf
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf_x
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_rs_vf_x
         integer, intent(in)                                                                    :: weno_dir
         type(int_bounds_info), intent(in)                                                      :: is1_weno_d, is2_weno_d, is3_weno_d
+        logical, optional, intent(in)                                                          :: packed  !< v_rs_weno holds v_vf
 
         ! Non-case-optimized amdflang path: weno_num_stencils is not a compile constant, so these are sized
         ! to the max (0:4). Only 0:weno_num_stencils is meaningful - whole-array assignments (e.g. from the
@@ -1002,7 +1004,7 @@ contains
             end if
         end if
 
-        if (weno_order /= 1) then
+        if (weno_order /= 1 .and. .not. f_optional_true(packed)) then
             call s_pack_weno_input_arr(v_vf)
         end if
 

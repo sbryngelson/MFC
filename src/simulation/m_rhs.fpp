@@ -1026,7 +1026,9 @@ contains
             if ((.not. weno_Re_flux) .or. int_comp > 0) then
                 ! Reconstruct densitiess
                 iv%beg = 1; iv%end = sys_size
-                call s_reconstruct_cell_boundary_values(q_prim_qp%vf(1:sys_size), qL_rsx_vf, qR_rsx_vf, id)
+                ! q_prim_qp is unchanged across sweeps; the viscous-derivative reconstruction reuses the buffer
+                call s_reconstruct_cell_boundary_values(q_prim_qp%vf(1:sys_size), qL_rsx_vf, qR_rsx_vf, id, &
+                                                        & packed=id > 1 .and. .not. weno_Re_flux)
             else
                 iv%beg = 1; iv%end = eqn_idx%cont%end
                 call s_reconstruct_cell_boundary_values(q_prim_qp%vf(iv%beg:iv%end), qL_rsx_vf, qR_rsx_vf, id)
@@ -2145,13 +2147,14 @@ contains
     end subroutine s_compute_additional_physics_rhs
 
     !> Reconstruct left and right cell-boundary values from cell-averaged variables
-    subroutine s_reconstruct_cell_boundary_values(v_vf, vL_x, vR_x, norm_dir)
+    subroutine s_reconstruct_cell_boundary_values(v_vf, vL_x, vR_x, norm_dir, packed)
 
         type(scalar_field), dimension(iv%beg:iv%end), intent(in) :: v_vf
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_x
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_x
         integer, intent(in) :: norm_dir
-        integer :: recon_dir  !< Coordinate direction of the reconstruction
+        logical, optional, intent(in) :: packed  !< The scheme's input buffer already holds v_vf
+        integer :: recon_dir                     !< Coordinate direction of the reconstruction
         integer :: i, j, k, l
 
         #:for SCHEME, TYPE in [('weno','recon_type_weno'), ('muscl','recon_type_muscl')]
@@ -2207,7 +2210,7 @@ contains
                 end if
 
                 call s_${SCHEME}$ (v_vf(iv%beg:iv%end), vL_x(:,:,:,iv%beg:iv%end), vR_x(:,:,:,iv%beg:iv%end), recon_dir, is1, &
-                                   & is2, is3)
+                                   & is2, is3, packed)
             end if
         #:endfor
 
