@@ -779,8 +779,8 @@ contains
     !> Tile clustering (amr_tile_cluster): mark every amr_blocking_factor lattice tile an amr_buf-padded tag reaches (one OR
     !! reduction of the global tile mask), then cover the marked tiles of each amr_maxc_fit chunk with greedy maximal boxes (an x
     !! run, grown in y, then z, while the whole run or slab is marked). The boxes are lattice-aligned and disjoint, so two of them
-    !! touch or lie amr_blocking_factor apart, and they are already padded. The debug seed MFC_AMR_TILE_SEED (lo(1:3) hi(1:3) per
-    !! box, coarse cells) replaces the tags with fixed boxes.
+    !! touch or lie amr_blocking_factor apart, and they are already padded. In debug builds the seed MFC_AMR_TILE_SEED (lo(1:3)
+    !! hi(1:3) per box, coarse cells) replaces the tags with fixed boxes.
     impure subroutine s_amr_tile_cluster(tags, ntag, boxes, nboxes)
 
         integer, intent(in)                   :: tags(:,:), ntag
@@ -794,7 +794,9 @@ contains
 #endif
 
         allocate (boxes(amr_max_fine)); nboxes = 0
+#ifdef MFC_DEBUG
         if (f_amr_tile_seed(boxes, nboxes)) return
+#endif
         bf = amr_blocking_factor; gx = [m_glb, n_glb, p_glb]
         nt = merge(gx/bf + 1, 1, amr_dim)
         allocate (mk(0:nt(1) - 1,0:nt(2) - 1,0:nt(3) - 1)); mk = .false.
@@ -844,7 +846,8 @@ contains
 
     end subroutine s_amr_tile_cluster
 
-    !> The debug seed of s_amr_tile_cluster: true (with the boxes) when MFC_AMR_TILE_SEED is set.
+#ifdef MFC_DEBUG
+    !> The debug seed of s_amr_tile_cluster (debug builds only): true (with the boxes) when MFC_AMR_TILE_SEED is set.
     impure logical function f_amr_tile_seed(boxes, nboxes) result(seeded)
 
         type(t_box), intent(inout) :: boxes(:)
@@ -863,5 +866,5 @@ contains
         end do
 
     end function f_amr_tile_seed
-
+#endif
 end module m_amr_cluster
