@@ -1404,29 +1404,13 @@ contains
 
     end subroutine s_amr_fill_wave_done
 
-    !> Per-stage level-1 fill: the wave, then per owned level-1 box the consume and the ghost fill.
+    !> Per-stage level-1 fill: the wave, then every owned level-1 box's consume and ghost fill at once.
     impure subroutine s_amr_stage_fill_wave(q_cons_coarse)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_coarse
-        integer                                                :: k, kk
-        integer                                                :: loc_cur  !< plain scalars for device routines (NVHPC -Minline)
 
         call s_amr_l1_fill_exchange(q_cons_coarse, .false.)
-        if (amr_tile_cluster) then
-            call s_amr_l1_fill_batched(q_cons_coarse)
-            return
-        end if
-        do kk = 1, amr_n_my
-            k = amr_my_blk(kk)
-            if (amr_block_level(k) /= 1) cycle
-            call s_amr_select_slot(k)
-            call s_amr_l1_fill_consume(q_cons_coarse, k, .false.)
-            call s_phase_tic(PH_GFILL)
-            loc_cur = amr_loc_of(amr_cur)
-            call s_amr_fill_fine_ghosts(amr_cg, loc_cur)
-            call s_phase_toc(PH_GFILL)
-        end do
-        call s_amr_fill_wave_done()
+        call s_amr_l1_fill_batched(q_cons_coarse)
 
     end subroutine s_amr_stage_fill_wave
 
@@ -1520,9 +1504,9 @@ contains
 
     end subroutine s_amr_cg_reserve
 
-    !> The level-1 fill consume and ghost fill for all owned level-1 boxes at once (amr_tile_cluster): each box's patch sits at its
-    !! own offset in the pooled amr_cg (s_amr_cg_reserve), so the own-slice copy, the received unpack and the ghost fill are one
-    !! kernel each over every box instead of a few launches per box. Same cells, same arithmetic as the per-box path.
+    !> The level-1 fill consume and ghost fill for all owned level-1 boxes at once: each box's patch sits at its own offset in the
+    !! pooled amr_cg (s_amr_cg_reserve), so the own-slice copy, the received unpack and the ghost fill are one kernel each over
+    !! every box instead of a few launches per box. Same cells, same arithmetic as the per-box consume and fill.
     impure subroutine s_amr_l1_fill_batched(q_cons_coarse)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_coarse

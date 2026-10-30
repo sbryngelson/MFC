@@ -66,99 +66,21 @@ contains
 
     end subroutine s_amr_reflux_faces_for
 
-    !> The per-stage level-1 reflux-face exchange as one wave. Every rank walks the level-1 slots ascending: all receives post first
-    !! (zero-copy, directly into the freg host mirrors; each box owns a register slot, so no pool is needed), then the owners stage
-    !! + multicast, then one waitall, then the receivers push to device. Every message carries its own keyed tag (band 0, per-pair
-    !! seq in the (ascending box, ascending dim, lo-then-hi) plan order both sides derive from the same predicates), so matching
-    !! does not depend on posting order or MPI non-overtaking. Under MFC_DEBUG the identity headers travel as separate 8-word
-    !! companion messages, one per (box, peer) group ahead of its payloads (a prefix cannot ride a zero-copy payload); they are
-    !! never recorded in [amr-xa], so the family words stay exactly comparable. The register arrays are sized up front: the apply
-    !! can reallocate them, so nothing may post into freg before s_amr_reg_prepare.
+    !> The per-stage level-1 reflux-face exchange as one wave: every face a rank refluxes for a block another rank owns is packed
+    !! on the owner's device into one pool, crosses as one message per peer and is unpacked on the device, so a stage costs one
+    !! host copy each way per rank rather than one per face. Both ends list a peer's faces in ascending block, then dim, low before
+    !! high, from the same predicates (s_amr_reflux_faces_for, f_amr_reflux_participates), so the pool layouts agree with no
+    !! handshake. The register arrays are sized up front: the apply can reallocate them, so nothing may post into freg before
+    !! s_amr_reg_prepare.
     impure subroutine s_amr_reflux_faces_wave()
-
-#ifdef MFC_MPI
-        integer :: k, r, idx, ncand, nhr, nhs, j, kk2
-        integer :: cand(num_procs), glo(3), ghi(3), msidx(3), mext(3)
-        logical :: s_lo(3), s_hi(3), u_lo(3), u_hi(3)
-        logical :: cl(3, num_procs), ch(3, num_procs)
-
-        if (num_procs == 1) return
-        call s_amr_reg_prepare()
-        if (amr_tile_cluster) then
-            call s_amr_reflux_faces_packed()
-            return
-        end if
-        call s_amr_wave_open(amr_wave, 0)
-        nhr = 0; nhs = 0
-        call s_amr_refresh_lists()
-        call s_amr_hdr_pools(amr_n_l1p)
-        ! receive side: for every level-1 block another rank owns whose faces this rank refluxes, the owner's freg faces land
-        ! straight in this rank's register slot (zero-copy); faces this rank does not reflux are poisoned so a stray read shows
-        call s_amr_rank_decomp(proc_rank, msidx, mext)
-        do kk2 = 1, amr_n_l1p
-            k = amr_l1p_blk(kk2)
-            if (amr_block_owner(k) == proc_rank) cycle
-            if (.not. f_amr_block_near(k, msidx, mext)) cycle
-            call s_amr_select_slot(k)
-            if (.not. f_amr_reflux_participates(proc_rank)) cycle
-            call s_amr_reflux_faces_for(proc_rank, s_lo, s_hi)
-            nhr = nhr + 1
-            call s_amr_size_int(amr_fw_rblk, nhr)
-            amr_fw_rblk(nhr) = k
-            call s_amr_hdr_req(2, nhr, amr_block_owner(k), XA_F5W_FACE_RCV, k)
-            call s_amr_freg_faces_poison(s_lo, s_hi)
-            call s_amr_freg_faces_req(2, amr_block_owner(k), XA_F5W_FACE_RCV, k, s_lo, s_hi)
-        end do
-        ! send side: every owned level-1 block's faces to each rank that refluxes them
-        call s_amr_refresh_my_blocks()
-        do kk2 = 1, amr_n_my
-            k = amr_my_blk(kk2)
-            if (amr_block_level(k) /= 1) cycle
-            call s_amr_select_slot(k)
-            if (amr_block_owner(k) /= proc_rank) cycle
-            glo = merge(amr_region_lo - 1, 0, amr_dim); ghi = merge(amr_region_hi + 1, 0, amr_dim)
-            call s_amr_ranks_overlapping(glo, ghi, cand, ncand)
-            u_lo = .false.; u_hi = .false.
-            do idx = 1, ncand
-                r = cand(idx)
-                cl(:,idx) = .false.; ch(:,idx) = .false.
-                if (r == proc_rank .or. .not. f_amr_reflux_participates(r)) cycle
-                call s_amr_reflux_faces_for(r, s_lo, s_hi)
-                cl(:,idx) = s_lo; ch(:,idx) = s_hi
-                u_lo = u_lo .or. s_lo; u_hi = u_hi .or. s_hi
-            end do
-            call s_amr_freg_faces_update(.false., u_lo, u_hi)
-            do idx = 1, ncand
-                r = cand(idx)
-                if (r == proc_rank .or. .not. f_amr_reflux_participates(r)) cycle
-                nhs = nhs + 1
-                call s_amr_hdr_req(1, nhs, r, XA_F5W_FACE_SND, k)
-                call s_amr_freg_faces_req(1, r, XA_F5W_FACE_SND, k, cl(:,idx), ch(:,idx))
-            end do
-        end do
-        call s_amr_wave_wait(amr_wave)
-        do j = 1, nhr
-            k = amr_fw_rblk(j)
-            call s_amr_select_slot(k)
-            call s_amr_hdr_check(j, XA_F5W_FACE_SND, k)
-            call s_amr_reflux_faces_for(proc_rank, s_lo, s_hi)
-            call s_amr_freg_faces_update(.true., s_lo, s_hi)
-        end do
-#endif
-
-    end subroutine s_amr_reflux_faces_wave
-
-    !> The reflux-faces wave for many small blocks (amr_tile_cluster): the same faces between the same ranks, but packed on the
-    !! device into one pool, one host copy each way and one message per peer, rather than a host copy and a message per face. Both
-    !! ends list a peer's faces in ascending block, then dim, low before high, from the same predicates as the per-face wave, so the
-    !! pool layouts agree with no handshake.
-    impure subroutine s_amr_reflux_faces_packed()
 
 #ifdef MFC_MPI
         integer :: k, r, idx, ncand, kk2, t
         integer :: cand(num_procs), glo(3), ghi(3), msidx(3), mext(3)
         logical :: s_lo(3), s_hi(3)
 
+        if (num_procs == 1) return
+        call s_amr_reg_prepare()
         call s_amr_wave_open(amr_wave, 0)
         call s_amr_wave_reset(amr_wsend); call s_amr_wave_reset(amr_wrecv)
         call s_amr_refresh_lists()
@@ -208,7 +130,7 @@ contains
         call s_amr_select_slot(1)
 #endif
 
-    end subroutine s_amr_reflux_faces_packed
+    end subroutine s_amr_reflux_faces_wave
 
     !> Append block k's faces f_lo/f_hi with peer as transfers (bl = dim, side 1 low / 2 high, register slot).
     impure subroutine s_amr_face_xfers(w, peer, k, f_lo, f_hi)
@@ -1150,45 +1072,13 @@ contains
         end do
         call s_amr_wave_close(amr_wrecv, amr_fw_rq, amr_fw_dev)
         call s_amr_wave_post(amr_wave, amr_wrecv, amr_fw_rq, XA_F7W_RCV, amr_fw_dev)
-        if (amr_tile_cluster) then
-            call s_amr_restrict_l1_batched(coarse_tgt, milo, mihi)
-            return
-        end if
-        ! owner-local covered overwrites + device packs, grouped per owned block: the transfer list is k-grouped by
-        ! construction, so a monotone cursor drains each block's sends inside its group
-        cur = 1
-        call s_amr_refresh_my_blocks()
-        do kk = 1, amr_n_my
-            k = amr_my_blk(kk)
-            if (amr_block_level(k) /= 1) cycle
-            rr = amr_slots(k)%amr_ref_ratio
-            call s_amr_region_box(k, rlo, rhi)
-            call s_amr_box_isect(rlo, rhi, milo, mihi, bl, bh)
-            if (all(bl <= bh)) call s_amr_restrict_device_sf(coarse_tgt, amr_loc_of(k), bl, bh, rlo, rr, o1, o2, o3)
-            do while (cur <= amr_wsend%nx)
-                if (amr_wsend%blk(cur) /= k) exit
-                call s_amr_wave_slice(amr_wsend, cur, lo, hi)
-                call s_amr_restrict_device_wire(amr_fw_sq(lo:hi), amr_loc_of(k), amr_wsend%bl(:,cur), amr_wsend%bh(:,cur), rlo, rr)
-                call s_amr_wave_hdr_pack(amr_wsend, amr_fw_sq, cur, XA_F7W_SND)
-                cur = cur + 1
-            end do
-        end do
-        call s_amr_wave_send(amr_wave, amr_wsend, amr_fw_sq, XA_F7W_SND, amr_fw_dev)
-        call s_amr_wave_wait(amr_wave)
-        do idx = 1, amr_wrecv%nx
-            call s_amr_wave_hdr_check(amr_wrecv, amr_fw_rq, idx, XA_F7W_SND)
-            call s_amr_wave_slice(amr_wrecv, idx, lo, hi)
-            bl = amr_wrecv%bl(:,idx); bh = amr_wrecv%bh(:,idx)
-            ! Device unpack of the covered box only (the strided-update flang trap; see s_restrict_fine_to_coarse)
-            call s_l0_pack_unpack_block_sf(coarse_tgt, bl(1) - o1, bl(2) - o2, bl(3) - o3, bh(1) - bl(1), bh(2) - bl(2), &
-                                           & bh(3) - bl(3), amr_fw_rq(lo:hi), .false.)
-        end do
+        call s_amr_restrict_l1_batched(coarse_tgt, milo, mihi)
 #endif
 
     end subroutine s_amr_restrict_l1_wave
 
-    !> The rest of the level-1 restrict wave under amr_tile_cluster (the receives are posted): every owned block's covered
-    !! overwrite, every send pack and every received unpack as one launch each over slab rows, instead of a few per block.
+    !> The rest of the level-1 restrict wave (the receives are posted): every owned block's covered overwrite, every send pack and
+    !! every received unpack as one launch each over slab rows, instead of a few per block.
     impure subroutine s_amr_restrict_l1_batched(coarse_tgt, milo, mihi)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: coarse_tgt
