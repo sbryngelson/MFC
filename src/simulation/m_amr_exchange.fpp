@@ -215,7 +215,7 @@ contains
         logical                                             :: d2, d3, multi, quart
         real(wp)                                            :: u0, sx, sy, sz, xix, xiy, xiz
         integer                                             :: ky, kz, wy, wz
-        real(wp)                                            :: st5(-2:2,-2:2,-2:2)
+        real(wp)                                            :: q5(-2:2), pl(-2:2), ln(-2:2)  !< staged x, y, z quartic
 
         ! q_coarse is the gathered block-local patch amr_cg (fine-level distribution); amr_isect_lo (global, == region_lo on
         ! the owner) + f/rr - amr_cpat_off is the patch-local coarse index. Fine indices are local to this block.
@@ -235,7 +235,7 @@ contains
         ! the O(surface) decomposition this routine exists to get.
         stot = f_amr_slab_tab_load(ns, sb, se)
         $:GPU_PARALLEL_LOOP(collapse=2, private='[s, ss, r, n1, n2, fi, fj, fk, ci, cj, ck, xix, xiy, xiz, u0, sx, sy, sz, ky, &
-                            & kz, st5]')
+                            & kz, q5, pl, ln]')
         do i = 1, sys_size
             do g = 0, stot - 1
                 s = 1  ! decode the flat index: ns <= 6, so a scan beats storing a per-cell slab map
@@ -264,10 +264,15 @@ contains
                     if (quart) then
                         do kz = -wz, wz
                             do ky = -wy, wy
-                                st5(:,ky, kz) = real(q_coarse(i)%sf(ci - 2:ci + 2,cj + ky, ck + kz), wp)
+                                q5 = real(q_coarse(i)%sf(ci - 2:ci + 2,cj + ky, ck + kz), wp)
+                                pl(ky) = f_amr_quartic_half(q5, xix)
                             end do
+                            ln(kz) = pl(0)
+                            if (d2) ln(kz) = f_amr_quartic_half(pl, xiy)
                         end do
-                        amr_cons_st(fi, fj, fk, i, loc) = f_amr_quartic_cell(st5, xix, xiy, xiz, d2, d3)
+                        u0 = ln(0)
+                        if (d3) u0 = f_amr_quartic_half(ln, xiz)
+                        amr_cons_st(fi, fj, fk, i, loc) = u0
                     else
                         u0 = real(q_coarse(i)%sf(ci, cj, ck), wp)
                         sx = minmod(real(q_coarse(i)%sf(ci + 1, cj, ck), wp) - u0, u0 - real(q_coarse(i)%sf(ci - 1, cj, ck), wp))
