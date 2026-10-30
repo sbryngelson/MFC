@@ -43,7 +43,7 @@ module m_amr_store
     public :: s_amr_alloc_slot, s_amr_alloc_slot_stash, s_amr_bat_member_prim, s_amr_br_load, s_amr_br_load_batch, &
         & s_amr_br_load_faces, s_amr_br_store, s_amr_br_store_faces, s_amr_copy_fine_fields, s_amr_free_slot, s_amr_alloc_pool, &
         & s_amr_free_pool, s_amr_set_mbuf, s_amr_init_swap_buffers, s_amr_free_swap_buffers, s_amr_prereserve_stash, &
-        & s_amr_reconcile_slots, s_amr_sync_grid_state_to_device
+        & s_amr_reconcile_slots, s_amr_sync_grid_state_to_device, s_amr_dev_mem
 
 contains
 
@@ -233,8 +233,39 @@ contains
 
     end subroutine s_amr_compact_store
 
-    !> Size the flat store for at least nloc local slots, growing 1.25x and never shrinking, so a run pays few reallocations no
-    !! matter how the block count churns (with the index space re-densified every reconcile, growth fires only on a new
+    !> Free and total device memory in bytes (hipMemGetInfo on the AMD GPU build); -1 for both where there is no query.
+    impure subroutine s_amr_dev_mem(free_b, total_b)
+
+        use iso_c_binding, only: c_int, c_size_t
+        integer(8), intent(out) :: free_b, total_b
+
+        #:if MFC_COMPILER == "LLVMFlang"
+#if defined(MFC_OpenMP)
+            interface
+                function hipMemGetInfo(f, t) bind(C, name='hipMemGetInfo') result(ierr)
+
+                    import :: c_int, c_size_t
+                    integer(c_size_t), intent(out) :: f, t
+                    integer(c_int)                 :: ierr
+
+                end function hipMemGetInfo
+            end interface
+            integer(c_size_t) :: f, t
+#endif
+        #:endif
+
+        free_b = -1_8; total_b = -1_8
+        #:if MFC_COMPILER == "LLVMFlang"
+#if defined(MFC_OpenMP)
+            if (hipMemGetInfo(f, t) /= 0) return
+            free_b = int(f, 8); total_b = int(t, 8)
+#endif
+        #:endif
+
+    end subroutine s_amr_dev_mem
+
+    !> Size the flat store for at least nloc local slots, growing geometrically and never shrinking, so a run pays few reallocations
+    !! no matter how the block count churns (with the index space re-densified every reconcile, growth fires only on a new
     !! rebuild-transient high-water). Growth must preserve the live blocks' fields, and those live on the device, so each array
     !! stages through a device-side temporary (two on-device copies, no PCIe round trip). No reader depends on the host mirror
     !! through a grow.
@@ -244,13 +275,10 @@ contains
         integer             :: oldcap, newcap, i, brlo(3), brhi(3)
         integer             :: c5, i4, k3, j2, i1
         integer             :: blo1, bhi1, blo2, bhi2, blo3, bhi3
-        !> device-native staging transiently holds old + tmp columns on the device, and growth fires at the memory high-water mark,
-        !! so the transient itself is budgeted: stage on-device while the extra copy stays under amr_grow_dev_bytes, and route a
-        !! larger store to the slower host path, whose device peak is max(old, new). A column count would not do: a column's bytes
-        !! scale with the block cap, so the same count means wildly different bytes. Known exposure: 4 GiB is 6% of a 64 GB GCD but
-        !! 25% of a 16 GB card, and no portable free-memory query exists here; revisit if a small-card production target appears.
+        !> device bytes kept free through a growth; without a free-memory query, the largest old store staged on the device
         integer(8), parameter           :: amr_grow_dev_bytes = 4_8*1024_8**3
-        integer(8)                      :: st_col_bytes
+        integer(8)                      :: st_col_bytes, free_b, total_b
+        logical                         :: dev_stage
         real(stp), allocatable          :: tmp(:,:,:,:,:), hstage(:,:,:,:,:)
         type(scalar_field), allocatable :: tmp_br(:)  !< CCE descriptor workaround, see below
 
@@ -261,21 +289,24 @@ contains
 
         if (nloc <= amr_st_cap) return
         oldcap = amr_st_cap
-        ! grow 1.25x with the increment capped at 16 slots: a proportional increment is itself store-scaled, and at a large cap
-        ! the +25% transient is what tips a near-limit device over. The +8 floor keeps early growth cheap when oldcap is tiny.
-        newcap = max(oldcap + max(min(oldcap/4, 16), 8), nloc)
+        st_col_bytes = int(mbuf_hi(1) - mbuf_lo(1) + 1, 8)*int(mbuf_hi(2) - mbuf_lo(2) + 1, 8)*int(mbuf_hi(3) - mbuf_lo(3) + 1, &
+                           & 8)*int(sys_size, 8)*int(storage_size(0._stp)/8, 8)
+        ! Staging one array on the device peaks at 2*newcap - oldcap extra columns over both arrays. Double when that fits in the
+        ! free device memory, so a growing refined region regrows the store a few times per run instead of every regrid; else grow
+        ! 1.25x capped at 16 slots (+8 floor) and stage through the host when the device copy does not fit either.
+        call s_amr_dev_mem(free_b, total_b)
+        newcap = max(2*oldcap, nloc, 8)
+        if (.not. f_fits(newcap)) newcap = max(oldcap + max(min(oldcap/4, 16), 8), nloc)
         ! tile clustering: hundreds of small columns per rank; doubling keeps the growth (and its device fragmentation) to a few
         if (amr_tile_cluster) newcap = max(2*oldcap, nloc)
+        dev_stage = f_fits(newcap)
+        if (free_b < 0) dev_stage = int(oldcap, 8)*st_col_bytes <= amr_grow_dev_bytes
 
         @:AMR_MBUF_BOUNDS()
 
         #:for ST in ['amr_cons_st', 'amr_stor_st']
-            st_col_bytes = int(mbuf_hi(1) - mbuf_lo(1) + 1, 8)*int(mbuf_hi(2) - mbuf_lo(2) + 1, &
-                               & 8)*int(mbuf_hi(3) - mbuf_lo(3) + 1, 8)*int(sys_size, 8)*int(storage_size(0._stp)/8, 8)
-            if (int(oldcap, 8)*st_col_bytes > amr_grow_dev_bytes) then
-                ! near-limit fallback: the device-native staging below transiently holds old + tmp = 2*oldcap columns
-                ! on the device, and growth fires exactly at the memory high-water mark. Above the threshold, take the
-                ! host round trip: slow (full PCIe both ways) but its device peak is max(old, new).
+            if (.not. dev_stage) then
+                ! near-limit fallback: slow (full PCIe both ways) but its device peak is max(old, new)
                 $:GPU_UPDATE(host='[' + ST + ']')
                 allocate (hstage(mbuf_lo(1):mbuf_hi(1),mbuf_lo(2):mbuf_hi(2),mbuf_lo(3):mbuf_hi(3),1:sys_size,1:oldcap))
                 hstage = ${ST}$(:,:,:,:,1:oldcap)
@@ -358,6 +389,17 @@ contains
                 @:ACC_SETUP_SFs(amr_cons_br(i))
             end do
         end if
+
+    contains
+
+        !> Device staging of a growth to cap c leaves amr_grow_dev_bytes free (false when free memory is unknown).
+        logical function f_fits(c)
+
+            integer, intent(in) :: c
+
+            f_fits = free_b >= 0 .and. int(2*c - oldcap, 8)*st_col_bytes + amr_grow_dev_bytes <= free_b
+
+        end function f_fits
 
     end subroutine s_amr_st_reserve
 

@@ -24,12 +24,13 @@ module m_amr_regrid
     use m_amr_distribution, only: s_amr_sort_by_key
     use m_amr, only: amr_slots, amr_cons_st, amr_stor_st, amr_loc_of, amr_slot_live, amr_my_blk, amr_n_my, &
         & s_amr_refresh_my_blocks, amr_maxc_fit, amr_seam_pairs_dirty, amr_mesh_epoch, amr_cpat_mar, s_amr_alloc_slot, &
-        & s_amr_alloc_slot_stash, s_amr_prereserve_stash, s_amr_free_slot, s_amr_reduce_xchg_flag, s_amr_reconcile_slots, &
-        & s_amr_assign_block_owners, s_amr_exchange_coarse_cons_halo, s_amr_phys_to_cells, s_amr_body_bbox, &
-        & s_amr_expand_box_over_bodies, s_amr_tile_box, f_amr_seam_dim, f_amr_boxes_overlap, s_set_amr_fine_geometry, &
-        & s_interpolate_coarse_to_fine, s_amr_setup_ib, f_l0_slot, amr_cad_tot, amr_cad_esc, amr_cad_armed, &
-        & s_amr_ranks_overlapping, f_amr_overlap_count, f_amr_rank_overlaps, s_amr_l1_fill_exchange, s_amr_l1_fill_consume, &
-        & s_amr_parent_fill_exchange, s_amr_parent_fill_consume, s_amr_fill_wave_done, amr_fw_sq, amr_fw_rq, amr_fw_dev
+        & s_amr_alloc_slot_stash, s_amr_prereserve_stash, s_amr_dev_mem, s_amr_free_slot, s_amr_reduce_xchg_flag, &
+        & s_amr_reconcile_slots, s_amr_assign_block_owners, s_amr_exchange_coarse_cons_halo, s_amr_phys_to_cells, &
+        & s_amr_body_bbox, s_amr_expand_box_over_bodies, s_amr_tile_box, f_amr_seam_dim, f_amr_boxes_overlap, &
+        & s_set_amr_fine_geometry, s_interpolate_coarse_to_fine, s_amr_setup_ib, f_l0_slot, amr_cad_tot, amr_cad_esc, &
+        & amr_cad_armed, s_amr_ranks_overlapping, f_amr_overlap_count, f_amr_rank_overlaps, s_amr_l1_fill_exchange, &
+        & s_amr_l1_fill_consume, s_amr_parent_fill_exchange, s_amr_parent_fill_consume, s_amr_fill_wave_done, amr_fw_sq, &
+        & amr_fw_rq, amr_fw_dev
     use m_amr_xchg_audit, only: XA_F4_SND, XA_F4_RCV
     use m_acoustic_src, only: acoustic_supp_lo, acoustic_supp_hi
     use m_active_box, only: ab_x, ab_y, ab_z, ab_active
@@ -396,33 +397,17 @@ contains
 
     end subroutine s_amr_pack_gwin_pairs
 
-    !> Diagnostic (rank_time_wrt): free device memory on this rank at a named point of a regrid (AMD GPU builds only).
+    !> Diagnostic (rank_time_wrt): free device memory on this rank at a named point of a regrid (AMD build only).
     impure subroutine s_amr_report_mem(tag)
 
-        use iso_c_binding, only: c_int, c_size_t
         character(len=*), intent(in) :: tag
+        integer(8)                   :: fb, tb
 
-        #:if MFC_COMPILER == "LLVMFlang"
-#if defined(MFC_OpenMP)
-            interface
-                function hipMemGetInfo(free_b, total_b) bind(C, name='hipMemGetInfo') result(ierr)
-
-                    import :: c_int, c_size_t
-                    integer(c_size_t), intent(out) :: free_b, total_b
-                    integer(c_int)                 :: ierr
-
-                end function hipMemGetInfo
-            end interface
-            integer(c_size_t) :: fb, tb
-            integer(c_int)    :: ie
-
-            if (.not. rank_time_wrt) return
-            ie = hipMemGetInfo(fb, tb)
-            write (0, '(A,I0,A,A,A,F8.2,A,F8.2)') ' [amr-mem] rank ', proc_rank, ' ', tag, ' free GiB ', real(fb, wp)/2._wp**30, &
-                   & ' of ', real(tb, wp)/2._wp**30
-#endif
-        #:endif
-        if (len(tag) < 0) print *, tag  ! keeps tag referenced where device memory is not queried
+        if (.not. rank_time_wrt) return
+        call s_amr_dev_mem(fb, tb)
+        if (fb < 0) return
+        write (0, '(A,I0,A,A,A,F8.2,A,F8.2)') ' [amr-mem] rank ', proc_rank, ' ', tag, ' free GiB ', real(fb, wp)/2._wp**30, &
+               & ' of ', real(tb, wp)/2._wp**30
 
     end subroutine s_amr_report_mem
 
