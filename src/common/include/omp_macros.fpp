@@ -180,11 +180,16 @@
 #:def OMP_PARALLEL_LOOP(collapse=None, private=None, parallelism='[gang, vector]', &
     & default='present', firstprivate=None, reduction=None, reductionOp=None, &
     & copy=None, copyin=None, copyinReadOnly=None, copyout=None, create=None, &
-    & no_create=None, present=None, deviceptr=None, attach=None, extraOmpArgs=None)
+    & no_create=None, present=None, deviceptr=None, attach=None, extraOmpArgs=None, privateArrays=None)
 
     #:set collapse_val = GEN_COLLAPSE_STR(collapse)
     #:set parallelism_val = OMP_PARALLELISM_STR(parallelism)
     #:set default_val = OMP_DEFAULT_STR(default)
+    #! amdflang maps a private local array tofrom on every launch (a blocking copy each way); alloc skips both copies
+    #:if MFC_COMPILER == AMD_COMPILER_ID
+        #:set default_val = default_val.strip('\n') + OMP_MAP_STR('alloc', privateArrays).strip('\n')
+    #:endif
+    #:set private = JOIN_LISTS(private, privateArrays)
     #:set private_val = GEN_PRIVATE_STR(private, False).strip('\n') + GEN_PRIVATE_STR(firstprivate, True).strip('\n')
     #:set reduction_val = GEN_REDUCTION_STR(reduction, reductionOp)
     #:set copy_val = OMP_COPY_STR(copy)
