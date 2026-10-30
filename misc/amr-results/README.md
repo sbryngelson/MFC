@@ -33,9 +33,12 @@ Blast lattice (the AMReX CNS / PeleC weak-scaling case): ideal gas, periodic, 8M
 `reports/miniapp_findings.md` (findings F1-F5 from the reference mini-app), `reports/miniapp_scaling.md`,
 `reports/waste_budget.md`, `reports/audit_*.txt` (independent re-derivation of the headline numbers).
 
-## Movies
-`movies/spheres3d_8gpu_v2_720p.mp4`: Mach 1.5 shock through eight force-driven spheres, 8 GPUs, volumetric shocks and a cutaway of
-the refined blocks coloured by GPU.
+## Movies (not in git: *.mp4 is ignored)
+- 8-sphere movie (Mach 1.5, 8 GPUs, volumetric shocks, GPU-coloured cutaway): 1080p master
+  `/lustre/orion/cfd154/scratch/sbryngelson/amr-report/movies/spheres3d_8gpu_v2.mp4`, 720p web copy alongside.
+- 64-sphere particle-curtain movie (Mach 2.5, 80 GPUs): `/lustre/orion/cfd154/scratch/sbryngelson/amr-report/movies/curtain64_80gpu.mp4`
+  (rendering).
+Representative frames are in `stills/`.
 
 ## Stills
 `stills/` (1600-px JPEG):
