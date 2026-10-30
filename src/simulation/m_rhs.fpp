@@ -961,7 +961,9 @@ contains
 
         ! END: Additional physics and source terms
 
-        if (run_time_info .or. probe_wrt .or. ib .or. bubbles_lagrange) then
+        ! run_time_info reads q_prim_vf only after the first stage (m_time_steppers); the hyper_cleaning damping above reads the
+        ! previous stage's copy
+        if (probe_wrt .or. ib .or. bubbles_lagrange .or. (run_time_info .and. (stage == 1 .or. hyper_cleaning))) then
             if (.not. igr) then
                 $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
                 do i = 1, sys_size
