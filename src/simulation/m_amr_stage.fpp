@@ -22,9 +22,7 @@ module m_amr_stage
     private
     public :: s_amr_stage_begin, s_amr_stage_fine, s_amr_l0_stage_update, s_amr_step_fold, s_amr_subcycle_fine
 
-    !> Subcycling: the coarse state interpolated in time for the fine ghost fills (allocated on first use).
-    type(vector_field) :: amr_qlerp
-    logical            :: amr_qlerp_ready = .false.
+    real(wp), parameter :: c_stage(3) = [0._wp, 1._wp, 0.5_wp]  !< SSP-RK3 stage times in units of the step
 
 contains
 
@@ -69,7 +67,6 @@ contains
         type(integer_field), dimension(1:num_dims,1:2), intent(in) :: bc_type
         real(stp), dimension(:,:,:,:,:), intent(inout)             :: pb_in, mv_in
         real(wp), dimension(:,:,:,:,:), intent(inout)              :: rhs_pb, rhs_mv
-        integer                                                    :: ilev
 
         if (.not. amr) return
         if (l0_ntile > 0 .and. chemistry) call s_amr_zero_rhs(rhs_vf)  ! coexist chemistry: the stage-top RHS ran; zero it now
@@ -77,14 +74,7 @@ contains
         if (amr_xchg_coarse_ghosts .and. .not. amr_cons_ghosts_valid) call s_amr_exchange_coarse_cons_halo(q_cons)
         call s_phase_toc(PH_HALO)
         amr_cons_ghosts_valid = .false.
-        call s_amr_fine_fine_post()  ! the seam's sends read stage-entry interiors only: post now, drain after the fills
-        call s_amr_stage_fill_wave(q_cons)
-        do ilev = 2, amr_num_levels
-            call s_amr_parent_fill_wave(ilev)
-        end do
-        call s_phase_tic(PH_SEAM)
-        call s_amr_fine_fine_drain()
-        call s_phase_toc(PH_SEAM)
+        call s_amr_fill_levels(q_cons, 1, amr_num_levels)
         call s_amr_fine_stage_advance_batched(s, coefs, bc_type, q_T_sf, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
         if (l0_ntile > 0 .and. .not. chemistry) then
             call s_phase_tic(PH_COARSE)
@@ -114,7 +104,6 @@ contains
         real(stp), dimension(:,:,:,:,:), intent(inout)             :: pb_in, mv_in
         real(wp), dimension(:,:,:,:,:), intent(inout)              :: rhs_pb, rhs_mv
         integer, intent(in)                                        :: t_step
-        real(wp), parameter                                        :: c_stage(3) = [0._wp, 1._wp, 0.5_wp]
         real(wp)                                                   :: dt0, theta
         integer                                                    :: k, s, i
 
@@ -140,11 +129,7 @@ contains
             do s = 1, 3
                 theta = 0.5_wp*(real(k, wp) + c_stage(s))
                 call s_amr_lerp_coarse(q_old, q_new, theta)
-                call s_amr_fine_fine_post()
-                call s_amr_stage_fill_wave(amr_qlerp%vf)
-                call s_phase_tic(PH_SEAM)
-                call s_amr_fine_fine_drain()
-                call s_phase_toc(PH_SEAM)
+                call s_amr_fill_levels(amr_qlerp%vf, 1, 1)
                 call s_amr_fine_stage_advance_batched(s, coefs(s,:), bc_type, q_T_sf, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
             end do
             if (amr_max_level >= 2) call s_amr_subcycle_l2(q_new, q_old, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, &
@@ -174,15 +159,10 @@ contains
         real(wp), dimension(:,:,:,:,:), intent(inout)              :: rhs_pb, rhs_mv
         integer, intent(in)                                        :: t_step
         real(wp), intent(in)                                       :: th_end, dt0
-        real(wp), parameter                                        :: c_stage(3) = [0._wp, 1._wp, 0.5_wp]
         integer                                                    :: j, s
 
         call s_amr_lerp_coarse(q_old, q_new, th_end)
-        call s_amr_fine_fine_post()
-        call s_amr_stage_fill_wave(amr_qlerp%vf)
-        call s_phase_tic(PH_SEAM)
-        call s_amr_fine_fine_drain()
-        call s_phase_toc(PH_SEAM)
+        call s_amr_fill_levels(amr_qlerp%vf, 1, 1)
         dt = 0.25_wp*dt0
         $:GPU_UPDATE(device='[dt]')
         amr_adv_level = 2
@@ -190,11 +170,7 @@ contains
             amr_sub_first = j == 0
             do s = 1, 3
                 amr_par_theta = 0.5_wp*(real(j, wp) + c_stage(s))
-                call s_amr_fine_fine_post()
-                call s_amr_parent_fill_wave(2)
-                call s_phase_tic(PH_SEAM)
-                call s_amr_fine_fine_drain()
-                call s_phase_toc(PH_SEAM)
+                call s_amr_fill_levels(amr_qlerp%vf, 2, 2)
                 call s_amr_fine_stage_advance_batched(s, coefs(s,:), bc_type, q_T_sf, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
             end do
         end do
@@ -207,6 +183,25 @@ contains
         call s_phase_toc(PH_RESTR)
 
     end subroutine s_amr_subcycle_l2
+
+    !> Ghost fill of levels lev_lo..lev_hi: the level-1 wave from the coarse q_cons (lev_lo = 1), then the parent waves; the
+    !! fine-fine seam reads stage-entry interiors only, so it is posted before the fills and drained after.
+    impure subroutine s_amr_fill_levels(q_cons, lev_lo, lev_hi)
+
+        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons
+        integer, intent(in)                                    :: lev_lo, lev_hi
+        integer                                                :: ilev
+
+        call s_amr_fine_fine_post()
+        if (lev_lo == 1) call s_amr_stage_fill_wave(q_cons)
+        do ilev = max(lev_lo, 2), lev_hi
+            call s_amr_parent_fill_wave(ilev)
+        end do
+        call s_phase_tic(PH_SEAM)
+        call s_amr_fine_fine_drain()
+        call s_phase_toc(PH_SEAM)
+
+    end subroutine s_amr_fill_levels
 
     !> amr_qlerp = (1 - theta) q_old + theta q_new over the whole buffered coarse domain.
     impure subroutine s_amr_lerp_coarse(q_old, q_new, theta)

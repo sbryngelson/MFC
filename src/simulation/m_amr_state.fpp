@@ -269,6 +269,11 @@ module m_amr_state
     integer                         :: amr_cpat_hi(3) = 0  !< amr_cg upper local bounds per dim (0 in collapsed dims)
     integer                         :: amr_cpat_off(3) = 0  !< global coarse index of amr_cg local cell 0 (region_lo - amr_cpat_mar)
     integer                         :: amr_wcur = 1  !< consume cursor into the open fill wave's receive transfers (box-major)
+
+    !> Subcycling: the coarse state interpolated in time for the fine ghost fills (allocated on first use).
+    type(vector_field) :: amr_qlerp
+    logical            :: amr_qlerp_ready = .false.
+
     !> Level-0 tiling (l0_ntile > 0, amr off): tile the base grid into l0_ntile**num_dims base-resolution (refinement-ratio-1)
     !! blocks and advance each through the same swap-based per-block solver the AMR fine overlay uses, with tile-tile same-level
     !! seam halos (s_amr_fine_fine_halo, fmul=1) at interior faces and the physical BC at domain-edge faces. l0_ntile>0 must be

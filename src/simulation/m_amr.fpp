@@ -353,6 +353,12 @@ contains
         end do
         @:DEALLOCATE(amr_cg)
         @:DEALLOCATE(amr_slab_tab)
+        if (amr_qlerp_ready) then
+            do i = 1, sys_size
+                @:DEALLOCATE(amr_qlerp%vf(i)%sf)
+            end do
+            @:DEALLOCATE(amr_qlerp%vf)
+        end if
         call s_amr_free_swap_buffers()
 
     end subroutine s_finalize_amr_module

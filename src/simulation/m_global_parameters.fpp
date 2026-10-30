@@ -311,16 +311,11 @@ module m_global_parameters
     integer :: n_el_bubs_loc, n_el_bubs_glb  !< Number of Lagrangian bubbles (local and global)
     logical :: moving_lag_bubbles
     logical :: lag_pressure_force
-
-    !> Subcycled AMR advance state (amr_subcycle): set by the subcycled driver, read by the flux capture and the batched advance.
-    !! amr_sub_on: a subcycled step is in progress (captures carry rk3_w * the level's dt and accumulate); amr_sub_first: the
-    !! current fine substep is the first of its parent step (its stage 1 restarts the fine registers); amr_adv_level: the level the
-    !! batched fine advance is restricted to (0: every refined level).
-    logical :: amr_sub_on = .false., amr_sub_first = .false.
-    integer :: amr_adv_level = 0
-    !> Parent time fraction for level >= 2 ghost fills under subcycling: the parent block's data is packed as (1 - amr_par_theta) *
-    !! its substep-start backup + amr_par_theta * its current state; 1 reads the current state only.
-    real(wp) :: amr_par_theta = 1._wp
+    ! subcycled AMR advance state (amr_subcycle)
+    logical  :: amr_sub_on = .false.     !< a subcycled step is in progress (flux captures accumulate rk3_w * the level dt)
+    logical  :: amr_sub_first = .false.  !< the fine substep is its parent step's first (stage 1 restarts the fine registers)
+    integer  :: amr_adv_level = 0        !< the level the batched fine advance is restricted to (0: every refined level)
+    real(wp) :: amr_par_theta = 1._wp    !< subcycled level>=2 fills read (1-theta)*parent backup + theta*parent (1: current only)
     logical  :: lag_gravity_force
     integer  :: lag_vel_model, lag_drag_model
     $:GPU_DECLARE(create='[n_el_bubs_loc, n_el_bubs_glb]')
