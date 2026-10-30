@@ -1190,13 +1190,21 @@ contains
         type(vector_field), intent(inout) :: q_cons_vf
         type(vector_field), intent(inout) :: q_prim_vf
         logical, intent(in) :: is_hat_L
-        integer :: j, k, l, q                                      !< Loop iterators from original, meaning varies
-        integer :: k_loop, l_loop, q_loop                          !< Standardized spatial loop iterators 0:m, 0:n, 0:p
+        integer :: j, k, l, q  !< Loop iterators from original, meaning varies
+        integer :: k_loop, l_loop, q_loop  !< Standardized spatial loop iterators 0:m, 0:n, 0:p
         integer :: i_fluid_loop
         integer :: abx_lo, abx_hi, aby_lo, aby_hi, abz_lo, abz_hi  !< Active-box flux-difference bounds
         real(wp) :: inv_ds, flux_face1, flux_face2
         real(wp) :: advected_qty_val, pressure_val, velocity_val
         real(wp) :: G1_eff, G2_eff, pres_K, alpha_K, alpha_rho_K, blkmod_K
+        real(wp) :: rhs_val
+        logical :: adv_fused  !< The vel_iface alpha*div(u) term rides in the flux-difference kernel
+        integer :: fadv_lo, fadv_hi  !< Its equation range there (empty when not fused)
+
+        adv_fused = adv_src_mode == adv_src_mode_vel_iface .and. hypo_nc_mode /= hypo_nc_mode_dual_pass .and. .not. (idir == 3 &
+            & .and. grid_geometry == 3)
+        fadv_lo = eqn_idx%adv%beg
+        fadv_hi = merge(eqn_idx%adv%end, fadv_lo - 1, adv_fused)
 
         G1_eff = 0._wp
         G2_eff = 0._wp
@@ -1260,7 +1268,7 @@ contains
             end if
 
             if (hypo_nc_mode /= hypo_nc_mode_dual_pass) then
-                $:GPU_PARALLEL_LOOP(collapse=4,private='[j, k_loop, l_loop, q_loop, inv_ds, flux_face1, flux_face2]')
+                $:GPU_PARALLEL_LOOP(collapse=4,private='[j, k_loop, l_loop, q_loop, inv_ds, flux_face1, flux_face2, rhs_val]')
                 do j = 1, sys_size
                     do q_loop = abz_lo, abz_hi
                         do l_loop = aby_lo, aby_hi
@@ -1268,7 +1276,14 @@ contains
                                 inv_ds = 1._wp/dx(k_loop)
                                 flux_face1 = flux_rsx_vf(k_loop - 1, l_loop, q_loop, j)
                                 flux_face2 = flux_rsx_vf(k_loop, l_loop, q_loop, j)
-                                rhs_vf(j)%sf(k_loop, l_loop, q_loop) = inv_ds*(flux_face1 - flux_face2)
+                                rhs_val = inv_ds*(flux_face1 - flux_face2)
+                                if (j >= fadv_lo .and. j <= fadv_hi) then
+                                    rhs_val = rhs_val + inv_ds*q_cons_vf%vf(j)%sf(k_loop, l_loop, &
+                                                                            & q_loop)*(flux_src_rsx_vf(k_loop, l_loop, q_loop, &
+                                                                            & fadv_lo) - flux_src_rsx_vf(k_loop - 1, l_loop, &
+                                                                            & q_loop, fadv_lo))
+                                end if
+                                rhs_vf(j)%sf(k_loop, l_loop, q_loop) = rhs_val
                             end do
                         end do
                     end do
@@ -1336,7 +1351,7 @@ contains
             end if
 
             if (hypo_nc_mode /= hypo_nc_mode_dual_pass) then
-                $:GPU_PARALLEL_LOOP(collapse=4,private='[j, k, l, q, inv_ds, flux_face1, flux_face2]')
+                $:GPU_PARALLEL_LOOP(collapse=4,private='[j, k, l, q, inv_ds, flux_face1, flux_face2, rhs_val]')
                 do j = 1, sys_size
                     do l = abz_lo, abz_hi
                         do k = aby_lo, aby_hi
@@ -1344,7 +1359,12 @@ contains
                                 inv_ds = 1._wp/dy(k)
                                 flux_face1 = flux_rsx_vf(q, k - 1, l, j)
                                 flux_face2 = flux_rsx_vf(q, k, l, j)
-                                rhs_vf(j)%sf(q, k, l) = rhs_vf(j)%sf(q, k, l) + inv_ds*(flux_face1 - flux_face2)
+                                rhs_val = rhs_vf(j)%sf(q, k, l) + inv_ds*(flux_face1 - flux_face2)
+                                if (j >= fadv_lo .and. j <= fadv_hi) then
+                                    rhs_val = rhs_val + inv_ds*q_cons_vf%vf(j)%sf(q, k, l)*(flux_src_rsx_vf(q, k, l, &
+                                                                            & fadv_lo) - flux_src_rsx_vf(q, k - 1, l, fadv_lo))
+                                end if
+                                rhs_vf(j)%sf(q, k, l) = rhs_val
                             end do
                         end do
                     end do
@@ -1498,7 +1518,7 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
             else  ! Cartesian Coordinates
                 if (hypo_nc_mode /= hypo_nc_mode_dual_pass) then
-                    $:GPU_PARALLEL_LOOP(collapse=4,private='[j, k, l, q, inv_ds, flux_face1, flux_face2]')
+                    $:GPU_PARALLEL_LOOP(collapse=4,private='[j, k, l, q, inv_ds, flux_face1, flux_face2, rhs_val]')
                     do j = 1, sys_size
                         do k = abz_lo, abz_hi
                             do q = aby_lo, aby_hi
@@ -1506,7 +1526,12 @@ contains
                                     inv_ds = 1._wp/dz(k)
                                     flux_face1 = flux_rsx_vf(l, q, k - 1, j)
                                     flux_face2 = flux_rsx_vf(l, q, k, j)
-                                    rhs_vf(j)%sf(l, q, k) = rhs_vf(j)%sf(l, q, k) + inv_ds*(flux_face1 - flux_face2)
+                                    rhs_val = rhs_vf(j)%sf(l, q, k) + inv_ds*(flux_face1 - flux_face2)
+                                    if (j >= fadv_lo .and. j <= fadv_hi) then
+                                        rhs_val = rhs_val + inv_ds*q_cons_vf%vf(j)%sf(l, q, k)*(flux_src_rsx_vf(l, q, k, &
+                                                                                & fadv_lo) - flux_src_rsx_vf(l, q, k - 1, fadv_lo))
+                                    end if
+                                    rhs_vf(j)%sf(l, q, k) = rhs_val
                                 end do
                             end do
                         end do
@@ -1628,19 +1653,21 @@ contains
                     end if
                 else if (adv_src_mode == adv_src_mode_vel_iface) then
                     ! u-interface: flux_src(adv%beg) supplies one shared face-normal velocity. RHS applies alpha_k * du/dx.
-                    $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
-                                        & local_flux1, local_flux2]')
-                    do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
-                        do q_idx = abz_lo, abz_hi; do l_idx = aby_lo, aby_hi; do k_idx = abx_lo, abx_hi
-                            local_inv_ds = 1._wp/dx(k_idx)
-                            local_term_coeff = q_cons_vf_arg%vf(j_adv)%sf(k_idx, l_idx, q_idx)
-                            local_flux1 = flux_src_rsx_vf(k_idx, l_idx, q_idx, eqn_idx%adv%beg)
-                            local_flux2 = flux_src_rsx_vf(k_idx - 1, l_idx, q_idx, eqn_idx%adv%beg)
-                            rhs_vf_arg(j_adv)%sf(k_idx, l_idx, q_idx) = rhs_vf_arg(j_adv)%sf(k_idx, l_idx, &
-                                       & q_idx) + local_inv_ds*local_term_coeff*(local_flux1 - local_flux2)
-                        end do; end do; end do
-                    end do
-                    $:END_GPU_PARALLEL_LOOP()
+                    if (.not. adv_fused) then  ! otherwise added in the flux-difference kernel
+                        $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
+                                            & local_flux1, local_flux2]')
+                        do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
+                            do q_idx = abz_lo, abz_hi; do l_idx = aby_lo, aby_hi; do k_idx = abx_lo, abx_hi
+                                local_inv_ds = 1._wp/dx(k_idx)
+                                local_term_coeff = q_cons_vf_arg%vf(j_adv)%sf(k_idx, l_idx, q_idx)
+                                local_flux1 = flux_src_rsx_vf(k_idx, l_idx, q_idx, eqn_idx%adv%beg)
+                                local_flux2 = flux_src_rsx_vf(k_idx - 1, l_idx, q_idx, eqn_idx%adv%beg)
+                                rhs_vf_arg(j_adv)%sf(k_idx, l_idx, q_idx) = rhs_vf_arg(j_adv)%sf(k_idx, l_idx, &
+                                           & q_idx) + local_inv_ds*local_term_coeff*(local_flux1 - local_flux2)
+                            end do; end do; end do
+                        end do
+                        $:END_GPU_PARALLEL_LOOP()
+                    end if
                     if (alt_soundspeed) then  ! K*div(u) correction
                         $:GPU_PARALLEL_LOOP(collapse=3, private='[k_idx, l_idx, q_idx, local_inv_ds, local_k_term_val, &
                                             & local_flux1, local_flux2]')
@@ -1707,19 +1734,21 @@ contains
                     end if
                 else if (adv_src_mode == adv_src_mode_vel_iface) then
                     ! u-interface: flux_src(adv%beg) supplies one shared face-normal velocity. RHS applies alpha_k * du/dy.
-                    $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
-                                        & local_flux1, local_flux2]')
-                    do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
-                        do l_idx = abz_lo, abz_hi; do k_idx = aby_lo, aby_hi; do q_idx = abx_lo, abx_hi
-                            local_inv_ds = 1._wp/dy(k_idx)
-                            local_term_coeff = q_cons_vf_arg%vf(j_adv)%sf(q_idx, k_idx, l_idx)
-                            local_flux1 = flux_src_rsx_vf(q_idx, k_idx, l_idx, eqn_idx%adv%beg)
-                            local_flux2 = flux_src_rsx_vf(q_idx, k_idx - 1, l_idx, eqn_idx%adv%beg)
-                            rhs_vf_arg(j_adv)%sf(q_idx, k_idx, l_idx) = rhs_vf_arg(j_adv)%sf(q_idx, k_idx, &
-                                       & l_idx) + local_inv_ds*local_term_coeff*(local_flux1 - local_flux2)
-                        end do; end do; end do
-                    end do
-                    $:END_GPU_PARALLEL_LOOP()
+                    if (.not. adv_fused) then  ! otherwise added in the flux-difference kernel
+                        $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
+                                            & local_flux1, local_flux2]')
+                        do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
+                            do l_idx = abz_lo, abz_hi; do k_idx = aby_lo, aby_hi; do q_idx = abx_lo, abx_hi
+                                local_inv_ds = 1._wp/dy(k_idx)
+                                local_term_coeff = q_cons_vf_arg%vf(j_adv)%sf(q_idx, k_idx, l_idx)
+                                local_flux1 = flux_src_rsx_vf(q_idx, k_idx, l_idx, eqn_idx%adv%beg)
+                                local_flux2 = flux_src_rsx_vf(q_idx, k_idx - 1, l_idx, eqn_idx%adv%beg)
+                                rhs_vf_arg(j_adv)%sf(q_idx, k_idx, l_idx) = rhs_vf_arg(j_adv)%sf(q_idx, k_idx, &
+                                           & l_idx) + local_inv_ds*local_term_coeff*(local_flux1 - local_flux2)
+                            end do; end do; end do
+                        end do
+                        $:END_GPU_PARALLEL_LOOP()
+                    end if
                     if (alt_soundspeed) then  ! K*div(u) correction
                         $:GPU_PARALLEL_LOOP(collapse=3, private='[k_idx, l_idx, q_idx, local_inv_ds, local_k_term_val, &
                                             & local_flux1, local_flux2]')
@@ -1853,19 +1882,21 @@ contains
                         end if
                     else if (adv_src_mode == adv_src_mode_vel_iface) then
                         ! u-interface: flux_src(adv%beg) supplies one shared face-normal velocity. RHS applies alpha_k * du/dz.
-                        $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
-                                            & local_flux1, local_flux2]')
-                        do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
-                            do k_idx = abz_lo, abz_hi; do q_idx = aby_lo, aby_hi; do l_idx = abx_lo, abx_hi
-                                local_inv_ds = 1._wp/dz(k_idx)
-                                local_term_coeff = q_cons_vf_arg%vf(j_adv)%sf(l_idx, q_idx, k_idx)
-                                local_flux1 = flux_src_rsx_vf(l_idx, q_idx, k_idx, eqn_idx%adv%beg)
-                                local_flux2 = flux_src_rsx_vf(l_idx, q_idx, k_idx - 1, eqn_idx%adv%beg)
-                                rhs_vf_arg(j_adv)%sf(l_idx, q_idx, k_idx) = rhs_vf_arg(j_adv)%sf(l_idx, q_idx, &
-                                           & k_idx) + local_inv_ds*local_term_coeff*(local_flux1 - local_flux2)
-                            end do; end do; end do
-                        end do
-                        $:END_GPU_PARALLEL_LOOP()
+                        if (.not. adv_fused) then  ! otherwise added in the flux-difference kernel
+                            $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
+                                                & local_flux1, local_flux2]')
+                            do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
+                                do k_idx = abz_lo, abz_hi; do q_idx = aby_lo, aby_hi; do l_idx = abx_lo, abx_hi
+                                    local_inv_ds = 1._wp/dz(k_idx)
+                                    local_term_coeff = q_cons_vf_arg%vf(j_adv)%sf(l_idx, q_idx, k_idx)
+                                    local_flux1 = flux_src_rsx_vf(l_idx, q_idx, k_idx, eqn_idx%adv%beg)
+                                    local_flux2 = flux_src_rsx_vf(l_idx, q_idx, k_idx - 1, eqn_idx%adv%beg)
+                                    rhs_vf_arg(j_adv)%sf(l_idx, q_idx, k_idx) = rhs_vf_arg(j_adv)%sf(l_idx, q_idx, &
+                                               & k_idx) + local_inv_ds*local_term_coeff*(local_flux1 - local_flux2)
+                                end do; end do; end do
+                            end do
+                            $:END_GPU_PARALLEL_LOOP()
+                        end if
                         if (alt_soundspeed) then  ! K*div(u) correction
                             $:GPU_PARALLEL_LOOP(collapse=3, private='[k_idx, l_idx, q_idx, local_inv_ds, local_k_term_val, &
                                                 & local_flux1, local_flux2]')
