@@ -5,7 +5,7 @@ import csv, json, math, os
 B = "/lustre/orion/cfd154/scratch/sbryngelson/"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 NP = [8, 64, 128, 512, 1024]
-CODES = {"mfc1": "MFC v1", "mfc2": "MFC v2", "amrex": "AMReX CNS", "pelec": "PeleC"}
+CODES = {"mfc1": "MFC v1", "mfc2": "MFC v2", "mfc3": "MFC v3 subdrv+swap", "amrex": "AMReX CNS", "pelec": "PeleC"}
 os.makedirs(OUT, exist_ok=True)
 
 tab = {}
@@ -45,7 +45,7 @@ for mode in ("sub", "lock"):
 
 # Time to solution at 128 GPUs (largest rung complete for every code)
 with open(os.path.join(OUT, "tts_np128.tex"), "w") as f:
-    for key, c in (("mfc", "MFC v2"), ("pelec", "PeleC"), ("amrex", "AMReX CNS")):
+    for key, c in (("mfc", "MFC v3 subdrv+swap"), ("pelec", "PeleC"), ("amrex", "AMReX CNS")):
         for mode in ("sub", "lock"):
             v = get(c, mode, 128, 2)
             f.write(f"\\def\\tts{key}{mode}{{{'nan' if math.isnan(v) else f'{v:.4g}'}}}\n")

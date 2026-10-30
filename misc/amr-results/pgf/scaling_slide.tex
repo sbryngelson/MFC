@@ -5,18 +5,21 @@
 \begin{groupplot}[group style={group size=3 by 1, horizontal sep=1.8cm}, gpus]
 \nextgroupplot[title={Weak-scaling efficiency}, ylabel={efficiency (time at 8 / time at N)}, ymin=0, ymax=1.05,
   legend pos=south west]
-  \addplot[mfc2] table[x=np, y=mfc2] {data/eff_sub.dat}; \addlegendentry{MFC}
+  \addplot[mfc3] table[x=np, y=mfc3] {data/eff_sub.dat}; \addlegendentry{MFC}
+  \addplot[mfc2] table[x=np, y=mfc2] {data/eff_sub.dat}; \addlegendentry{MFC, previous build}
   \ifamrex
   \addplot[amrex] table[x=np, y=amrex] {data/eff_sub.dat}; \addlegendentry{AMReX CNS}
   \fi
   \addplot[pelec] table[x=np, y=pelec] {data/eff_sub.dat}; \addlegendentry{PeleC}
 \nextgroupplot[title={AMR cost added beyond 8 GPUs}, ylabel={AMR-only s/step minus 8-GPU value}, ymin=-0.02]
+  \addplot[mfc3] table[x=np, y=mfc3] {data/amradd_sub.dat};
   \addplot[mfc2] table[x=np, y=mfc2] {data/amradd_sub.dat};
   \ifamrex
   \addplot[amrex] table[x=np, y=amrex] {data/amradd_sub.dat};
   \fi
   \addplot[pelec] table[x=np, y=pelec] {data/amradd_sub.dat};
 \nextgroupplot[title={Time per coarse step}, ylabel={seconds}, ymin=0]
+  \addplot[mfc3] table[x=np, y=mfc3] {data/step_sub.dat};
   \addplot[mfc2] table[x=np, y=mfc2] {data/step_sub.dat};
   \ifamrex
   \addplot[amrex] table[x=np, y=amrex] {data/step_sub.dat};
