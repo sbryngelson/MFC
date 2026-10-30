@@ -520,10 +520,9 @@ contains
 
                 if (ib_state_wrt) call s_write_ib_force_history(t_step)
 
-                if (cfl_dt) then
-                    if (mytime >= t_stop) return
-                else
-                    if (t_step == t_step_stop) return
+                if (merge(mytime >= t_stop, t_step == t_step_stop, cfl_dt)) then
+                    amr_sub_on = .false.
+                    return
                 end if
             end if
 
