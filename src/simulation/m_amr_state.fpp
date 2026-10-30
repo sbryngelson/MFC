@@ -591,6 +591,28 @@ contains
 
     end function f_amr_quartic_half
 
+    !> Tensor-product quartic over the 5^dim parent stencil s (unused dims at index 0), one direction at a time (x, then y, z): the
+    !! fine cell at child offsets xix, xiy, xiz. Shared by the ghost fill and the regrid seeding.
+    pure real(wp) function f_amr_quartic_cell(s, xix, xiy, xiz, d2, d3) result(v)
+        $:GPU_ROUTINE(parallelism='[seq]')
+        real(wp), intent(in) :: s(-2:2,-2:2,-2:2), xix, xiy, xiz
+        logical, intent(in)  :: d2, d3
+        real(wp)             :: pl(-2:2,-2:2), ln(-2:2)
+        integer              :: ky, kz, wy, wz
+
+        wy = merge(2, 0, d2); wz = merge(2, 0, d3)
+        do kz = -wz, wz
+            do ky = -wy, wy
+                pl(ky, kz) = f_amr_quartic_half(s(:,ky, kz), xix)
+            end do
+            ln(kz) = pl(0, kz)
+            if (d2) ln(kz) = f_amr_quartic_half(pl(:,kz), xiy)
+        end do
+        v = ln(0)
+        if (d3) v = f_amr_quartic_half(ln, xiz)
+
+    end function f_amr_quartic_cell
+
     !> Allocate the pooled q_prim/rhs advance scratch (idempotent). The lockstep driver argument-associates the scratch for every
     !! block, owned or not, so it must exist on every rank, including one that never allocates a slot. Called from the one point per
     !! mode where mbuf* are final: end of s_initialize_amr_module when l0_ntile == 0 (pure AMR), and after s_l0_tiles_init's mbuf

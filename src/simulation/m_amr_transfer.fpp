@@ -391,7 +391,7 @@ contains
         integer, intent(in)            :: loc, ivar  !< flat-store slot and variable of the fine target
         integer                        :: fi, fj, fk, ci, cj, ck, ox, oy, oz, rrat, mm, nn, pp, il1, il2, il3, ky, kz, wy, wz
         real(wp)                       :: u0, sx, sy, sz, xix, xiy, xiz
-        real(wp)                       :: q5(-2:2), pl(-2:2,-2:2), ln(-2:2)
+        real(wp)                       :: st5(-2:2,-2:2,-2:2)
         logical                        :: d2, d3, quart
 
         ! coarse source qc is the gathered block-local patch amr_cg (fine-level distribution): amr_isect_lo is global and equals
@@ -405,7 +405,7 @@ contains
         il1 = amr_isect_lo(1); il2 = amr_isect_lo(2); il3 = amr_isect_lo(3)
         d2 = n_glb > 0; d3 = p_glb > 0
         quart = amr_prolong == 2; wy = merge(2, 0, d2); wz = merge(2, 0, d3)
-        $:GPU_PARALLEL_LOOP(collapse=3, private='[ci, cj, ck, xix, xiy, xiz, u0, sx, sy, sz, ky, kz, q5, pl, ln]')
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[ci, cj, ck, xix, xiy, xiz, u0, sx, sy, sz, ky, kz, st5]')
         do fk = 0, pp
             do fj = 0, nn
                 do fi = 0, mm
@@ -416,18 +416,12 @@ contains
                     ci = il1 + fi/rrat - ox
                     xix = (real(mod(fi, rrat), wp) - real(rrat - 1, wp)*0.5_wp)/real(rrat, wp)
                     if (quart) then
-                        ! twin of the quartic in s_amr_fill_fine_ghosts
                         do kz = -wz, wz
                             do ky = -wy, wy
-                                q5 = real(qc%sf(ci - 2:ci + 2,cj + ky, ck + kz), wp)
-                                pl(ky, kz) = f_amr_quartic_half(q5, xix)
+                                st5(:,ky, kz) = real(qc%sf(ci - 2:ci + 2,cj + ky, ck + kz), wp)
                             end do
-                            ln(kz) = pl(0, kz)
-                            if (d2) ln(kz) = f_amr_quartic_half(pl(:,kz), xiy)
                         end do
-                        u0 = ln(0)
-                        if (d3) u0 = f_amr_quartic_half(ln, xiz)
-                        amr_cons_st(fi, fj, fk, ivar, loc) = u0
+                        amr_cons_st(fi, fj, fk, ivar, loc) = f_amr_quartic_cell(st5, xix, xiy, xiz, d2, d3)
                     else
                         u0 = real(qc%sf(ci, cj, ck), wp)
                         sx = minmod(real(qc%sf(ci + 1, cj, ck), wp) - u0, u0 - real(qc%sf(ci - 1, cj, ck), wp))
