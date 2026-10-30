@@ -5521,6 +5521,19 @@ def list_cases() -> typing.List[TestCaseBuilder]:
         )
         cases.append(define_case_d(stack, "", {}, ppn=2))
         stack.pop()
+        # owner-aware placement (amr_place_owner) of the same two cases: owners move, results must not
+        stack.push(
+            "AMR -> 2D -> dynamic regrid np=2 -> place owner",
+            {**amr_2d_base, "amr_regrid_int": 2, "amr_tag_eps": 0.1, "amr_buf": 2, "amr_place_owner": "T"},
+        )
+        cases.append(define_case_d(stack, "", {}, ppn=2))
+        stack.pop()
+        stack.push(
+            "AMR -> 1D -> multi-level dynamic regrid np=2 -> place owner",
+            {**amr_1d_base, "amr_regrid_int": 2, "amr_tag_eps": 0.1, "amr_buf": 6, "amr_max_level": 2, "amr_max_blocks": 8, "amr_place_owner": "T"},
+        )
+        cases.append(define_case_d(stack, "", {}, ppn=2))
+        stack.pop()
 
         # 2D churn + growth at np=2: an off-center cylindrical blast at cap 8. The expanding annulus grows the box
         # count monotonically across rebuilds, so s_amr_st_reserve growth keeps firing, while sweeping across the SFC
