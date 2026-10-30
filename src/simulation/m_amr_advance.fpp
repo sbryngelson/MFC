@@ -234,9 +234,7 @@ contains
             end if
             amr_in_fine_advance = .true.
             call s_phase_tic(PH_SWAP)
-            call s_amr_swap_to_fine()  ! the leader's grid, extended into the slab (amr_bat_n > 1)
-            idwint = idwbuff  ! widen the conversion range to the ghost shells (restored by s_amr_restore_coarse)
-            $:GPU_UPDATE(device='[idwint]')
+            call s_amr_swap_to_fine(widen=.true.)  ! the leader's grid, extended into the slab (amr_bat_n > 1)
             call s_phase_toc(PH_SWAP)
             call s_phase_tic(PH_RHS)
             call s_amr_br_load_batch(amr_bat_n)
@@ -359,9 +357,7 @@ contains
 
         amr_in_fine_advance = .true.
         call s_phase_tic(PH_SWAP)
-        call s_amr_swap_to_fine()
-        idwint = amr_slots(amr_cur)%idwbuff  ! widen the conversion range to the ghost shell (restored by s_amr_restore_coarse)
-        $:GPU_UPDATE(device='[idwint]')
+        call s_amr_swap_to_fine(widen=.true.)
         call s_phase_toc(PH_SWAP)
         call s_phase_tic(PH_RHS)
         loc_cur = amr_loc_of(amr_cur)

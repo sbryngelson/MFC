@@ -21,6 +21,8 @@
     blo3 = mbuf_lo(3); bhi3 = mbuf_hi(3)
 #:enddef
 
+#:set GS_ARRAYS = [(D, A) for D, X in [(1, 'x'), (2, 'y'), (3, 'z')] for A in [X + '_cb', X + '_cc', 'd' + X]]
+
 !> @brief Flat per-block field store: dense slot indexing, reservation, alloc/free and the prim/bridge loaders.
 module m_amr_store
 
@@ -39,6 +41,10 @@ module m_amr_store
 
     implicit none
 
+    !> Staging for the coordinate push of s_amr_sync_grid_state_to_device: the active dims' cb/cc/d arrays back to back.
+    real(wp), allocatable :: amr_gs_buf(:)
+    $:GPU_DECLARE(create='[amr_gs_buf]')
+
     private
     public :: s_amr_alloc_slot, s_amr_bat_member_prim, s_amr_br_load, s_amr_br_load_batch, s_amr_br_load_faces, s_amr_br_store, &
         & s_amr_br_store_faces, s_amr_copy_fine_fields, s_amr_free_slot, s_amr_alloc_pool, s_amr_free_pool, s_amr_set_mbuf, &
@@ -47,13 +53,37 @@ module m_amr_store
 contains
 
     !> Push the (host-side) global grid state to its device copies after a swap/restore. m/n/p, idwint/idwbuff, and the coordinate
-    !! arrays are GPU_DECLARE'd; kernels read the device copies. No-op on CPU.
+    !! arrays are GPU_DECLARE'd; kernels read the device copies. The coordinates go through amr_gs_buf as one update and a device
+    !! unpack, since every update of an allocatable costs several synchronous copies. No-op on CPU.
     impure subroutine s_amr_sync_grid_state_to_device()
 
+        integer :: o, j, lb, ub
+
         $:GPU_UPDATE(device='[m, n, p, idwint, idwbuff]')
-        #:for D, X, E in [(1, 'x', 'm'), (2, 'y', 'n'), (3, 'z', 'p')]
+        if (.not. allocated(amr_gs_buf)) then
+            o = 0
+            #:for D, A in GS_ARRAYS
+                if (amr_dim(${D}$)) o = o + size(${A}$)
+            #:endfor
+            @:ALLOCATE(amr_gs_buf(1:o))
+        end if
+        o = 0
+        #:for D, A in GS_ARRAYS
             if (amr_dim(${D}$)) then
-                $:GPU_UPDATE(device='[' + X + '_cb, ' + X + '_cc, d' + X + ']')
+                amr_gs_buf(o + 1:o + size(${A}$)) = ${A}$; o = o + size(${A}$)
+            end if
+        #:endfor
+        $:GPU_UPDATE(device='[amr_gs_buf(1:o)]')
+        o = 0
+        #:for D, A in GS_ARRAYS
+            if (amr_dim(${D}$)) then
+                lb = lbound(${A}$, 1); ub = ubound(${A}$, 1)
+                $:GPU_PARALLEL_LOOP()
+                do j = lb, ub
+                    ${A}$(j) = amr_gs_buf(o + 1 + j - lb)
+                end do
+                $:END_GPU_PARALLEL_LOOP()
+                o = o + ub - lb + 1
             end if
         #:endfor
 
@@ -556,6 +586,9 @@ contains
         integer :: i
 
         if (allocated(amr_loc_of)) deallocate (amr_loc_of, amr_loc_free)
+        if (allocated(amr_gs_buf)) then
+            @:DEALLOCATE(amr_gs_buf)
+        end if
         #:for ST in ['amr_cons_st', 'amr_stor_st']
             if (allocated(${ST}$)) then
                 @:DEALLOCATE(${ST}$)

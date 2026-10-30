@@ -94,9 +94,10 @@ contains
     end subroutine s_amr_cont_damage_fine
 
     !> Swap the global grid state to the fine block. Must be paired with s_amr_restore_coarse.
-    impure subroutine s_amr_swap_to_fine()
+    impure subroutine s_amr_swap_to_fine(widen)
 
-        integer :: ibm, o, e
+        logical, intent(in), optional :: widen  !< also widen idwint to the ghost shells (the RHS conversion range)
+        integer                       :: ibm, o, e
 
         ! Saving on a nested swap would overwrite the sw_* bounce buffers with fine state, and the eventual restore would install
         ! fine extents as the coarse grid (silent corruption of everything after). Hence every save below is depth-guarded; the
@@ -151,6 +152,9 @@ contains
                     ${E}$ = e; idwint(${D}$)%end = e; idwbuff(${D}$)%end = e + buff_size
                 end if
             #:endfor
+        end if
+        if (present(widen)) then
+            if (widen) idwint = idwbuff
         end if
         ! sync the swapped extents/bounds/coordinates to the device: RHS kernels read the device copies of these GPU_DECLARE'd
         ! globals (stale coarse bounds = OOB kernels)
