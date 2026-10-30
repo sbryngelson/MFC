@@ -63,23 +63,22 @@ module m_amr_registers
     integer    :: amr_reg_nblk_built = -1
 
     !> Per-slot geometry scratch for the batched capture kernels (1:amr_max_blocks): host-filled by s_amr_capture_slot, then
-    !! GPU_UPDATE'd so one kernel iterates the slot dimension instead of O(blocks) tiny launches. bactive gates the slot;
-    !! bt1lo/bt1hi/bt2lo/bt2hi are the per-slot transverse window (a slot outside the rectangular caps bmax1/bmax2 is cycled);
-    !! bjlo/bjhi are the normal-face flux indices; bo1/bo2 the transverse origins; bclo/bchi the per-face capture gates.
-    integer, allocatable :: bjlo(:), bjhi(:), bo1(:), bo2(:), bt1lo(:), bt1hi(:), bt2lo(:), bt2hi(:)
-    logical, allocatable :: bclo(:), bchi(:), bactive(:)
+    !! GPU_UPDATE'd (one table, one update: each update costs tens of microseconds of host time) so one kernel iterates the slot
+    !! dimension instead of O(blocks) tiny launches. Rows: 1:2 the normal-face flux indices (jlo, jhi), 3:4 the transverse origins,
+    !! 5:8 the per-slot transverse window (t1lo, t1hi, t2lo, t2hi; a slot outside the rectangular caps bmax1/bmax2 is cycled), 9:10
+    !! the low/high face capture gates and 11 the slot gate (1 = on).
+    integer, allocatable :: bcap(:,:)
     integer              :: bmax1 = 0, bmax2 = 0
-    $:GPU_DECLARE(create='[bjlo, bjhi, bo1, bo2, bt1lo, bt1hi, bt2lo, bt2hi, bclo, bchi, bactive]')
+    $:GPU_DECLARE(create='[bcap]')
 
-    !> Per-slot geometry scratch for the batched reflux apply kernels (mirror of the capture batching above): a_act gates the slot,
-    !! a_lo/a_hi the per-face applies, a_ol/a_oh the outside coarse cell's local index in the face dim, a_ta/a_tb the local
-    !! transverse origins, a_b1l..a_b2h the transverse windows (block-relative, freg/creg-aligned), a_mlo/a_mhi the outside-cell
-    !! widths. Filled per direction on the host, GPU_UPDATE'd, consumed by one kernel per face direction instead of O(blocks) tiny
-    !! launches.
-    integer, allocatable  :: a_ol(:), a_oh(:), a_ta(:), a_tb(:), a_b1l(:), a_b1h(:), a_b2l(:), a_b2h(:)
-    logical, allocatable  :: a_lo(:), a_hi(:), a_act(:)
-    real(wp), allocatable :: a_mlo(:), a_mhi(:)
-    $:GPU_DECLARE(create='[a_ol, a_oh, a_ta, a_tb, a_b1l, a_b1h, a_b2l, a_b2h, a_lo, a_hi, a_act, a_mlo, a_mhi]')
+    !> Per-slot geometry scratch for the batched reflux apply kernels (mirror of the capture batching above). aint rows: 1:2 the
+    !! outside coarse cell's local index in the face dim (low, high face), 3:4 the local transverse origins, 5:8 the transverse
+    !! windows (block-relative, freg/creg-aligned), 9:10 the per-face applies and 11 the slot gate (1 = on); areal rows 1:2 the
+    !! outside-cell widths. Filled per direction on the host, GPU_UPDATE'd, consumed by one kernel per face direction instead of
+    !! O(blocks) tiny launches.
+    integer, allocatable  :: aint(:,:)
+    real(wp), allocatable :: areal(:,:)
+    $:GPU_DECLARE(create='[aint, areal]')
 
     !> amr_tile_cluster: this rank's coarse cells (0:m, 0:n, 0:p) under a level-1 block. A level-1 face whose outside cell is
     !! covered is fine-fine (the ghost pieces match its flux on both sides), so the apply skips the correction there. 0:0 when off.
@@ -150,7 +149,7 @@ contains
     !!
     !! Keyed on amr_reg_n, the dense participation-local count (s_amr_reg_prepare): register slots are dense indices from
     !! amr_reg_of, so capacity follows what this rank owns or participates in, not the global block count. The capture and
-    !! apply kernels sweep slot = 1..amr_reg_n with bactive/a_act gating the filled subset.
+    !! apply kernels sweep slot = 1..amr_reg_n with the bcap/aint slot gates on the filled subset.
     !!
     !! Contents are preserved across growth, mirroring s_amr_st_reserve: every caller of s_amr_alloc_slot is a between-step
     !! operation (regrid, restart, slot reconcile, L0 tile build) and stage 1 overwrites the registers, but freg accumulates
@@ -363,14 +362,9 @@ contains
             end if
         #:endfor
         ! per-slot geometry scratch for the batched capture kernels (device-resident: host-filled, GPU_UPDATE'd before each call)
-        @:ALLOCATE(bjlo(1:amr_max_blocks), bjhi(1:amr_max_blocks), bo1(1:amr_max_blocks), bo2(1:amr_max_blocks))
-        @:ALLOCATE(bt1lo(1:amr_max_blocks), bt1hi(1:amr_max_blocks), bt2lo(1:amr_max_blocks), bt2hi(1:amr_max_blocks))
-        @:ALLOCATE(bclo(1:amr_max_blocks), bchi(1:amr_max_blocks), bactive(1:amr_max_blocks))
-        bactive = .false.
-        @:ALLOCATE(a_ol(1:amr_max_blocks), a_oh(1:amr_max_blocks), a_ta(1:amr_max_blocks), a_tb(1:amr_max_blocks))
-        @:ALLOCATE(a_b1l(1:amr_max_blocks), a_b1h(1:amr_max_blocks), a_b2l(1:amr_max_blocks))
-        @:ALLOCATE(a_b2h(1:amr_max_blocks), a_lo(1:amr_max_blocks), a_hi(1:amr_max_blocks), a_act(1:amr_max_blocks))
-        @:ALLOCATE(a_mlo(1:amr_max_blocks), a_mhi(1:amr_max_blocks))
+        @:ALLOCATE(bcap(1:11, 1:amr_max_blocks))
+        bcap = 0
+        @:ALLOCATE(aint(1:11, 1:amr_max_blocks), areal(1:2, 1:amr_max_blocks))
         if (amr_tile_cluster) then
             @:ALLOCATE(l1cov(0:m, 0:n, 0:p))
         else
@@ -419,7 +413,7 @@ contains
         ko = 0
         if (amr_bat_n > 0) then
             call s_amr_select_slot(amr_bat_blk(ibm))
-            ko(amr_bat_sd) = (ibm - 1)*amr_bat_w
+            ko = amr_bat_off(:,ibm)
             ext = amr_bat_mext(:,ibm)
         else
             ext = [m, n, p]
@@ -438,20 +432,20 @@ contains
         integer             :: ta, tb
 
         ta = merge(2, 1, id == 1); tb = merge(2, 3, id == 3)
-        bactive(sreg) = .true.; bclo(sreg) = clo; bchi(sreg) = chi
-        bjlo(sreg) = blo(id) - 1; bjhi(sreg) = bhi(id); bo1(sreg) = blo(ta); bo2(sreg) = blo(tb)
-        bt1lo(sreg) = wlo(ta) - blo(ta); bt1hi(sreg) = whi(ta) - blo(ta)
-        bt2lo(sreg) = wlo(tb) - blo(tb); bt2hi(sreg) = whi(tb) - blo(tb)
-        bmax1 = max(bmax1, bt1hi(sreg)); bmax2 = max(bmax2, bt2hi(sreg))
+        bcap(11, sreg) = 1; bcap(9, sreg) = merge(1, 0, clo); bcap(10, sreg) = merge(1, 0, chi)
+        bcap(1, sreg) = blo(id) - 1; bcap(2, sreg) = bhi(id); bcap(3, sreg) = blo(ta); bcap(4, sreg) = blo(tb)
+        bcap(5, sreg) = wlo(ta) - blo(ta); bcap(6, sreg) = whi(ta) - blo(ta)
+        bcap(7, sreg) = wlo(tb) - blo(tb); bcap(8, sreg) = whi(tb) - blo(tb)
+        bmax1 = max(bmax1, bcap(6, sreg)); bmax2 = max(bmax2, bcap(8, sreg))
 
     end subroutine s_amr_capture_slot
 
     !> Boundary-flux capture, batched over the register slots: for each active slot in [1:nb], reg(id)%lo/hi(eq, t1, t2, slot)
-    !! [+=/=] cf * flux(face, bo1(slot)+t1, bo2(slot)+t2) for eq in [eqb:eqe], over the per-slot transverse window [bt1lo:bt1hi] x
-    !! [bt2lo:bt2hi]; reg is freg (fine) or creg. acc=.true. accumulates, .false. overwrites (the merge picks the old value or 0
-    !! with no arithmetic, so a stage-1 overwrite reads no uninitialized register). bclo/bchi gate the low/high face. The device
-    !! kernel collapses (slot, t2, t1, eq) over the rectangular caps [0:maxt2]x[0:maxt1] (max over slots) and cycles inactive slots
-    !! / out-of-window cells, so one launch replaces O(blocks) per-slot launches.
+    !! [+=/=] cf * flux(face, origin1+t1, origin2+t2) for eq in [eqb:eqe], over the per-slot transverse window (bcap rows 5:8); reg
+    !! is freg (fine) or creg. acc=.true. accumulates, .false. overwrites (the merge picks the old value or 0 with no arithmetic, so
+    !! a stage-1 overwrite reads no uninitialized register). bcap rows 9:10 gate the low/high face. The device kernel collapses
+    !! (slot, t2, t1, eq) over the rectangular caps [0:maxt2]x[0:maxt1] (max over slots) and cycles inactive slots / out-of-window
+    !! cells, so one launch replaces O(blocks) per-slot launches.
     impure subroutine s_amr_capture_batch(nb, id, fine, advective, cf, acc, maxt1, maxt2, eqb, eqe)
 
         integer, intent(in) :: nb, id, maxt1, maxt2, eqb, eqe
@@ -467,25 +461,25 @@ contains
             do t2 = 0, maxt2
                 do t1 = 0, maxt1
                     do eq = eqb, eqe
-                        if (.not. bactive(slot)) cycle
-                        if (t1 < bt1lo(slot) .or. t1 > bt1hi(slot) .or. t2 < bt2lo(slot) .or. t2 > bt2hi(slot)) cycle
+                        if (bcap(11, slot) == 0) cycle
+                        if (t1 < bcap(5, slot) .or. t1 > bcap(6, slot) .or. t2 < bcap(7, slot) .or. t2 > bcap(8, slot)) cycle
                         select case (id)
                         case (1)
-                            i1 = bjlo(slot); i2 = bo1(slot) + t1; i3 = bo2(slot) + t2
-                            j1 = bjhi(slot); j2 = i2; j3 = i3
+                            i1 = bcap(1, slot); i2 = bcap(3, slot) + t1; i3 = bcap(4, slot) + t2
+                            j1 = bcap(2, slot); j2 = i2; j3 = i3
                         case (2)
-                            i1 = bo1(slot) + t1; i2 = bjlo(slot); i3 = bo2(slot) + t2
-                            j1 = i1; j2 = bjhi(slot); j3 = i3
+                            i1 = bcap(3, slot) + t1; i2 = bcap(1, slot); i3 = bcap(4, slot) + t2
+                            j1 = i1; j2 = bcap(2, slot); j3 = i3
                         case (3)
-                            i1 = bo1(slot) + t1; i2 = bo2(slot) + t2; i3 = bjlo(slot)
-                            j1 = i1; j2 = i2; j3 = bjhi(slot)
+                            i1 = bcap(3, slot) + t1; i2 = bcap(4, slot) + t2; i3 = bcap(1, slot)
+                            j1 = i1; j2 = i2; j3 = bcap(2, slot)
                         end select
-                        ! The flux reads must stay inside the bclo/bchi guards. A coarse slot goes active when either face is
+                        ! The flux reads must stay inside the face gates. A coarse slot goes active when either face is
                         ! owned, and the unowned face's index is still computed; it then points a whole block width outside this
                         ! rank's subdomain (jlo down to -amr_max_grid_size). Reading it unguarded is an out-of-bounds device access
                         ! against flux_rsx_vf's tight (-1:m_alloc) bounds. It hides at np=1, where the intersection is the block
                         ! and both flags hold, so single-rank tests do not catch it.
-                        if (bclo(slot)) then
+                        if (bcap(9, slot) == 1) then
                             if (advective) then
                                 v = flux_rsx_vf(i1, i2, i3, eq)
                             else
@@ -497,7 +491,7 @@ contains
                                 creg(id)%lo(eq, t1, t2, slot) = merge(creg(id)%lo(eq, t1, t2, slot), 0._wp, acc) + cf*v
                             end if
                         end if
-                        if (bchi(slot)) then
+                        if (bcap(10, slot) == 1) then
                             if (advective) then
                                 v = flux_rsx_vf(j1, j2, j3, eq)
                             else
@@ -527,15 +521,15 @@ contains
         logical, intent(in)  :: fine, acc
         real(wp), intent(in) :: cf
 
-        if (.not. any(bactive(1:nb))) return
-        $:GPU_UPDATE(device='[bjlo, bjhi, bo1, bo2, bt1lo, bt1hi, bt2lo, bt2hi, bclo, bchi, bactive]')
+        if (.not. any(bcap(11,1:nb) == 1)) return
+        $:GPU_UPDATE(device='[bcap(:, 1:nb)]')
         call s_amr_capture_batch(nb, id, fine, .true., cf, acc, bmax1, bmax2, 1, sys_size)
         if (viscous) call s_amr_capture_batch(nb, id, fine, .false., cf, .true., bmax1, bmax2, eqn_idx%mom%beg, eqn_idx%E)
         if (chemistry .and. chem_params%diffusion) then
             call s_amr_capture_batch(nb, id, fine, .false., cf, .true., bmax1, bmax2, eqn_idx%species%beg, eqn_idx%species%end)
             if (.not. viscous) call s_amr_capture_batch(nb, id, fine, .false., cf, .true., bmax1, bmax2, eqn_idx%E, eqn_idx%E)
         end if
-        bactive = .false.; bmax1 = 0; bmax2 = 0
+        bcap(11,:) = 0; bmax1 = 0; bmax2 = 0
 
     end subroutine s_amr_capture_total
 
@@ -664,15 +658,15 @@ contains
     ! equivalent to a per-block loop. Host precompute walks the slots with select_slot + s_amr_reflux_face_flags; the
     ! a_* descriptors are pushed once per direction. Per direction d the transverse dims are (ta, tb) and the fine-face
     ! register holds rr children per active transverse dim.
-    #:for D, TA, TB, DX, IDX in [(1, 2, 3, 'dx', 'a_ol(k), i2, i3'), (2, 1, 3, 'dy', 'i2, a_ol(k), i3'), (3, 1, 2, 'dz', &
-                                  & 'i2, i3, a_ol(k)')]
+    #:for D, TA, TB, DX, IDX in [(1, 2, 3, 'dx', 'aint(1, k), i2, i3'), (2, 1, 3, 'dy', 'i2, aint(1, k), i3'), (3, 1, 2, 'dz', &
+                                  & 'i2, i3, aint(1, k)')]
         !> Reflux correction for the faces normal to direction ${D}$. Called only when amr_dim(${D}$).
         impure subroutine s_amr_apply_reflux_d${D}$(rhs_vf)
 
             type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf
             integer                                                :: eq, c1, c2, c1w, c2w, k, save_cur, nact, gmax1, gmax2
             integer                                                :: f10, f20, dd1, dd2, nch, rr, dd1_hi, dd2_hi, sreg
-            integer                                                :: bla, bha, blb, bhb
+            integer                                                :: bla, bha, blb, bhb, nr
             integer                                                :: i2, i3, sidx(3), ext(3), tlo(3), thi(3)
             logical                                                :: dta, dtb, own_lo(3), own_hi(3), tcl, wl, wh
             real(wp)                                               :: fblo, fbhi
@@ -684,7 +678,7 @@ contains
             nch = rr**count([dta, dtb])
             dd1_hi = merge(rr - 1, 0, dta); dd2_hi = merge(rr - 1, 0, dtb)
             nact = 0; gmax1 = 0; gmax2 = 0
-            a_act = .false.
+            aint(11,:) = 0
             do k = 1, amr_num_blocks
                 if (amr_block_level(k) /= 1) cycle
                 if (.not. f_amr_block_near(k, amr_sidx, amr_ext)) cycle
@@ -694,27 +688,28 @@ contains
                 bla = tlo(${TA}$) - amr_region_lo(${TA}$); bha = thi(${TA}$) - amr_region_lo(${TA}$)
                 blb = tlo(${TB}$) - amr_region_lo(${TB}$); bhb = thi(${TB}$) - amr_region_lo(${TB}$)
                 sreg = amr_reg_of(k)
-                a_act(sreg) = .true.; a_lo(sreg) = own_lo(${D}$); a_hi(sreg) = own_hi(${D}$)
-                a_ol(sreg) = amr_region_lo(${D}$) - 1 - sidx(${D}$); a_oh(sreg) = amr_region_hi(${D}$) + 1 - sidx(${D}$)
-                a_ta(sreg) = amr_region_lo(${TA}$) - sidx(${TA}$); a_tb(sreg) = amr_region_lo(${TB}$) - sidx(${TB}$)
-                a_b1l(sreg) = bla; a_b1h(sreg) = bha; a_b2l(sreg) = blb; a_b2h(sreg) = bhb
-                a_mlo(sreg) = 1._wp; a_mhi(sreg) = 1._wp
-                if (own_lo(${D}$)) a_mlo(sreg) = ${DX}$(a_ol(sreg))
-                if (own_hi(${D}$)) a_mhi(sreg) = ${DX}$(a_oh(sreg))
+                aint(11, sreg) = 1; aint(9, sreg) = merge(1, 0, own_lo(${D}$)); aint(10, sreg) = merge(1, 0, own_hi(${D}$))
+                aint(1, sreg) = amr_region_lo(${D}$) - 1 - sidx(${D}$); aint(2, sreg) = amr_region_hi(${D}$) + 1 - sidx(${D}$)
+                aint(3, sreg) = amr_region_lo(${TA}$) - sidx(${TA}$); aint(4, sreg) = amr_region_lo(${TB}$) - sidx(${TB}$)
+                aint(5, sreg) = bla; aint(6, sreg) = bha; aint(7, sreg) = blb; aint(8, sreg) = bhb
+                areal(1, sreg) = 1._wp; areal(2, sreg) = 1._wp
+                if (own_lo(${D}$)) areal(1, sreg) = ${DX}$(aint(1, sreg))
+                if (own_hi(${D}$)) areal(2, sreg) = ${DX}$(aint(2, sreg))
                 nact = nact + 1
                 gmax1 = max(gmax1, bha - bla); gmax2 = max(gmax2, bhb - blb)
             end do
             call s_amr_select_slot(save_cur)
             if (nact > 0) then
-                $:GPU_UPDATE(device='[a_ol, a_oh, a_ta, a_tb, a_b1l, a_b1h, a_b2l, a_b2h, a_lo, a_hi, a_act, a_mlo, a_mhi]')
+                nr = amr_reg_n
+                $:GPU_UPDATE(device='[aint(:, 1:nr), areal(:, 1:nr)]')
                 $:GPU_PARALLEL_LOOP(collapse=4, private='[c1, c2, f10, f20, dd1, dd2, fblo, fbhi, i2, i3, wl, wh]')
                 do k = 1, amr_reg_n
                     do c2w = 0, gmax2
                         do c1w = 0, gmax1
                             do eq = 1, sys_size
-                                if (.not. a_act(k)) cycle
-                                c1 = a_b1l(k) + c1w; c2 = a_b2l(k) + c2w
-                                if (c1 > a_b1h(k) .or. c2 > a_b2h(k)) cycle
+                                if (aint(11, k) == 0) cycle
+                                c1 = aint(5, k) + c1w; c2 = aint(7, k) + c2w
+                                if (c1 > aint(6, k) .or. c2 > aint(8, k)) cycle
                                 f10 = 0; if (dta) f10 = rr*c1
                                 f20 = 0; if (dtb) f20 = rr*c2
                                 fblo = 0._wp; fbhi = 0._wp
@@ -725,16 +720,16 @@ contains
                                     end do
                                 end do
                                 fblo = fblo/real(nch, wp); fbhi = fbhi/real(nch, wp)
-                                i2 = a_ta(k) + c1; i3 = a_tb(k) + c2
+                                i2 = aint(3, k) + c1; i3 = aint(4, k) + c2
                                 ! tile clustering: no correction where another level-1 block covers the outside cell
-                                wl = a_lo(k); wh = a_hi(k)
+                                wl = aint(9, k) == 1; wh = aint(10, k) == 1
                                 if (wl .and. tcl) wl = .not. l1cov(${IDX}$)
-                                if (wh .and. tcl) wh = .not. l1cov(${IDX.replace('a_ol', 'a_oh')}$)
+                                if (wh .and. tcl) wh = .not. l1cov(${IDX.replace('aint(1,', 'aint(2,')}$)
                                 if (wl) rhs_vf(eq)%sf(${IDX}$) = rhs_vf(eq)%sf(${IDX}$) + (creg(${D}$)%lo(eq, c1, c2, &
-                                    & k) - fblo)/a_mlo(k)
-                                if (wh) rhs_vf(eq)%sf(${IDX.replace('a_ol', 'a_oh')}$) &
-                                    & = rhs_vf(eq)%sf(${IDX.replace('a_ol', 'a_oh')}$) + (fbhi - creg(${D}$)%hi(eq, c1, c2, &
-                                    & k))/a_mhi(k)
+                                    & k) - fblo)/areal(1, k)
+                                if (wh) rhs_vf(eq)%sf(${IDX.replace('aint(1,', 'aint(2,')}$) &
+                                    & = rhs_vf(eq)%sf(${IDX.replace('aint(1,', 'aint(2,')}$) + (fbhi - creg(${D}$)%hi(eq, c1, c2, &
+                                    & k))/areal(2, k)
                             end do
                         end do
                     end do
@@ -854,8 +849,7 @@ contains
         do d = 1, num_dims
             @:DEALLOCATE(creg(d)%lo, creg(d)%hi, freg(d)%lo, freg(d)%hi)
         end do
-        @:DEALLOCATE(bjlo, bjhi, bo1, bo2, bt1lo, bt1hi, bt2lo, bt2hi, bclo, bchi, bactive)
-        @:DEALLOCATE(a_ol, a_oh, a_ta, a_tb, a_b1l, a_b1h, a_b2l, a_b2h, a_lo, a_hi, a_act, a_mlo, a_mhi, l1cov)
+        @:DEALLOCATE(bcap, aint, areal, l1cov)
         if (allocated(amr_reg_of)) deallocate (amr_reg_of)
         amr_reg_n = 0; amr_reg_cur = 0
 

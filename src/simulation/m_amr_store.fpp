@@ -347,6 +347,8 @@ contains
         if (.not. allocated(amr_cons_br)) then
             brlo = [mbuf_lo(1), mbuf_lo(2), mbuf_lo(3)]; brhi = [mbuf_hi(1), mbuf_hi(2), mbuf_hi(3)]
             brhi(num_dims) = brlo(num_dims) + amr_br_batch*(brhi(num_dims) - brlo(num_dims) + 1) - 1
+            if (num_dims > 1) brhi(num_dims - 1) = brlo(num_dims - 1) + amr_bat_cols*(brhi(num_dims - 1) - brlo(num_dims - 1) + 1) &
+                & - 1
             ! Same CCE descriptor defect as amr_cg / amr_scr_prim: a bare module-scope derived-type allocatable must be given a
             ! valid descriptor by allocating a local and handing it over with move_alloc, then mapped.
             allocate (tmp_br(1:sys_size)); call move_alloc(tmp_br, amr_cons_br)
@@ -446,31 +448,27 @@ contains
     impure subroutine s_amr_br_load_batch(nb)
 
         integer, intent(in) :: nb
-        integer             :: ibm, i, j, k, l, loc, o1, o2, o3, b1l, b1h, b2l, b2h, b3l, b3h, jj, kk, ll, bs
+        integer             :: ibm, i, j, k, l, loc, b1l, b1h, b2l, b2h, b3l, b3h, jj, kk, ll, bs, ns, mb
 
         bs = buff_size
-        o1 = 0; o2 = 0; o3 = 0
-        select case (amr_bat_sd)
-        case (1); o1 = amr_bat_w
-        case (2); o2 = amr_bat_w
-        case (3); o3 = amr_bat_w
-        end select
+        ns = max(nb, amr_bat_ns)
         b1l = amr_slots(amr_cur)%idwbuff(1)%beg; b1h = amr_slots(amr_cur)%idwbuff(1)%end
         b2l = amr_slots(amr_cur)%idwbuff(2)%beg; b2h = amr_slots(amr_cur)%idwbuff(2)%end
         b3l = amr_slots(amr_cur)%idwbuff(3)%beg; b3h = amr_slots(amr_cur)%idwbuff(3)%end
-        $:GPU_PARALLEL_LOOP(collapse=5, private='[loc, jj, kk, ll]', copyin='[nb, o1, o2, o3, b1l, b1h, b2l, b2h, b3l, b3h, bs]')
-        do ibm = 1, nb
+        $:GPU_PARALLEL_LOOP(collapse=5, private='[loc, jj, kk, ll, mb]', copyin='[nb, ns, b1l, b1h, b2l, b2h, b3l, b3h, bs]')
+        do ibm = 1, ns
             do i = 1, sys_size
                 do l = b3l, b3h
                     do k = b2l, b2h
                         do j = b1l, b1h
-                            loc = amr_bat_loc(ibm)
+                            mb = min(ibm, nb)  ! the slots past the last member repeat it (finite filler for the stencils)
+                            loc = amr_bat_loc(mb)
                             ! a padded member (amr_bat_pad): clamp to its own buffered region, so the padding holds its
                             ! outermost ghost values (finite and physical, never read by a real cell's stencil)
-                            jj = min(j, amr_bat_mext(1, ibm) + bs); kk = min(k, amr_bat_mext(2, ibm) + bs); ll = min(l, &
-                                     & amr_bat_mext(3, ibm) + bs)
-                            amr_cons_br(i)%sf(j + (ibm - 1)*o1, k + (ibm - 1)*o2, l + (ibm - 1)*o3) = amr_cons_st(jj, kk, ll, i, &
-                                        & loc)
+                            jj = min(j, amr_bat_mext(1, mb) + bs); kk = min(k, amr_bat_mext(2, mb) + bs); ll = min(l, &
+                                     & amr_bat_mext(3, mb) + bs)
+                            amr_cons_br(i)%sf(j + amr_bat_off(1, ibm), k + amr_bat_off(2, ibm), l + amr_bat_off(3, &
+                                        & ibm)) = amr_cons_st(jj, kk, ll, i, loc)
                         end do
                     end do
                 end do
@@ -490,12 +488,7 @@ contains
         integer                                                :: i, j, k, l, h, o1, o2, o3, b1l, b1h, b2l, b2h, b3l, b3h
 
         h = amr_bat_blk(ibm)
-        o1 = 0; o2 = 0; o3 = 0
-        select case (amr_bat_sd)
-        case (1); o1 = (ibm - 1)*amr_bat_w
-        case (2); o2 = (ibm - 1)*amr_bat_w
-        case (3); o3 = (ibm - 1)*amr_bat_w
-        end select
+        o1 = amr_bat_off(1, ibm); o2 = amr_bat_off(2, ibm); o3 = amr_bat_off(3, ibm)
         b1l = amr_slots(h)%idwbuff(1)%beg; b1h = amr_slots(h)%idwbuff(1)%end
         b2l = amr_slots(h)%idwbuff(2)%beg; b2h = amr_slots(h)%idwbuff(2)%end
         b3l = amr_slots(h)%idwbuff(3)%beg; b3h = amr_slots(h)%idwbuff(3)%end

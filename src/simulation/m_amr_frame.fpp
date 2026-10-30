@@ -136,23 +136,21 @@ contains
         ! amr_bat_w along amr_bat_sd), since the flux divergence reads dx/dy/dz at every slab cell. Cell boundaries (x_cb etc.)
         ! are not replicated: nothing on the batched path reads them (WENO coefficients are not recomputed on a uniform grid).
         if (amr_bat_n > 1) then
-            e = amr_bat_ext(amr_bat_sd)
-            do ibm = 2, amr_bat_n
-                o = (ibm - 1)*amr_bat_w
+            do ibm = 2, max(amr_bat_n, amr_bat_ns)
                 #:for D, X, E in [(1, 'x', 'm'), (2, 'y', 'n'), (3, 'z', 'p')]
-                    if (amr_bat_sd == ${D}$) then
+                    o = amr_bat_off(${D}$, ibm); e = amr_bat_ext(${D}$)
+                    if (o > 0) then
                         ${X}$_cc(o - buff_size:o + e + buff_size) = ${X}$_cc(-buff_size:e + buff_size)
                         d${X}$(o - buff_size:o + e + buff_size) = d${X}$(-buff_size:e + buff_size)
                     end if
                 #:endfor
             end do
-            e = (amr_bat_n - 1)*amr_bat_w + e
-            select case (amr_bat_sd)
-            case (1); m = e
-            case (2); n = e
-            case (3); p = e
-            end select
-            idwint(amr_bat_sd)%end = e; idwbuff(amr_bat_sd)%end = e + buff_size
+            #:for D, E in [(1, 'm'), (2, 'n'), (3, 'p')]
+                if (${D}$ == amr_bat_sd .or. ${D}$ == amr_bat_sd2) then
+                    e = maxval(amr_bat_off(${D}$,1:max(amr_bat_n, amr_bat_ns))) + amr_bat_ext(${D}$)
+                    ${E}$ = e; idwint(${D}$)%end = e; idwbuff(${D}$)%end = e + buff_size
+                end if
+            #:endfor
         end if
         ! sync the swapped extents/bounds/coordinates to the device: RHS kernels read the device copies of these GPU_DECLARE'd
         ! globals (stale coarse bounds = OOB kernels)
@@ -284,7 +282,7 @@ contains
         do ibm = 1, max(1, amr_bat_n)
             if (amr_bat_n > 1) then
                 g = amr_bat_blk(ibm); lo = amr_isect_lo_all(:,g)
-                o = 0; o(amr_bat_sd) = (ibm - 1)*amr_bat_w
+                o = amr_bat_off(:,ibm)
                 mb = merge(-buff_size, 0, amr_dim); me = merge(amr_bat_mext(:,ibm) + buff_size, 0, amr_dim)
             else
                 lo = amr_isect_lo; o = 0; mb = idwbuff%beg; me = idwbuff%end

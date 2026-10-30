@@ -182,6 +182,7 @@ module m_amr_state
     !! at a time and share amr_fw_sq/rq; the seam wave is posted before the fills and drained after them, so it keeps its own pair.
     !! The zero-copy reflux waves use amr_fw_sq/rq for their debug headers only and list their blocks in amr_fw_rblk.
     real(wp), allocatable :: amr_fw_sq(:), amr_fw_rq(:), amr_sw_sq(:), amr_sw_rq(:)
+    real(wp), allocatable :: amr_rf_sq(:), amr_rf_rq(:)  !< device-resident pools of the packed reflux-faces wave (amr_tile_cluster)
     integer, allocatable  :: amr_fw_rblk(:)
     !> Device-resident wire pools: with rdma_mpi the pools live on the device and MPI sends and receives them by device address, as
     !! the base halo does. Every step-path writer and reader of a pool is a device kernel whose copyin/copyout of the slice then
@@ -269,6 +270,8 @@ module m_amr_state
     !! amr_slab_tab is one device-resident slab table for the shell/ghost kernels: rows lo(1:3),hi(1:3),soff,scnt over <= 6 slabs,
     !! refreshed by one GPU_UPDATE per launch.
     integer, allocatable            :: amr_slab_tab(:,:)
+    integer                         :: amr_slab_n = 0  !< rows queued in amr_slab_tab (s_amr_slab_add)
+    integer                         :: amr_cg_np = 1  !< patches amr_cg holds, stacked along dim 3 (s_amr_cg_reserve)
     type(scalar_field), allocatable :: amr_cg(:)
     integer                         :: amr_cpat_mar = 0  !< coarse-cell stencil reach (f_amr_cpat_mar)
     integer                         :: amr_cpat_hi(3) = 0  !< amr_cg upper local bounds per dim (0 in collapsed dims)
@@ -622,6 +625,7 @@ contains
         ! the batched advance stacks amr_br_batch blocks along the last active dimension (see amr_cons_br)
         slo = [mbuf_lo(1), mbuf_lo(2), mbuf_lo(3)]; shi = [mbuf_hi(1), mbuf_hi(2), mbuf_hi(3)]
         shi(num_dims) = slo(num_dims) + amr_br_batch*(shi(num_dims) - slo(num_dims) + 1) - 1
+        if (num_dims > 1) shi(num_dims - 1) = slo(num_dims - 1) + amr_bat_cols*(shi(num_dims - 1) - slo(num_dims - 1) + 1) - 1
         ! CCE OpenMP-offload leaves a bare module-scope derived-type allocatable's descriptor uninitialized, so a direct
         ! allocate here aborts with `lib-4425 INTERNAL ERROR-Unitialized descriptor for ALLOCATE statement argument` on the
         ! host allocate, not the device map. Same defect, same workaround as amr_cg above: allocate a local, which gets a

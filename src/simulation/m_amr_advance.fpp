@@ -203,7 +203,7 @@ contains
             if (amr_adv_level > 0 .and. amr_block_level(g) /= amr_adv_level) cycle  ! subcycling: one level at a time
             amr_bat_n = 1; amr_bat_blk(1) = g
             do j = i + 1, amr_n_my
-                if (amr_bat_n == amr_bat_lim) exit
+                if (amr_bat_n == amr_bat_lim*amr_bat_cols) exit
                 h = my(j)
                 if (done(j) .or. amr_block_level(h) /= amr_block_level(g)) cycle
                 ! padded membership: no larger than the leader in any dim, and the padding wastes <= amr_bat_pad of its cells
@@ -219,13 +219,12 @@ contains
             ! the batch frame: leader selected (swap, capture and RK read amr_cur / the slot's extents), members' store columns
             call s_amr_select_slot(g)
             amr_bat_ext = [amr_slots(g)%m, amr_slots(g)%n, amr_slots(g)%p]
-            amr_bat_sd = num_dims
-            amr_bat_w = amr_bat_ext(amr_bat_sd) + 2*buff_size + 1
+            call s_amr_bat_layout()
             do ibm = 1, amr_bat_n
                 amr_bat_loc(ibm) = amr_loc_of(amr_bat_blk(ibm))
                 amr_bat_mext(:,ibm) = [amr_slots(amr_bat_blk(ibm))%m, amr_slots(amr_bat_blk(ibm))%n, amr_slots(amr_bat_blk(ibm))%p]
             end do
-            $:GPU_UPDATE(device='[amr_bat_loc, amr_bat_mext]')
+            $:GPU_UPDATE(device='[amr_bat_loc, amr_bat_mext, amr_bat_off]')
             ! step-entry backup for the SSP-RK combination, per member (device copy over the member's buffered extents)
             if (s == 1) then
                 do ibm = 1, amr_bat_n
@@ -288,6 +287,31 @@ contains
         deallocate (done)
 
     end subroutine s_amr_fine_stage_advance_batched
+
+    !> The batch's slab layout (leader extents amr_bat_ext): stacks of up to amr_bat_lim members along the last active dim, stride
+    !! amr_bat_w, and under amr_bat_cols > 1 the stacks side by side along the next dim, stride amr_bat_w2. amr_bat_ns slots fill
+    !! the stacks in use (a partial last stack is padded by repeating the last member, s_amr_br_load_batch), so the slab is a full
+    !! rectangle; a single stack is the plain 1D layout.
+    impure subroutine s_amr_bat_layout()
+
+        integer :: ibm, nz
+
+        amr_bat_sd = num_dims
+        amr_bat_w = amr_bat_ext(amr_bat_sd) + 2*buff_size + 1
+        nz = min(amr_bat_n, amr_bat_lim)
+        amr_bat_sd2 = 0; amr_bat_w2 = 0
+        if (amr_bat_n > nz) then
+            amr_bat_sd2 = num_dims - 1
+            amr_bat_w2 = amr_bat_ext(amr_bat_sd2) + 2*buff_size + 1
+        end if
+        amr_bat_ns = nz*((amr_bat_n + nz - 1)/nz)
+        do ibm = 1, amr_bat_ns
+            amr_bat_off(:,ibm) = 0
+            amr_bat_off(amr_bat_sd, ibm) = mod(ibm - 1, nz)*amr_bat_w
+            if (amr_bat_sd2 > 0) amr_bat_off(amr_bat_sd2, ibm) = ((ibm - 1)/nz)*amr_bat_w2
+        end do
+
+    end subroutine s_amr_bat_layout
 
     !> The order the batched advance groups the owned blocks in: as owned, or under amr_tile_cluster (many box shapes) largest
     !! first, so a batch leader can take the smaller blocks the padding allowance admits.
@@ -397,16 +421,10 @@ contains
         integer, intent(in)                                 :: nb
         type(scalar_field), dimension(sys_size), intent(in) :: q_rhs
         real(wp), intent(in)                                :: c1, c2, c3, c4, dt_in
-        integer                                             :: ibm, i, fi, fj, fk, fm, fn, fp, loc, o1, o2, o3
+        integer                                             :: ibm, i, fi, fj, fk, fm, fn, fp, loc
 
         fm = amr_bat_ext(1); fn = amr_bat_ext(2); fp = amr_bat_ext(3)
-        o1 = 0; o2 = 0; o3 = 0
-        select case (amr_bat_sd)
-        case (1); o1 = amr_bat_w
-        case (2); o2 = amr_bat_w
-        case (3); o3 = amr_bat_w
-        end select
-        $:GPU_PARALLEL_LOOP(collapse=5, private='[loc]', copyin='[nb, fm, fn, fp, o1, o2, o3]')
+        $:GPU_PARALLEL_LOOP(collapse=5, private='[loc]', copyin='[nb, fm, fn, fp]')
         do ibm = 1, nb
             do i = 1, sys_size
                 do fk = 0, fp
@@ -417,8 +435,8 @@ contains
                             loc = amr_bat_loc(ibm)
                             amr_cons_st(fi, fj, fk, i, loc) = (c1*real(amr_cons_st(fi, fj, fk, i, loc), &
                                         & wp) + c2*real(amr_stor_st(fi, fj, fk, i, loc), &
-                                        & wp) + c3*dt_in*real(q_rhs(i)%sf(fi + (ibm - 1)*o1, fj + (ibm - 1)*o2, &
-                                        & fk + (ibm - 1)*o3), wp))/c4
+                                        & wp) + c3*dt_in*real(q_rhs(i)%sf(fi + amr_bat_off(1, ibm), fj + amr_bat_off(2, ibm), &
+                                        & fk + amr_bat_off(3, ibm)), wp))/c4
                         end do
                     end do
                 end do

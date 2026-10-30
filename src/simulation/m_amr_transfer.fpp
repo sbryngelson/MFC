@@ -84,6 +84,10 @@ contains
 
         if (num_procs == 1) return
         call s_amr_reg_prepare()
+        if (amr_tile_cluster) then
+            call s_amr_reflux_faces_packed()
+            return
+        end if
         call s_amr_wave_open(amr_wave, 0)
         nhr = 0; nhs = 0
         call s_amr_refresh_lists()
@@ -143,6 +147,126 @@ contains
 #endif
 
     end subroutine s_amr_reflux_faces_wave
+
+    !> The reflux-faces wave for many small blocks (amr_tile_cluster): the same faces between the same ranks, but packed on the
+    !! device into one pool, one host copy each way and one message per peer, rather than a host copy and a message per face. Both
+    !! ends list a peer's faces in ascending block, then dim, low before high, from the same predicates as the per-face wave, so the
+    !! pool layouts agree with no handshake.
+    impure subroutine s_amr_reflux_faces_packed()
+
+#ifdef MFC_MPI
+        integer :: k, r, idx, ncand, kk2, t
+        integer :: cand(num_procs), glo(3), ghi(3), msidx(3), mext(3)
+        logical :: s_lo(3), s_hi(3)
+
+        call s_amr_wave_open(amr_wave, 0)
+        call s_amr_wave_reset(amr_wsend); call s_amr_wave_reset(amr_wrecv)
+        call s_amr_refresh_lists()
+        call s_amr_rank_decomp(proc_rank, msidx, mext)
+        do kk2 = 1, amr_n_l1p
+            k = amr_l1p_blk(kk2)
+            if (amr_block_owner(k) == proc_rank) cycle
+            if (.not. f_amr_block_near(k, msidx, mext)) cycle
+            call s_amr_select_slot(k)
+            if (.not. f_amr_reflux_participates(proc_rank)) cycle
+            call s_amr_reflux_faces_for(proc_rank, s_lo, s_hi)
+            call s_amr_face_xfers(amr_wrecv, amr_block_owner(k), k, s_lo, s_hi)
+        end do
+        call s_amr_refresh_my_blocks()
+        do kk2 = 1, amr_n_my
+            k = amr_my_blk(kk2)
+            if (amr_block_level(k) /= 1 .or. amr_block_owner(k) /= proc_rank) cycle
+            call s_amr_select_slot(k)
+            glo = merge(amr_region_lo - 1, 0, amr_dim); ghi = merge(amr_region_hi + 1, 0, amr_dim)
+            call s_amr_ranks_overlapping(glo, ghi, cand, ncand)
+            do idx = 1, ncand
+                r = cand(idx)
+                if (r == proc_rank .or. .not. f_amr_reflux_participates(r)) cycle
+                call s_amr_reflux_faces_for(r, s_lo, s_hi)
+                call s_amr_face_xfers(amr_wsend, r, k, s_lo, s_hi)
+            end do
+        end do
+        call s_amr_wave_close(amr_wsend, amr_rf_sq, .true.)
+        call s_amr_wave_close(amr_wrecv, amr_rf_rq, .true.)
+        call s_amr_wave_post(amr_wave, amr_wrecv, amr_rf_rq, XA_F5W_FACE_RCV, .false.)
+        if (amr_wsend%nx > 0) then
+            call s_amr_freg_pack(amr_wsend, .true.)
+            $:GPU_UPDATE(host='[amr_rf_sq(1:amr_wsend%words)]')
+            do t = 1, amr_wsend%nx
+                call s_amr_wave_hdr_pack(amr_wsend, amr_rf_sq, t, XA_F5W_FACE_SND)
+            end do
+        end if
+        call s_amr_wave_send(amr_wave, amr_wsend, amr_rf_sq, XA_F5W_FACE_SND, .false.)
+        call s_amr_wave_wait(amr_wave)
+        if (amr_wrecv%nx > 0) then
+            do t = 1, amr_wrecv%nx
+                call s_amr_wave_hdr_check(amr_wrecv, amr_rf_rq, t, XA_F5W_FACE_SND)
+            end do
+            $:GPU_UPDATE(device='[amr_rf_rq(1:amr_wrecv%words)]')
+            call s_amr_freg_pack(amr_wrecv, .false.)
+        end if
+        call s_amr_select_slot(1)
+#endif
+
+    end subroutine s_amr_reflux_faces_packed
+
+    !> Append block k's faces f_lo/f_hi with peer as transfers (bl = dim, side 1 low / 2 high, register slot).
+    impure subroutine s_amr_face_xfers(w, peer, k, f_lo, f_hi)
+
+        type(t_amr_wave_side), intent(inout) :: w
+        integer, intent(in)                  :: peer, k
+        logical, intent(in)                  :: f_lo(3), f_hi(3)
+        integer                              :: d, nw
+
+        do d = 1, num_dims
+            nw = size(freg(d)%lo, 1)*size(freg(d)%lo, 2)*size(freg(d)%lo, 3)
+            if (f_lo(d)) call s_amr_wave_add(w, peer, k, [d, 1, amr_reg_of(k)], [0, 0, 0], nw)
+            if (f_hi(d)) call s_amr_wave_add(w, peer, k, [d, 2, amr_reg_of(k)], [0, 0, 0], nw)
+        end do
+
+    end subroutine s_amr_face_xfers
+
+    !> Copy a side's freg faces into (pack) or out of the device pool, one kernel per face direction and side over its transfers.
+    impure subroutine s_amr_freg_pack(w, pack)
+
+        type(t_amr_wave_side), intent(in) :: w
+        logical, intent(in)               :: pack
+        integer, allocatable              :: tsl(:), toff(:)
+        integer                           :: t, nt, n1, n2, eq, a, b, j
+
+        allocate (tsl(w%nx), toff(w%nx))
+        #:for D in [1, 2, 3]
+            #:for S, SI in [('lo', 1), ('hi', 2)]
+                if (${D}$ <= num_dims) then
+                    nt = 0
+                    do t = 1, w%nx
+                        if (w%bl(1, t) /= ${D}$ .or. w%bl(2, t) /= ${SI}$) cycle
+                        nt = nt + 1; tsl(nt) = w%bl(3, t); toff(nt) = w%off(t) + XA_NH
+                    end do
+                    if (nt > 0) then
+                        n1 = size(freg(${D}$)%${S}$, 2); n2 = size(freg(${D}$)%${S}$, 3)
+                        $:GPU_PARALLEL_LOOP(collapse=4, copyin='[tsl, toff]', private='[j]')
+                        do t = 1, nt
+                            do b = 0, n2 - 1
+                                do a = 0, n1 - 1
+                                    do eq = 1, sys_size
+                                        j = toff(t) + eq + sys_size*(a + n1*b)
+                                        if (pack) then
+                                            amr_rf_sq(j) = freg(${D}$)%${S}$(eq, a, b, tsl(t))
+                                        else
+                                            freg(${D}$)%${S}$(eq, a, b, tsl(t)) = amr_rf_rq(j)
+                                        end if
+                                    end do
+                                end do
+                            end do
+                        end do
+                        $:END_GPU_PARALLEL_LOOP()
+                    end if
+                end if
+            #:endfor
+        #:endfor
+
+    end subroutine s_amr_freg_pack
 
     !> The split-ownership level>=2 freg exchange as one wave, run once before the reflux fold (the registers are final after the
     !! advance, and the applies keep their per-box reverse-order position). Same zero-copy, companion-header design as the faces
@@ -1026,6 +1150,10 @@ contains
         end do
         call s_amr_wave_close(amr_wrecv, amr_fw_rq, amr_fw_dev)
         call s_amr_wave_post(amr_wave, amr_wrecv, amr_fw_rq, XA_F7W_RCV, amr_fw_dev)
+        if (amr_tile_cluster) then
+            call s_amr_restrict_l1_batched(coarse_tgt, milo, mihi)
+            return
+        end if
         ! owner-local covered overwrites + device packs, grouped per owned block: the transfer list is k-grouped by
         ! construction, so a monotone cursor drains each block's sends inside its group
         cur = 1
@@ -1058,6 +1186,45 @@ contains
 #endif
 
     end subroutine s_amr_restrict_l1_wave
+
+    !> The rest of the level-1 restrict wave under amr_tile_cluster (the receives are posted): every owned block's covered
+    !! overwrite, every send pack and every received unpack as one launch each over slab rows, instead of a few per block.
+    impure subroutine s_amr_restrict_l1_batched(coarse_tgt, milo, mihi)
+
+        type(scalar_field), dimension(sys_size), intent(inout) :: coarse_tgt
+        integer, intent(in)                                    :: milo(3), mihi(3)
+
+#ifdef MFC_MPI
+        integer :: k, kk, t, rlo(3), rhi(3), bl(3), bh(3)
+
+        call s_amr_refresh_my_blocks()
+        do kk = 1, amr_n_my
+            k = amr_my_blk(kk)
+            if (amr_block_level(k) /= 1) cycle
+            call s_amr_region_box(k, rlo, rhi)
+            call s_amr_box_isect(rlo, rhi, milo, mihi, bl, bh)
+            if (all(bl <= bh)) call s_amr_slab_add(bl, bh, amr_loc_of(k), rlo, [0, 0, 0])
+        end do
+        call s_amr_restrict_rows_sf(coarse_tgt, amr_sidx(1), amr_sidx(2), amr_sidx(3))
+        do t = 1, amr_wsend%nx
+            k = amr_wsend%blk(t)
+            call s_amr_region_box(k, rlo, rhi)
+            call s_amr_slab_add(amr_wsend%bl(:,t), amr_wsend%bh(:,t), amr_loc_of(k), rlo, [amr_wsend%off(t) + XA_NH, 0, 0])
+        end do
+        if (amr_wsend%nx > 0) call s_amr_restrict_rows_wire(amr_fw_sq(1:amr_wsend%words))
+        do t = 1, amr_wsend%nx
+            call s_amr_wave_hdr_pack(amr_wsend, amr_fw_sq, t, XA_F7W_SND)
+        end do
+        call s_amr_wave_send(amr_wave, amr_wsend, amr_fw_sq, XA_F7W_SND, amr_fw_dev)
+        call s_amr_wave_wait(amr_wave)
+        do t = 1, amr_wrecv%nx
+            call s_amr_wave_hdr_check(amr_wrecv, amr_fw_rq, t, XA_F7W_SND)
+            call s_amr_slab_add(amr_wrecv%bl(:,t), amr_wrecv%bh(:,t), amr_wrecv%off(t) + XA_NH, [0, 0, 0], amr_sidx)
+        end do
+        if (amr_wrecv%nx > 0) call s_amr_unpack_rows(amr_fw_rq(1:amr_wrecv%words), coarse_tgt)
+#endif
+
+    end subroutine s_amr_restrict_l1_batched
 
     !> Sibling-seam face weights for level>=2 block kb under parent pblk: 0 on a face shared with a same-parent sibling tile
     !! (fine-fine, not c/f: refluxing there double-writes and leaks; the outside parent cell is covered by the sibling's restrict),

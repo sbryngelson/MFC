@@ -403,18 +403,20 @@ module m_global_parameters
     !> Batched fine advance: the batch being advanced - amr_bat_n members (0 outside a batch), their block ids, their shared
     !! extents, the stacking dimension (the last active one) and the stack stride (block width + two ghost shells). Member i sits at
     !! offset (i-1)*amr_bat_w along amr_bat_sd in the bridge and in every solver scratch array; the flux capture in m_amr_registers
-    !! reads these to place each member's faces. amr_bat_lim (<= amr_bat_max, the table capacity) is the batch size: 8, or under
-    !! amr_tile_cluster as many blocks as fill the slab 8 blocks of the 64-cell cap would.
-    integer, parameter :: amr_bat_max = 64
-    integer            :: amr_bat_lim = 8
+    !! reads these to place each member's faces. amr_bat_lim is the members per stack: 8, or under amr_tile_cluster as many blocks
+    !! as fill the slab 8 blocks of the 64-cell cap would. Under amr_tile_cluster amr_bat_cols stacks side by side along amr_bat_sd2
+    !! (the next-to-last dim, stride amr_bat_w2) fill the coarse extent the solver scratch already has there; slot i's offset is
+    !! amr_bat_off(:, i). amr_bat_max is the table capacity.
+    integer, parameter :: amr_bat_max = 256
+    integer            :: amr_bat_lim = 8, amr_bat_cols = 1, amr_bat_sd2 = 0, amr_bat_w2 = 0, amr_bat_ns = 0
     integer            :: amr_bat_n = 0, amr_bat_blk(amr_bat_max) = 0, amr_bat_ext(3) = 0, amr_bat_sd = 3, amr_bat_w = 0
     !> A block may join a batch led by a larger block when padding it to the leader's extent wastes at most amr_bat_pad of its own
     !! cells. Members may be smaller than the leader; amr_bat_mext holds each member's own extents so the bridge load clamps its
     !! source to the member's buffered region (finite, physical filler in the padding), the RK update writes only the member's own
     !! cells, and the capture reads the member's own faces.
     real(wp), parameter :: amr_bat_pad = 0.1_wp
-    integer             :: amr_bat_mext(3, amr_bat_max) = 0
-    $:GPU_DECLARE(create='[amr_bat_mext]')
+    integer             :: amr_bat_mext(3, amr_bat_max) = 0, amr_bat_off(3, amr_bat_max) = 0
+    $:GPU_DECLARE(create='[amr_bat_mext, amr_bat_off]')
 
 contains
 
@@ -1143,6 +1145,11 @@ contains
                 if (amr_tile_cluster) amr_bat_lim = min(amr_bat_max, max(8, &
                     & 8*(64*amr_ref_ratio + 2*buff_size)/(amr_ref_ratio*cap + 2*buff_size)))
                 idwbuff_alloc(sd)%end = max(idwbuff_alloc(sd)%end, amr_bat_lim*(amr_ref_ratio*cap + 2*buff_size) - buff_size - 1)
+                if (amr_tile_cluster .and. .not. igr .and. sd > 1) then
+                    amr_bat_cols = (idwbuff_alloc(sd - 1)%end - buff_size - (amr_ref_ratio*cap - 1))/(amr_ref_ratio*cap &
+                                    & + 2*buff_size + 1) + 1
+                    amr_bat_cols = max(1, min(amr_bat_cols, amr_bat_max/amr_bat_lim))
+                end if
             end block
         end if
 

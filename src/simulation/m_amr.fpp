@@ -230,7 +230,7 @@ contains
         ! GPU_DECLARE'd module one like q_prim_vf both allocate fine; only a bare module array does not). Allocate a local, which
         ! gets a valid descriptor, and hand it to the module variable via move_alloc, then map.
         allocate (tmp_cg(1:sys_size))
-        @:ALLOCATE(amr_slab_tab(1:8, 1:6))
+        @:ALLOCATE(amr_slab_tab(1:15, 1:64))
         call move_alloc(tmp_cg, amr_cg)
         $:GPU_ENTER_DATA(create='[amr_cg]')
         do i = 1, sys_size
