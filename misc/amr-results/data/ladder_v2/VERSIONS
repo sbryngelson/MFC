@@ -1,0 +1,12 @@
+MFC worktree: /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-bench2
+git commit: 5d8ab069c430f8f3709fee07a93761f8ec0f91af (AMR: log store growth and post-build free memory under rank_time_wrt)
+git status: 0 modified/untracked files
+history: 3a0e61a1, a4eaff68 and 23b4d7aa were built first and superseded at the coordinator's request; binaries and partial runs in trash/<commit>/. No kept run used them.
+build: source ./mfc.sh load -c famd -m g; ./mfc.sh build --gpu mp -j 16 -t pre_process simulation --case-optimization -i mfc-simple-v2/np8_lock_s240_r1/case.py (login node, Fri Oct 30 06:34:15 AM EDT 2026)
+pre_process and syscheck are byte-identical to the 23b4d7aa build (no pre_process/common change); simulation rebuilt
+one build serves all decks (m/n/p and amr_place_owner are not case-optimized); all generated MFC.sh files point at these binaries
+sha256:
+8d67fadfaf94b3ef0fb58e4144a20f90d556dee7751e9d099dc803cbdf6a217d  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-bench2/build/install/gpu-mp-b593668db5/bin/syscheck
+0a8efc956058574157093ee8c97fd1c2fab2c90f5858240f0820a4bc43825d88  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-bench2/build/install/gpu-mp-192103e0ba/bin/pre_process
+e803309fca62844b6b57e5febb5e2385b149e4f5e2c88db159cefa751edfd635  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-bench2/build/install/gpu-mp-02535a6ac4/bin/simulation
+modules (mfc.sh load -c famd -m g): craype-x86-trento libfabric/2.3.1 craype-network-ofi xpmem/1.0.1-1.5_1_gfb6998056825 Core/26.05 tmux/3.6a hsi/default lfs-wrapper/0.0.1 DefApps python/3.14.3 cmake/3.31.11 cray-dsmml/0.3.0 PrgEnv-amd/8.7.0 amd/7.0.2 cray-libsci/26.03.0 cray-mpich/9.1.0 cray-pmi/6.1.17 craype/2.7.36 perftools-base/26.03.0 cpe/26.03 darshan-runtime/3.4.7-mpi 

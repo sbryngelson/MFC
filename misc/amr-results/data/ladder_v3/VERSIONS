@@ -1,0 +1,17 @@
+MFC simple-config v3: variants and binaries (case-optimized, built on the login node Fri Oct 30 11:07:20 AM EDT 2026, deck np8_lock_s240_r1_sw/case.py)
+== ctl: /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-integrate e341896a AMR reflux: device-resident coarse capture and apply tables (git status: 0 modified tracked files)
+10256a97ba97632c5aca2e2cf174e5bcfb468411800f3ed20fd8e26d18424eea  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-integrate/build/install/gpu-mp-b593668db5/bin/syscheck
+2877f52ea703e7f105f2b65ef4cdea1946920846dbc56cd2d7fb39b9bbec18a2  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-integrate/build/install/gpu-mp-192103e0ba/bin/pre_process
+e2eabcb97c3ff1c701b2f65c578113a57ad9c40fe4293ec704446b80bb2fc1c9  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-integrate/build/install/gpu-mp-02535a6ac4/bin/simulation
+== sd: /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-v3-sd fa3ca677 AMR subcycling: gather the level-1 patch rings once per coarse step and blend in  (git status: 0 modified tracked files)
+c8e14ac2dfc4d6e08edd92a65587af37a05b1725e618d811eb3ebbc899b565df  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-v3-sd/build/install/gpu-mp-b593668db5/bin/syscheck
+abd77ce80bc9a1e533ee0a85b3979397dadafc1cfc4b5c926987024dff3a848a  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-v3-sd/build/install/gpu-mp-192103e0ba/bin/pre_process
+2a7dba40b9f2af21222913a7497da0a970c29bb11ae763046918f39bcd1cfcfa  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-v3-sd/build/install/gpu-mp-02535a6ac4/bin/simulation
+== sw: /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-v3 7273d602 AMR swap: push the coordinates as one packed update and widen idwint inside the s (git status: 0 modified tracked files)
+c4f63a14a89bccfaca659e7b9bc937f3744c90289feac847e7d9e51f1b57ccfc  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-v3/build/install/gpu-mp-b593668db5/bin/syscheck
+c5361ae376bf551a2771a2112bebed9ac1c26a23c3c6d3cb41c15425dc1a065f  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-v3/build/install/gpu-mp-192103e0ba/bin/pre_process
+674d7e063948dcc06051c8efa3b1f3aaaa48409db4a89393c201ed32287011d4  /lustre/orion/cfd154/scratch/sbryngelson/mfc-amr-v3/build/install/gpu-mp-02535a6ac4/bin/simulation
+tiles = sw binaries + amr_tile_cluster = T
+branch spike/amr-integrate-v3: e341896a -> 572639aa (lerp timer) -> fa3ca677 (subdrv) -> 7273d602 (swap)
+build: source ./mfc.sh load -c famd -m g; ./mfc.sh build --gpu mp -j 16 -t pre_process simulation --case-optimization -i <deck>
+modules: as in ../mfc-simple-v2/VERSIONS (same mfc.sh load -c famd -m g)

@@ -1,58 +1,83 @@
-# AMR results on Frontier (2026-10-29/30 snapshot)
+# AMR results on Frontier (snapshot 2026-10-30)
 
-Figures, data and reports from the MFC AMR work on OLCF Frontier (MI250X, AMD AFAR compilers). Numbers were re-derived from raw
-outputs by an independent audit (`reports/audit_*.txt`); corrections are applied here. Treat MFC scaling rows as provisional
-until the single-build ladder (simple deck: 5-equation, 1 fluid, `mp_weno = F`, `amr_tag_abs = T`, two reps) replaces them.
+Figures, data and reports from the MFC AMR work on OLCF Frontier (MI250X, AMD AFAR compilers). Code: branch
+`spike/amr-integrate` (7273d602 = all fixes below, validated). Movies are not in git (`*.mp4` is ignored); paths below.
 
 ## Benchmark
 Blast lattice (the AMReX CNS / PeleC weak-scaling case): ideal gas, periodic, 8M base cells per GPU, one refined level, regrid every
-20 coarse steps; s/step = (wall at 240 steps - wall at 40)/200. Compared codes: MFC, AMReX CNS, PeleC, and a C/HIP reference mini-app.
+20 coarse steps; s/step = (wall at 240 steps - wall at 40)/200, 2 reps per point, one case-optimized MFC build per ladder.
+MFC: WENO5 + HLLC, 5-equation single fluid (`mp_weno = F`, `amr_tag_abs = T`, `amr_place_owner = T`); AMReX CNS and PeleC:
+their second-order schemes. Same grid, dt, tag rule and refinement ratio; MFC refines ~1.3x more volume (40.5% vs 30.3%
+subcycled). AMR-only = wall minus each code's own hydro RHS.
 
-## Figures
+## Headline (subcycled, integrated build 5d8ab069)
+| GPUs | MFC s/step | AMReX CNS | PeleC | MFC efficiency | AMReX | PeleC | MFC AMR-only | AMReX | PeleC |
+|---|---|---|---|---|---|---|---|---|---|
+| 8 | 0.765 | 0.467 | 0.600 | 1 | 1 | 1 | 0.217 | 0.281 | 0.141 |
+| 64 | 0.797 | 0.600 | 0.802 | 0.96 | 0.78 | 0.75 | 0.233 | 0.408 | 0.328 |
+| 128 | 0.833 | 0.613 | 0.832 | 0.92 | 0.76 | 0.72 | 0.260 | 0.421 | 0.358 |
+| 512 | 0.899 | 0.678 | 0.952 | 0.85 | 0.69 | 0.63 | 0.313 | 0.486 | 0.478 |
+
+Lock-step at 512 GPUs: MFC 0.282 s/step (efficiency 0.89) vs AMReX 0.250 (0.68). Before the fixes (651b6d88) MFC subcycled was
+1.574 -> 2.183 s/step (8 -> 512 GPUs). The subcycling driver + swap packing (7273d602) cut a further ~12%: 0.699 s/step at
+64 GPUs (AMR-only 0.141), see `data/scaling_simple_deck_v3.csv`. 1024-GPU rung and the 7273d602 build at 128-1024 GPUs pending.
+
+## Sponsor figures (`pgf/`)
+pgfplots sources, data tables and PDFs; PNG previews in `pgf/png/`. `*_pelec` variants compare MFC with PeleC only. Rebuild
+instructions in `pgf/README.md`.
+| figure | shows |
+|---|---|
+| `scaling_slide` | efficiency, AMR-only cost added beyond 8 GPUs, s/step vs GPUs |
+| `lockstep` | lock-step efficiency and s/step, MFC vs AMReX CNS |
+| `tts` | wall time to the same physical time at 128 GPUs |
+| `fixes` | what each fix bought, MFC subcycled at 64 GPUs (1.95 -> 0.70 s/step) |
+| `amr_only` | AMR-only cost vs GPUs, subcycled and lock-step |
+| `coverage` | refined share of the domain |
+| `interface_error` | coarse-fine interface error vs the uniform fine grid, minmod vs quartic |
+| `rhs_models` | RHS ns/cell for the same numerics in HIP vs OpenMP variants |
+| `convergence` | subcycling order of accuracy (quartic: second order) |
+
+`figures/slide_scaling.png` is the matplotlib version of `scaling_slide` (script `pgf/make_slide.py`).
+
+## Ladders (`data/`)
+- `scaling_simple_deck_v2.csv`, `ladder_v2/` (README, VERSIONS, scripts), `figures/scaling_simple_deck_v2.png`: integrated
+  build 5d8ab069 plus the 651b6d88 baseline, AMReX CNS and PeleC, 8-512 GPUs.
+- `scaling_simple_deck_v3.csv`, `ladder_v3/`, `figures/scaling_simple_deck_v3.png`: subcycling driver and swap packing at
+  8/64 GPUs; tile clustering findings (out of memory with subcycling: store slots sized for full blocks; post-meeting fix).
+- `scaling_simple_deck.csv`, `figures/scaling_simple_deck.png`: the pre-fix single-build ladder (651b6d88).
+- `progress_data.json`: data behind the live progress page.
+
+## Pre-fix analysis (superseded by the fixes; kept for the root-cause record)
 | file | shows | caveats |
 |---|---|---|
-| `figures/amr_only_vs_gpus.png` | AMR-only seconds per coarse step (everything except each code's hydro RHS) at 8/64/128/512 GPUs | MFC np8/np64 used an earlier build than np128/np512; MFC refines more volume (43.9% vs ~30% subcycled) |
-| `figures/stacked_sub.png`, `stacked_nosub.png`, `categories_*.png` | AMR-only cost by category (fill, halo/seam, reflux, restriction, regrid, RK/copies, other) per code and GPU count | MFC flux capture/copies moved out of its RHS by an estimate that is mostly idle gap (see audit) |
+| `figures/amr_only_vs_gpus.png` | AMR-only s/step per code, 8-512 GPUs | MFC np8/np64 used an earlier build than np128/np512 |
+| `figures/stacked_sub.png`, `stacked_nosub.png`, `categories_*.png` | AMR-only cost by category per code and GPU count | MFC flux capture/copies moved out of its RHS by an estimate |
 | `figures/coverage.png` | refined share of the domain per code | read at the grid used in the last timed steps |
-| `figures/overhead_vs_gpus.png` | AMR overhead factor (total / own RHS) | flattered by a heavy RHS; secondary metric |
-| `figures/waterfall.png`, `budget_bars.png` | waste budget: MFC step time today vs after each pending fix vs the necessary floor (np8) | hatched bars are estimates |
-| `figures/subcycled_overhead_breakdown.png` | where MFC's subcycled AMR overhead goes, by root cause | np8, one run |
-| `figures/halo_vs_load_np8.png` | halo wait vs per-rank load: the skew comes from uneven parent-data gathering, not block counts | |
-| `figures/rhs_breakdown.png` | hydro RHS ns/cell/stage by kernel group, MFC vs mini-app (1 GCD, 200^3) | MFC ran MP-WENO; without it 5.16 vs 6.58 ns/cell |
-| `figures/omp_vs_hip.png` | same algorithm in HIP vs Fortran OpenMP with MFC's compiler | one unroll fix closes the OpenMP gap |
-| `figures/interface_error_vs_uniform.png` | coarse-fine interface error vs uniform grids, minmod vs quartic, lock-step vs subcycled | uniform fine hits its error floor at 128^2 |
-| `figures/subcycle_error_map_{before,after}_seeding_fix.png` | subcycled minus lock-step error maps before/after seeding new fine cells with the quartic | |
-| `figures/render_*_contact_sheet.png` | volumetric render looks (8-sphere run, 64-sphere particle curtain) | |
+| `figures/overhead_vs_gpus.png` | AMR overhead factor (total / own RHS) | flattered by a heavy RHS |
+| `figures/waterfall.png`, `budget_bars.png` | waste budget: step time vs after each pending fix vs the floor (np8) | hatched bars are estimates |
+| `figures/subcycled_overhead_breakdown.png` | where subcycled AMR overhead went, by root cause | np8, one run |
+| `figures/halo_vs_load_np8.png` | halo wait vs per-rank load: skew from uneven parent-data gathering | |
+| `figures/rhs_breakdown.png` | hydro RHS ns/cell/stage by kernel group, MFC vs mini-app | MFC ran MP-WENO |
+| `figures/omp_vs_hip.png` | same algorithm in HIP vs Fortran OpenMP with MFC's compiler | |
+| `figures/interface_error_vs_uniform.png` | coarse-fine interface error vs uniform grids | |
+| `figures/subcycle_error_map_{before,after}_seeding_fix.png` | subcycled minus lock-step error before/after quartic seeding | |
+| `figures/render_*_contact_sheet.png` | volumetric render looks | |
 
-## Data
-`data/fair_metrics.csv`, `data/categories_long.csv` (per-code, per-category AMR cost), `data/waste_budget.csv`, `data/waterfall.csv`,
-`data/omp_vs_hip.csv`, `data/rhs_groups.csv`, `data/progress_data.json` (the live progress page's data).
+Data: `data/fair_metrics.csv`, `categories_long.csv`, `waste_budget.csv`, `waterfall.csv`, `omp_vs_hip.csv`, `rhs_groups.csv`.
 
 ## Reports
 `reports/overhead_findings.md`, `reports/capture_and_migration_findings.md` (MFC root causes with file:line),
-`reports/miniapp_findings.md` (findings F1-F5 from the reference mini-app), `reports/miniapp_scaling.md`,
-`reports/waste_budget.md`, `reports/audit_*.txt` (independent re-derivation of the headline numbers).
+`reports/miniapp_findings.md`, `reports/miniapp_scaling.md` (reference C/HIP mini-app), `reports/waste_budget.md`,
+`reports/audit_*.txt` (independent re-derivation of the headline numbers).
 
-## Movies (not in git: *.mp4 is ignored)
-- 8-sphere movie (Mach 1.5, 8 GPUs, volumetric shocks, GPU-coloured cutaway): 1080p master
-  `/lustre/orion/cfd154/scratch/sbryngelson/amr-report/movies/spheres3d_8gpu_v2.mp4`, 720p web copy alongside.
-- 64-sphere particle-curtain movie (Mach 2.5, 80 GPUs): `/lustre/orion/cfd154/scratch/sbryngelson/amr-report/movies/curtain64_80gpu.mp4`
-  (rendering).
-Representative frames are in `stills/`.
+## Movies (not in git)
+- 64-sphere particle curtain (Mach 2.5, 80 GPUs): `/lustre/orion/cfd154/scratch/sbryngelson/amr-report/movies/curtain64_80gpu.mp4`
+  (1080p) and `_720p.mp4`.
+- 8 spheres (Mach 1.5, 8 GPUs): `/lustre/orion/cfd154/scratch/sbryngelson/amr-report/movies/spheres3d_8gpu_v2.mp4`.
 
-## Stills
-`stills/` (1600-px JPEG):
-- `spheres8_{flow,cut,hero}_{400,900,1700}.jpg`: the 8-sphere run (Mach 1.5, 8 GPUs) at t = 0.32, 0.72, 1.36 in three looks:
-  volumetric shock field with pressure-coloured spheres; cutaway with refined blocks outlined by GPU; close hero view.
-- `spheres8_movie_f_*.jpg`: frames from the 8-sphere movie (flow pass, a callout pause, the closing shot).
-- `curtain64_{flow,wake,cut,hero}_{144,440,904,1696}.jpg`: Mach 2.5 shock through a curtain of 64 force-driven spheres
-  (viscous, collisions on, 80 GPUs) at t = 0.49, 1.50, 3.09, 5.80: bow shocks, vortex wakes, refinement on the cut face, close view.
+## Stills (`stills/`, 1600-px JPEG)
+- `curtain64_hero4k_{close,wide,cut}[_caption].jpg`: 4K hero renders (full resolution in amr-report/hero/).
+- `curtain64_{flow,wake,cut,hero}_{144,440,904,1696}.jpg`: Mach 2.5 shock through 64 force-driven spheres (viscous, collisions
+  on, 80 GPUs) at t = 0.49, 1.50, 3.09, 5.80; `curtain64_movie_f_*.jpg`: movie frames.
+- `spheres8_{flow,cut,hero}_{400,900,1700}.jpg`, `spheres8_movie_f_*.jpg`: the 8-sphere run.
 - `curtain_test_midplane_slice.jpg`: mid-plane slice of the 22-sphere curtain test (8 GPUs).
-- `curtain64_hero4k_{close,wide,cut}[_caption].jpg`: 4K hero renders (1600-px copies here; full-resolution images in amr-report/hero/):
-  close view at step 1400 with vortex rings, wide view at step 704 with dozens of bow shocks, cutaway at step 904.
-- `curtain64_movie_f_*.jpg`: frames from the curtain movie (flow with vortex cores, the transmitted-shock callout, the closing shot).
-
-## Scaling, single MFC build
-`figures/scaling_simple_deck.png`, `data/scaling_simple_deck.csv`: MFC (one case-optimized build of 651b6d88, 5-equation single
-fluid, mp_weno off, AMReX tag rule, 2 reps) vs AMReX CNS and PeleC at 8/64/128 GPUs; wall s/step and AMR-only s/step.
-Subcycled MFC's weak-scaling loss is almost entirely regrid (0.039 -> 0.412 s/step from 8 to 64 GPUs) plus gather waiting.
