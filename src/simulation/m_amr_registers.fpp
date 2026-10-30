@@ -65,20 +65,26 @@ module m_amr_registers
     !> Per-slot geometry scratch for the batched capture kernels (1:amr_max_blocks): host-filled by s_amr_capture_slot, then
     !! GPU_UPDATE'd (one table, one update: each update costs tens of microseconds of host time) so one kernel iterates the slot
     !! dimension instead of O(blocks) tiny launches. Rows: 1:2 the normal-face flux indices (jlo, jhi), 3:4 the transverse origins,
-    !! 5:8 the per-slot transverse window (t1lo, t1hi, t2lo, t2hi; a slot outside the rectangular caps bmax1/bmax2 is cycled), 9:10
-    !! the low/high face capture gates and 11 the slot gate (1 = on).
-    integer, allocatable :: bcap(:,:)
-    integer              :: bmax1 = 0, bmax2 = 0
+    !! 5:8 the per-slot transverse window (t1lo, t1hi, t2lo, t2hi; a slot outside the rectangular caps bmax is cycled), 9:10 the
+    !! low/high face capture gates and 11 the slot gate (1 = on). Set 0 (last index) is the fine side's per-call table; sets 1:3 are
+    !! the coarse side's per-direction tables, built once per topology change (s_amr_coarse_tables) and left on the device. bmax(:,
+    !! set) holds each set's caps.
+    integer, allocatable :: bcap(:,:,:)
+    integer              :: bmax(2,0:3) = 0
     $:GPU_DECLARE(create='[bcap]')
 
     !> Per-slot geometry scratch for the batched reflux apply kernels (mirror of the capture batching above). aint rows: 1:2 the
     !! outside coarse cell's local index in the face dim (low, high face), 3:4 the local transverse origins, 5:8 the transverse
     !! windows (block-relative, freg/creg-aligned), 9:10 the per-face applies and 11 the slot gate (1 = on); areal rows 1:2 the
-    !! outside-cell widths. Filled per direction on the host, GPU_UPDATE'd, consumed by one kernel per face direction instead of
-    !! O(blocks) tiny launches.
-    integer, allocatable  :: aint(:,:)
-    real(wp), allocatable :: areal(:,:)
+    !! outside-cell widths; last index the face direction. Built with the coarse capture tables (s_amr_coarse_tables), consumed by
+    !! one kernel per face direction instead of O(blocks) tiny launches. a_n/a_m hold each direction's active count and caps.
+    integer, allocatable  :: aint(:,:,:)
+    real(wp), allocatable :: areal(:,:,:)
+    integer               :: a_n(3) = 0, a_m(2, 3) = 0
     $:GPU_DECLARE(create='[aint, areal]')
+    !> Mesh-epoch/tripwire keys of the last coarse-table build.
+    integer(8) :: amr_ctab_epoch_built = -1_8
+    integer    :: amr_ctab_nblk_built = -1
 
     !> amr_tile_cluster: this rank's coarse cells (0:m, 0:n, 0:p) under a level-1 block. A level-1 face whose outside cell is
     !! covered is fine-fine (the ghost pieces match its flux on both sides), so the apply skips the correction there. 0:0 when off.
@@ -362,9 +368,10 @@ contains
             end if
         #:endfor
         ! per-slot geometry scratch for the batched capture kernels (device-resident: host-filled, GPU_UPDATE'd before each call)
-        @:ALLOCATE(bcap(1:11, 1:amr_max_blocks))
-        bcap = 0
-        @:ALLOCATE(aint(1:11, 1:amr_max_blocks), areal(1:2, 1:amr_max_blocks))
+        @:ALLOCATE(bcap(1:11, 1:amr_max_blocks, 0:3))
+        bcap = 0; bmax = 0
+        @:ALLOCATE(aint(1:11, 1:amr_max_blocks, 1:3), areal(1:2, 1:amr_max_blocks, 1:3))
+        aint = 0; areal = 1._wp; amr_ctab_epoch_built = -1_8; amr_ctab_nblk_built = -1
         if (amr_tile_cluster) then
             @:ALLOCATE(l1cov(0:m, 0:n, 0:p))
         else
@@ -421,22 +428,20 @@ contains
 
     end subroutine s_amr_bat_member
 
-    !> Fill capture slot sreg with the face pair of one block along direction id: blo/bhi is the block's box in local flux indices
-    !! (faces at blo(id)-1 and bhi(id)), wlo/whi the transverse window to capture (the block's own extent, or on the coarse side
-    !! this rank's owned overlap), clo/chi the per-face gates. Transverse indices are 0-based from blo, aligned across the coarse
-    !! and fine registers: fine children of block-relative coarse cell t are faces 2*t and 2*t+1.
-    subroutine s_amr_capture_slot(sreg, id, blo, bhi, wlo, whi, clo, chi)
+    !> Fill capture table set's slot sreg with the face pair of one block along direction id: blo/bhi is the block's box in local
+    !! flux indices (faces at blo(id)-1 and bhi(id)), wlo/whi the transverse window to capture (the block's own extent, or on the
+    !! coarse side this rank's owned overlap), clo/chi the per-face gates. Transverse indices are 0-based from blo, aligned across
+    !! the coarse and fine registers: fine children of block-relative coarse cell t are faces 2*t and 2*t+1.
+    subroutine s_amr_capture_slot(set, sreg, id, blo, bhi, wlo, whi, clo, chi)
 
-        integer, intent(in) :: sreg, id, blo(3), bhi(3), wlo(3), whi(3)
+        integer, intent(in) :: set, sreg, id, blo(3), bhi(3), wlo(3), whi(3)
         logical, intent(in) :: clo, chi
         integer             :: ta, tb
 
         ta = merge(2, 1, id == 1); tb = merge(2, 3, id == 3)
-        bcap(11, sreg) = 1; bcap(9, sreg) = merge(1, 0, clo); bcap(10, sreg) = merge(1, 0, chi)
-        bcap(1, sreg) = blo(id) - 1; bcap(2, sreg) = bhi(id); bcap(3, sreg) = blo(ta); bcap(4, sreg) = blo(tb)
-        bcap(5, sreg) = wlo(ta) - blo(ta); bcap(6, sreg) = whi(ta) - blo(ta)
-        bcap(7, sreg) = wlo(tb) - blo(tb); bcap(8, sreg) = whi(tb) - blo(tb)
-        bmax1 = max(bmax1, bcap(6, sreg)); bmax2 = max(bmax2, bcap(8, sreg))
+        bcap(:,sreg, set) = [blo(id) - 1, bhi(id), blo(ta), blo(tb), wlo(ta) - blo(ta), whi(ta) - blo(ta), wlo(tb) - blo(tb), &
+             & whi(tb) - blo(tb), merge(1, 0, clo), merge(1, 0, chi), 1]
+        bmax(:,set) = max(bmax(:,set), bcap(6:8:2,sreg, set))
 
     end subroutine s_amr_capture_slot
 
@@ -446,9 +451,9 @@ contains
     !! a stage-1 overwrite reads no uninitialized register). bcap rows 9:10 gate the low/high face. The device kernel collapses
     !! (slot, t2, t1, eq) over the rectangular caps [0:maxt2]x[0:maxt1] (max over slots) and cycles inactive slots / out-of-window
     !! cells, so one launch replaces O(blocks) per-slot launches.
-    impure subroutine s_amr_capture_batch(nb, id, fine, advective, cf, acc, maxt1, maxt2, eqb, eqe)
+    impure subroutine s_amr_capture_batch(set, nb, id, fine, advective, cf, acc, maxt1, maxt2, eqb, eqe)
 
-        integer, intent(in) :: nb, id, maxt1, maxt2, eqb, eqe
+        integer, intent(in) :: set, nb, id, maxt1, maxt2, eqb, eqe
         !> Which flat Riemann buffer to read: T = flux_rsx_vf (advective), F = flux_src_rsx_vf (viscous, chemistry). Both are plain
         !! module arrays, so this routine takes no field dummies.
         logical, intent(in)  :: fine, advective, acc
@@ -461,25 +466,26 @@ contains
             do t2 = 0, maxt2
                 do t1 = 0, maxt1
                     do eq = eqb, eqe
-                        if (bcap(11, slot) == 0) cycle
-                        if (t1 < bcap(5, slot) .or. t1 > bcap(6, slot) .or. t2 < bcap(7, slot) .or. t2 > bcap(8, slot)) cycle
+                        if (bcap(11, slot, set) == 0) cycle
+                        if (t1 < bcap(5, slot, set) .or. t1 > bcap(6, slot, set) .or. t2 < bcap(7, slot, set) .or. t2 > bcap(8, &
+                            & slot, set)) cycle
                         select case (id)
                         case (1)
-                            i1 = bcap(1, slot); i2 = bcap(3, slot) + t1; i3 = bcap(4, slot) + t2
-                            j1 = bcap(2, slot); j2 = i2; j3 = i3
+                            i1 = bcap(1, slot, set); i2 = bcap(3, slot, set) + t1; i3 = bcap(4, slot, set) + t2
+                            j1 = bcap(2, slot, set); j2 = i2; j3 = i3
                         case (2)
-                            i1 = bcap(3, slot) + t1; i2 = bcap(1, slot); i3 = bcap(4, slot) + t2
-                            j1 = i1; j2 = bcap(2, slot); j3 = i3
+                            i1 = bcap(3, slot, set) + t1; i2 = bcap(1, slot, set); i3 = bcap(4, slot, set) + t2
+                            j1 = i1; j2 = bcap(2, slot, set); j3 = i3
                         case (3)
-                            i1 = bcap(3, slot) + t1; i2 = bcap(4, slot) + t2; i3 = bcap(1, slot)
-                            j1 = i1; j2 = i2; j3 = bcap(2, slot)
+                            i1 = bcap(3, slot, set) + t1; i2 = bcap(4, slot, set) + t2; i3 = bcap(1, slot, set)
+                            j1 = i1; j2 = i2; j3 = bcap(2, slot, set)
                         end select
                         ! The flux reads must stay inside the face gates. A coarse slot goes active when either face is
                         ! owned, and the unowned face's index is still computed; it then points a whole block width outside this
                         ! rank's subdomain (jlo down to -amr_max_grid_size). Reading it unguarded is an out-of-bounds device access
                         ! against flux_rsx_vf's tight (-1:m_alloc) bounds. It hides at np=1, where the intersection is the block
                         ! and both flags hold, so single-rank tests do not catch it.
-                        if (bcap(9, slot) == 1) then
+                        if (bcap(9, slot, set) == 1) then
                             if (advective) then
                                 v = flux_rsx_vf(i1, i2, i3, eq)
                             else
@@ -491,7 +497,7 @@ contains
                                 creg(id)%lo(eq, t1, t2, slot) = merge(creg(id)%lo(eq, t1, t2, slot), 0._wp, acc) + cf*v
                             end if
                         end if
-                        if (bcap(10, slot) == 1) then
+                        if (bcap(10, slot, set) == 1) then
                             if (advective) then
                                 v = flux_rsx_vf(j1, j2, j3, eq)
                             else
@@ -514,22 +520,29 @@ contains
     !> Total-flux capture of the filled slots (s_amr_capture_slot) into freg (fine) or creg, one batched kernel per category:
     !! advective (all equations); viscous (flux_src, mom..E); chemistry diffusion (flux_src species, plus the thermal-conduction +
     !! enthalpy energy flux only when not viscous, since the viscous pass already captured flux_src(E), which holds
-    !! viscous+diffusion). The coarse and fine sides share this one routine, so the c/f reflux always subtracts matching fluxes.
-    impure subroutine s_amr_capture_total(nb, id, fine, cf, acc)
+    !! viscous+diffusion). The coarse and fine sides share this one routine, so the c/f reflux always subtracts matching fluxes. The
+    !! per-call set 0 is pushed here and cleared after; the coarse sets are already on the device.
+    impure subroutine s_amr_capture_total(set, nb, id, fine, cf, acc)
 
-        integer, intent(in)  :: nb, id
+        integer, intent(in)  :: set, nb, id
         logical, intent(in)  :: fine, acc
         real(wp), intent(in) :: cf
+        integer              :: m1, m2
 
-        if (.not. any(bcap(11,1:nb) == 1)) return
-        $:GPU_UPDATE(device='[bcap(:, 1:nb)]')
-        call s_amr_capture_batch(nb, id, fine, .true., cf, acc, bmax1, bmax2, 1, sys_size)
-        if (viscous) call s_amr_capture_batch(nb, id, fine, .false., cf, .true., bmax1, bmax2, eqn_idx%mom%beg, eqn_idx%E)
-        if (chemistry .and. chem_params%diffusion) then
-            call s_amr_capture_batch(nb, id, fine, .false., cf, .true., bmax1, bmax2, eqn_idx%species%beg, eqn_idx%species%end)
-            if (.not. viscous) call s_amr_capture_batch(nb, id, fine, .false., cf, .true., bmax1, bmax2, eqn_idx%E, eqn_idx%E)
+        if (.not. any(bcap(11,1:nb,set) == 1)) return
+        if (set == 0) then
+            $:GPU_UPDATE(device='[bcap(:, 1:nb, 0)]')
         end if
-        bcap(11,:) = 0; bmax1 = 0; bmax2 = 0
+        m1 = bmax(1, set); m2 = bmax(2, set)
+        call s_amr_capture_batch(set, nb, id, fine, .true., cf, acc, m1, m2, 1, sys_size)
+        if (viscous) call s_amr_capture_batch(set, nb, id, fine, .false., cf, .true., m1, m2, eqn_idx%mom%beg, eqn_idx%E)
+        if (chemistry .and. chem_params%diffusion) then
+            call s_amr_capture_batch(set, nb, id, fine, .false., cf, .true., m1, m2, eqn_idx%species%beg, eqn_idx%species%end)
+            if (.not. viscous) call s_amr_capture_batch(set, nb, id, fine, .false., cf, .true., m1, m2, eqn_idx%E, eqn_idx%E)
+        end if
+        if (set == 0) then
+            bcap(11,:,0) = 0; bmax(:,0) = 0
+        end if
 
     end subroutine s_amr_capture_total
 
@@ -539,8 +552,8 @@ contains
     impure subroutine s_amr_capture_boundary_flux(id, stage)
 
         integer, intent(in) :: id, stage
-        integer             :: islot, save_cur, kc, ibm, ko(3), ext(3), sidx(3), tlo(3), thi(3), cflo(3), cfhi(3)
-        logical             :: own_lo(3), own_hi(3), accum
+        integer             :: save_cur, kc, ibm, ko(3), ext(3), cflo(3), cfhi(3)
+        logical             :: accum
         real(wp)            :: coef
 
         if (.not. amr) return
@@ -571,9 +584,9 @@ contains
             end if
             do ibm = 1, max(1, amr_bat_n)
                 call s_amr_bat_member(ibm, ko, ext)
-                call s_amr_capture_slot(amr_reg_cur, id, ko, ko + ext, ko, ko + ext, .true., .true.)
+                call s_amr_capture_slot(0, amr_reg_cur, id, ko, ko + ext, ko, ko + ext, .true., .true.)
             end do
-            call s_amr_capture_total(amr_reg_n, id, .true., coef, accum)
+            call s_amr_capture_total(0, amr_reg_n, id, .true., coef, accum)
             ! multi-level lock-step: this fine block is the coarse side (parent) of its level+1 children. Capture creg for each
             ! child from this block's fine flux at the child's footprint faces; the footprint is in this parent's fine frame, so
             ! it indexes flux_rsx_vf directly. creg holds the rk3_w-weighted step-integral flux for the once-per-step state reflux
@@ -589,38 +602,72 @@ contains
                 do kc = 1, amr_num_blocks
                     if (.not. f_amr_is_child(kc, amr_cur)) cycle
                     call s_amr_parent_foot(kc, amr_cur, cflo, cfhi)
-                    call s_amr_capture_slot(amr_reg_of(kc), id, cflo + ko, cfhi + ko, cflo + ko, cfhi + ko, .true., .true.)
+                    call s_amr_capture_slot(0, amr_reg_of(kc), id, cflo + ko, cfhi + ko, cflo + ko, cfhi + ko, .true., .true.)
                 end do
             end do
             if (amr_bat_n > 0) call s_amr_select_slot(save_cur)
             ! children's coarse side: the parent's step integral (dt-weighted under subcycling, applied with dt_reflux = 1)
-            call s_amr_capture_total(amr_reg_n, id, .false., rk3_w(stage)*merge(dt, 1._wp, amr_sub_on), stage > 1)
+            call s_amr_capture_total(0, amr_reg_n, id, .false., rk3_w(stage)*merge(dt, 1._wp, amr_sub_on), stage > 1)
         else
-            ! coarse branch: a face's capture runs on the rank owning the coarse cells just outside it (its flux_rsx_vf covers
-            ! that face; at a rank-interior face the same rank also holds the inside cells). This rank fills creg over its owned
-            ! transverse overlap [tlo:thi] in the block-relative frame. At np=1 the intersection is the block and both flags hold,
-            ! recovering single-rank behavior exactly. One coarse s_compute_rhs pass fills every active block's registers: revisit
-            ! each slot's region+intersection in turn. own_lo/own_hi is s_amr_reg_prepare's clause (c) verbatim, so
-            ! amr_reg_of(islot) is always mapped here.
-            do islot = 1, amr_num_blocks
-                ! a level>=2 block's coarse side is its parent (creg captured in the fine branch), not L0
-                if (amr_block_level(islot) >= 2) cycle
-                if (.not. f_amr_block_near(islot, amr_sidx, amr_ext)) cycle
-                call s_amr_select_slot(islot)
-                call s_amr_reflux_face_flags(sidx, ext, own_lo, own_hi, tlo, thi)
-                if (own_lo(id) .or. own_hi(id)) call s_amr_capture_slot(amr_reg_of(islot), id, amr_region_lo - sidx, &
-                    & amr_region_hi - sidx, tlo - sidx, thi - sidx, own_lo(id), own_hi(id))
-            end do
-            call s_amr_select_slot(save_cur)
+            ! coarse branch: one coarse s_compute_rhs pass fills every active block's registers from the direction's table
+            call s_amr_coarse_tables()
             ! subcycled: the coarse step's dt-weighted flux integral (state reflux after the fine substeps); else this stage's
             if (amr_sub_on) then
-                call s_amr_capture_total(amr_reg_n, id, .false., rk3_w(stage)*dt, stage > 1)
+                call s_amr_capture_total(id, amr_reg_n, id, .false., rk3_w(stage)*dt, stage > 1)
             else
-                call s_amr_capture_total(amr_reg_n, id, .false., 1._wp, .false.)
+                call s_amr_capture_total(id, amr_reg_n, id, .false., 1._wp, .false.)
             end if
         end if
 
     end subroutine s_amr_capture_boundary_flux
+
+    !> Build the coarse side's per-direction capture tables (bcap sets 1:3) and reflux apply tables (aint/areal) once per topology
+    !! change and push them to the device. Called only from the coarse capture and the apply, so the installed grid (dx/dy/dz) is
+    !! the coarse one. A face's capture runs on the rank owning the coarse cells just outside it (its flux_rsx_vf covers that face;
+    !! at a rank-interior face the same rank also holds the inside cells): this rank fills creg over its owned transverse overlap
+    !! [tlo:thi] in the block-relative frame. At np=1 the intersection is the block and both flags hold. own_lo/own_hi is
+    !! s_amr_reg_prepare's clause (c) verbatim, so amr_reg_of(k) is always mapped here.
+    impure subroutine s_amr_coarse_tables()
+
+        integer :: k, d, save_cur, sreg, ta, tb, sidx(3), ext(3), tlo(3), thi(3)
+        logical :: own_lo(3), own_hi(3)
+
+        if (amr_ctab_epoch_built == amr_mesh_epoch .and. amr_ctab_nblk_built == amr_num_blocks) return
+        save_cur = amr_cur
+        bcap(11,:,1:3) = 0; bmax(:,1:3) = 0; aint(11,:,:) = 0; a_n = 0; a_m = 0
+        do k = 1, amr_num_blocks
+            ! a level>=2 block's coarse side is its parent (creg captured in the fine branch), not L0
+            if (amr_block_level(k) >= 2) cycle
+            if (.not. f_amr_block_near(k, amr_sidx, amr_ext)) cycle
+            call s_amr_select_slot(k)
+            call s_amr_reflux_face_flags(sidx, ext, own_lo, own_hi, tlo, thi)
+            sreg = amr_reg_of(k)
+            do d = 1, num_dims
+                if (.not. (own_lo(d) .or. own_hi(d))) cycle
+                call s_amr_capture_slot(d, sreg, d, amr_region_lo - sidx, amr_region_hi - sidx, tlo - sidx, thi - sidx, &
+                                        & own_lo(d), own_hi(d))
+                if (amr_block_level(k) /= 1) cycle
+                ta = merge(2, 1, d == 1); tb = merge(2, 3, d == 3)
+                aint(:,sreg, d) = [amr_region_lo(d) - 1 - sidx(d), amr_region_hi(d) + 1 - sidx(d), amr_region_lo(ta) - sidx(ta), &
+                     & amr_region_lo(tb) - sidx(tb), tlo(ta) - amr_region_lo(ta), thi(ta) - amr_region_lo(ta), &
+                     & tlo(tb) - amr_region_lo(tb), thi(tb) - amr_region_lo(tb), merge(1, 0, own_lo(d)), merge(1, 0, own_hi(d)), 1]
+                areal(:,sreg, d) = 1._wp
+                #:for D, DX in [(1, 'dx'), (2, 'dy'), (3, 'dz')]
+                    if (d == ${D}$) then
+                        if (own_lo(d)) areal(1, sreg, d) = ${DX}$(aint(1, sreg, d))
+                        if (own_hi(d)) areal(2, sreg, d) = ${DX}$(aint(2, sreg, d))
+                    end if
+                #:endfor
+                a_n(d) = a_n(d) + 1
+                a_m(:,d) = max(a_m(:,d), aint(6:8:2,sreg, d) - aint(5:7:2,sreg, d))
+            end do
+        end do
+        call s_amr_select_slot(save_cur)
+        $:GPU_UPDATE(device='[bcap, aint, areal]')
+        amr_ctab_epoch_built = amr_mesh_epoch
+        amr_ctab_nblk_built = amr_num_blocks
+
+    end subroutine s_amr_coarse_tables
 
     !> Correct the coarse rhs in the first cell outside each block face so the coarse update sees the (child-averaged) fine flux at
     !! every c/f face. Signs follow rhs = (flux_left - flux_right)/dx: low face is the outside cell's right face => rhs += (F_coarse
@@ -654,97 +701,72 @@ contains
     ! Batched over the level-1 blocks, one kernel per face direction (mirror of the capture-side batching,
     ! s_amr_capture_batch), since per-launch overhead rather than arithmetic dominates a per-block form.
     ! Same-side corrections of distinct blocks are disjoint (same-level blocks never overlap), so with the low and high faces in
-    ! separate launches the batched kernel is race-free and order-fixed for any block spacing. Host precompute walks the slots with
-    ! select_slot + s_amr_reflux_face_flags; the a_* descriptors are pushed once per direction. Per direction d the transverse dims
+    ! separate launches the batched kernel is race-free and order-fixed for any block spacing. The per-direction tables come from
+    ! s_amr_coarse_tables, built once per topology change. Per direction d the transverse dims
     ! are (ta, tb) and the fine-face register holds rr children per active transverse dim.
-    #:for D, TA, TB, DX, IDX in [(1, 2, 3, 'dx', 'aint(1, k), i2, i3'), (2, 1, 3, 'dy', 'i2, aint(1, k), i3'), (3, 1, 2, 'dz', &
-                                  & 'i2, i3, aint(1, k)')]
+    #:for D, TA, TB, IDX in [(1, 2, 3, 'aint(1, k, 1), i2, i3'), (2, 1, 3, 'i2, aint(1, k, 2), i3'), (3, 1, 2, &
+                              & 'i2, i3, aint(1, k, 3)')]
         !> Reflux correction for the faces normal to direction ${D}$. Called only when amr_dim(${D}$).
         impure subroutine s_amr_apply_reflux_d${D}$(rhs_vf)
 
             type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf
-            integer                                                :: eq, c1, c2, c1w, c2w, k, save_cur, nact, gmax1, gmax2
-            integer                                                :: f10, f20, dd1, dd2, nch, rr, dd1_hi, dd2_hi, sreg
-            integer                                                :: bla, bha, blb, bhb, nr, side
-            integer                                                :: i2, i3, sidx(3), ext(3), tlo(3), thi(3)
-            logical                                                :: dta, dtb, own_lo(3), own_hi(3), tcl, wl
+            integer                                                :: eq, c1, c2, c1w, c2w, k, gmax1, gmax2
+            integer                                                :: f10, f20, dd1, dd2, nch, rr, dd1_hi, dd2_hi, side
+            integer                                                :: i2, i3
+            logical                                                :: dta, dtb, tcl, wl
             real(wp)                                               :: fb
 
+            call s_amr_coarse_tables()
+            if (a_n(${D}$) == 0) return
             rr = amr_ref_ratio
-            save_cur = amr_cur
             tcl = amr_tile_cluster
             dta = amr_dim(${TA}$); dtb = amr_dim(${TB}$)
             nch = rr**count([dta, dtb])
             dd1_hi = merge(rr - 1, 0, dta); dd2_hi = merge(rr - 1, 0, dtb)
-            nact = 0; gmax1 = 0; gmax2 = 0
-            aint(11,:) = 0
-            do k = 1, amr_num_blocks
-                if (amr_block_level(k) /= 1) cycle
-                if (.not. f_amr_block_near(k, amr_sidx, amr_ext)) cycle
-                call s_amr_select_slot(k)
-                call s_amr_reflux_face_flags(sidx, ext, own_lo, own_hi, tlo, thi)
-                if (.not. (own_lo(${D}$) .or. own_hi(${D}$))) cycle
-                bla = tlo(${TA}$) - amr_region_lo(${TA}$); bha = thi(${TA}$) - amr_region_lo(${TA}$)
-                blb = tlo(${TB}$) - amr_region_lo(${TB}$); bhb = thi(${TB}$) - amr_region_lo(${TB}$)
-                sreg = amr_reg_of(k)
-                aint(11, sreg) = 1; aint(9, sreg) = merge(1, 0, own_lo(${D}$)); aint(10, sreg) = merge(1, 0, own_hi(${D}$))
-                aint(1, sreg) = amr_region_lo(${D}$) - 1 - sidx(${D}$); aint(2, sreg) = amr_region_hi(${D}$) + 1 - sidx(${D}$)
-                aint(3, sreg) = amr_region_lo(${TA}$) - sidx(${TA}$); aint(4, sreg) = amr_region_lo(${TB}$) - sidx(${TB}$)
-                aint(5, sreg) = bla; aint(6, sreg) = bha; aint(7, sreg) = blb; aint(8, sreg) = bhb
-                areal(1, sreg) = 1._wp; areal(2, sreg) = 1._wp
-                if (own_lo(${D}$)) areal(1, sreg) = ${DX}$(aint(1, sreg))
-                if (own_hi(${D}$)) areal(2, sreg) = ${DX}$(aint(2, sreg))
-                nact = nact + 1
-                gmax1 = max(gmax1, bha - bla); gmax2 = max(gmax2, bhb - blb)
-            end do
-            call s_amr_select_slot(save_cur)
-            if (nact > 0) then
-                nr = amr_reg_n
-                $:GPU_UPDATE(device='[aint(:, 1:nr), areal(:, 1:nr)]')
-                ! low faces, then high faces: one block's high outside cell can be another's low outside cell (a one-cell gap),
-                ! so a single launch over both would race on it
-                do side = 0, 1
-                    $:GPU_PARALLEL_LOOP(collapse=4, private='[c1, c2, f10, f20, dd1, dd2, fb, i2, i3, wl]')
-                    do k = 1, amr_reg_n
-                        do c2w = 0, gmax2
-                            do c1w = 0, gmax1
-                                do eq = 1, sys_size
-                                    if (aint(11, k) == 0 .or. aint(9 + side, k) == 0) cycle
-                                    c1 = aint(5, k) + c1w; c2 = aint(7, k) + c2w
-                                    if (c1 > aint(6, k) .or. c2 > aint(8, k)) cycle
-                                    i2 = aint(3, k) + c1; i3 = aint(4, k) + c2
-                                    ! tile clustering: no correction where another level-1 block covers the outside cell
-                                    wl = .true.
-                                    if (tcl) wl = .not. l1cov(${IDX.replace('aint(1,', 'aint(1 + side,')}$)
-                                    if (.not. wl) cycle
-                                    f10 = 0; if (dta) f10 = rr*c1
-                                    f20 = 0; if (dtb) f20 = rr*c2
-                                    fb = 0._wp
-                                    do dd2 = 0, dd2_hi
-                                        do dd1 = 0, dd1_hi
-                                            if (side == 0) then
-                                                fb = fb + freg(${D}$)%lo(eq, f10 + dd1, f20 + dd2, k)
-                                            else
-                                                fb = fb + freg(${D}$)%hi(eq, f10 + dd1, f20 + dd2, k)
-                                            end if
-                                        end do
+            gmax1 = a_m(1, ${D}$); gmax2 = a_m(2, ${D}$)
+            ! low faces, then high faces: one block's high outside cell can be another's low outside cell (a one-cell gap),
+            ! so a single launch over both would race on it
+            do side = 0, 1
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[c1, c2, f10, f20, dd1, dd2, fb, i2, i3, wl]')
+                do k = 1, amr_reg_n
+                    do c2w = 0, gmax2
+                        do c1w = 0, gmax1
+                            do eq = 1, sys_size
+                                if (aint(11, k, ${D}$) == 0 .or. aint(9 + side, k, ${D}$) == 0) cycle
+                                c1 = aint(5, k, ${D}$) + c1w; c2 = aint(7, k, ${D}$) + c2w
+                                if (c1 > aint(6, k, ${D}$) .or. c2 > aint(8, k, ${D}$)) cycle
+                                i2 = aint(3, k, ${D}$) + c1; i3 = aint(4, k, ${D}$) + c2
+                                ! tile clustering: no correction where another level-1 block covers the outside cell
+                                wl = .true.
+                                if (tcl) wl = .not. l1cov(${IDX.replace('aint(1,', 'aint(1 + side,')}$)
+                                if (.not. wl) cycle
+                                f10 = 0; if (dta) f10 = rr*c1
+                                f20 = 0; if (dtb) f20 = rr*c2
+                                fb = 0._wp
+                                do dd2 = 0, dd2_hi
+                                    do dd1 = 0, dd1_hi
+                                        if (side == 0) then
+                                            fb = fb + freg(${D}$)%lo(eq, f10 + dd1, f20 + dd2, k)
+                                        else
+                                            fb = fb + freg(${D}$)%hi(eq, f10 + dd1, f20 + dd2, k)
+                                        end if
                                     end do
-                                    fb = fb/real(nch, wp)
-                                    if (side == 0) then
-                                        rhs_vf(eq)%sf(${IDX}$) = rhs_vf(eq)%sf(${IDX}$) + (creg(${D}$)%lo(eq, c1, c2, &
-                                               & k) - fb)/areal(1, k)
-                                    else
-                                        rhs_vf(eq)%sf(${IDX.replace('aint(1,', 'aint(2,')}$) &
-                                               & = rhs_vf(eq)%sf(${IDX.replace('aint(1,', 'aint(2,')}$) + (fb &
-                                               & - creg(${D}$)%hi(eq, c1, c2, k))/areal(2, k)
-                                    end if
                                 end do
+                                fb = fb/real(nch, wp)
+                                if (side == 0) then
+                                    rhs_vf(eq)%sf(${IDX}$) = rhs_vf(eq)%sf(${IDX}$) + (creg(${D}$)%lo(eq, c1, c2, &
+                                           & k) - fb)/areal(1, k, ${D}$)
+                                else
+                                    rhs_vf(eq)%sf(${IDX.replace('aint(1,', 'aint(2,')}$) &
+                                           & = rhs_vf(eq)%sf(${IDX.replace('aint(1,', 'aint(2,')}$) + (fb - creg(${D}$)%hi(eq, &
+                                           & c1, c2, k))/areal(2, k, ${D}$)
+                                end if
                             end do
                         end do
                     end do
-                    $:END_GPU_PARALLEL_LOOP()
                 end do
-            end if
+                $:END_GPU_PARALLEL_LOOP()
+            end do
 
         end subroutine s_amr_apply_reflux_d${D}$
     #:endfor
