@@ -107,6 +107,7 @@ contains
         real(wp)                                                   :: dt0, theta
         integer                                                    :: k, s, i
 
+        amr_cons_ghosts_valid = .false.  ! level 0's last stage may have set it; the fine RHS converts and exchanges as lock-step
         if (.not. amr_qlerp_ready) then
             @:ALLOCATE(amr_qlerp%vf(1:sys_size))
             do i = 1, sys_size
