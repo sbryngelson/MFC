@@ -380,13 +380,14 @@ contains
 
     end subroutine s_amr_pack_gwin_pairs
 
-    #:if MFC_COMPILER == "LLVMFlang"
-        !> Diagnostic (rank_time_wrt): free device memory on this rank at a named point of a regrid.
-        impure subroutine s_amr_report_mem(tag)
+    !> Diagnostic (rank_time_wrt): free device memory on this rank at a named point of a regrid (AMD GPU builds only).
+    impure subroutine s_amr_report_mem(tag)
 
-            use iso_c_binding, only: c_int, c_size_t
-            character(len=*), intent(in) :: tag
+        use iso_c_binding, only: c_int, c_size_t
+        character(len=*), intent(in) :: tag
 
+        #:if MFC_COMPILER == "LLVMFlang"
+#if defined(MFC_OpenMP)
             interface
                 function hipMemGetInfo(free_b, total_b) bind(C, name='hipMemGetInfo') result(ierr)
 
@@ -403,17 +404,11 @@ contains
             ie = hipMemGetInfo(fb, tb)
             write (0, '(A,I0,A,A,A,F8.2,A,F8.2)') ' [amr-mem] rank ', proc_rank, ' ', tag, ' free GiB ', real(fb, wp)/2._wp**30, &
                    & ' of ', real(tb, wp)/2._wp**30
+#endif
+        #:endif
+        if (len(tag) < 0) print *, tag  ! keeps tag referenced where device memory is not queried
 
-        end subroutine s_amr_report_mem
-    #:else
-        impure subroutine s_amr_report_mem(tag)
-
-            character(len=*), intent(in) :: tag
-
-            if (len(tag) < 0) print *, tag  ! device memory is only queried on the AMD build
-
-        end subroutine s_amr_report_mem
-    #:endif
+    end subroutine s_amr_report_mem
 
     !> Regrid: tag by relative density gradient, cluster (Berger-Rigoutsos + min-separation merge) into separated boxes, pad/clamp/
     !! size-cap each, rebuild every active slot. Each new slot prolongs from coarse then overwrites its overlap with whichever old
