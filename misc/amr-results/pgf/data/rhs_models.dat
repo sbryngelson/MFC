@@ -1,0 +1,6 @@
+i;label;ns
+0;HIP (mini-app);1.607
+1;C + OpenMP, fused;1.899
+2;Fortran + OpenMP, fused + unroll;1.798
+3;Fortran + OpenMP, fused;2.435
+4;Fortran + OpenMP, MFC-like split;1.998

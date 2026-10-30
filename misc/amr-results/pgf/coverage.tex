@@ -1,0 +1,14 @@
+\documentclass[border=4pt]{standalone}
+\input{style}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[width=8.5cm, height=6cm, ybar, bar width=13pt, ymin=0, grid=none, ymajorgrids,
+  title={Refined share of the domain}, ylabel={\% of domain refined}, xtick={0,1}, xticklabels={Lock-step,Subcycled},
+  xmin=-0.6, xmax=1.6, legend pos=north west, nodes near coords, nodes near coords style={font=\scriptsize,
+  /pgf/number format/fixed, /pgf/number format/precision=1}, enlarge y limits={upper, value=0.15}]
+  \addplot[fill=mfc!45, draw=none] table[x=i, y=MFC] {data/coverage.dat}; \addlegendentry{MFC, default}
+  \addplot[fill=mfc, draw=none] table[x=i, y=tileclustering] {data/coverage.dat}; \addlegendentry{MFC, tile clustering}
+  \addplot[fill=amrex, draw=none] table[x=i, y=AMReXCNS] {data/coverage.dat}; \addlegendentry{AMReX CNS / PeleC}
+\end{axis}
+\end{tikzpicture}
+\end{document}

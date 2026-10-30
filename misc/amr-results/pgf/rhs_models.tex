@@ -1,0 +1,14 @@
+\documentclass[border=4pt]{standalone}
+\input{style}
+\pgfplotstableread[col sep=semicolon]{data/rhs_models.dat}\rhstab
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[width=8cm, height=5.6cm, xbar, bar width=10pt, xmin=0, grid=none, xmajorgrids, y dir=reverse,
+  title={Same numerics, different programming model}, xlabel={ns per cell per RHS stage (one MI250X GCD)},
+  ytick=data, yticklabels from table={\rhstab}{label}, nodes near coords, nodes near coords style={font=\scriptsize,
+  /pgf/number format/fixed, /pgf/number format/precision=2}, axis lines*=left, enlarge x limits={upper, value=0.15},
+  enlarge y limits=0.15]
+  \addplot[fill=mfc, draw=none] table[x=ns, y=i] {\rhstab};
+\end{axis}
+\end{tikzpicture}
+\end{document}

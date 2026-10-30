@@ -64,3 +64,30 @@ conv = json.load(open(B + "amr-report/progress/data.json"))["conv"]["series"]
 for i, s in enumerate(conv):
     write(f"conv{i}.dat", list(zip(s["x"], s["y"])), ["dt", "err"])
 print("wrote", sorted(os.listdir(OUT)))
+
+# Coverage (refined share of the domain) from the progress data, mini-app omitted
+cov = json.load(open(B + "amr-report/progress/data.json"))["cov"]
+pick = [s for s in cov["series"] if not s["name"].startswith("Mini-app")]
+write("coverage.dat", [[i] + [s["y"][i] for s in pick] for i in range(len(cov["groups"]))],
+      ["i"] + [s["name"].split(",")[-1].strip().replace(" ", "").replace("(new)", "") or "mfc" for s in pick])
+
+# Interface error relative to the uniform fine grid (L1 in the coarse-fine band)
+rows = {}
+for ln in open(B + "mfc-regrid-dbg/studyE/table.txt"):
+    f = [x.strip() for x in ln.split("|")]
+    if len(f) == 7 and f[0].isdigit():
+        rows.setdefault(f[1], {})[int(f[0])] = float(f[5])
+ERR = [("lockminmod", "lock-step, minmod"), ("lockquartic", "lock-step, quartic"), ("subminmod", "subcycled, minmod"),
+       ("subquartic", "subcycled, quartic"), ("coarse", "uniform coarse")]
+write("interface_error.dat", [[n] + [rows[r][n] for _, r in ERR] for n in (64, 128)], ["N"] + [k for k, _ in ERR])
+
+# RHS cost per cell: same numerics, different programming model / code structure
+ohs = {}
+for r in csv.DictReader(open(B + "mfc-amr-workdir/misc/amr-results/data/omp_vs_hip.csv")):
+    if r["group"] == "Total RHS (un-profiled wall)":
+        ohs[r["variant"]] = float(r["ns_per_cell"])
+RHS = [("HIP (mini-app)", "a_hip_afar"), ("C + OpenMP, fused", "d_c_omp_fused"),
+       ("Fortran + OpenMP, fused + unroll", "bx_unroll"), ("Fortran + OpenMP, fused", "b_omp_fused"),
+       ("Fortran + OpenMP, MFC-like split", "c_omp_split")]
+with open(os.path.join(OUT, "rhs_models.dat"), "w") as f:
+    f.write("i;label;ns\n" + "".join(f"{i};{lab};{ohs[k]:.4g}\n" for i, (lab, k) in enumerate(RHS)))

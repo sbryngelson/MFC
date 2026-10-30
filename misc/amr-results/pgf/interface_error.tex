@@ -1,0 +1,17 @@
+\documentclass[border=4pt]{standalone}
+\input{style}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[width=8.5cm, height=6.2cm, ybar, bar width=9pt, ymode=log, log origin=infty, ymin=0.3, ymax=3e5,
+  grid=none, ymajorgrids, title={Coarse-fine interface error}, ylabel={L1 error in the interface band / uniform fine},
+  xtick={0,1}, xticklabels={64\textsuperscript{2} base grid,128\textsuperscript{2} base grid}, xmin=-0.6, xmax=1.6,
+  legend style={at={(1.03,1)}, anchor=north west}]
+  \addplot[fill=pelec, draw=none] table[x expr=\coordindex, y=lockminmod] {data/interface_error.dat}; \addlegendentry{lock-step, minmod}
+  \addplot[fill=pelec!50, draw=none] table[x expr=\coordindex, y=subminmod] {data/interface_error.dat}; \addlegendentry{subcycled, minmod}
+  \addplot[fill=mfc, draw=none] table[x expr=\coordindex, y=lockquartic] {data/interface_error.dat}; \addlegendentry{lock-step, quartic}
+  \addplot[fill=mfc!50, draw=none] table[x expr=\coordindex, y=subquartic] {data/interface_error.dat}; \addlegendentry{subcycled, quartic}
+  \addplot[fill=amrex, draw=none] table[x expr=\coordindex, y=coarse] {data/interface_error.dat}; \addlegendentry{uniform coarse}
+  \draw[black, densely dashed] (axis cs:-0.6,1) -- (axis cs:1.6,1) node[pos=0.02, above, anchor=south west, font=\scriptsize] {uniform fine grid};
+\end{axis}
+\end{tikzpicture}
+\end{document}
