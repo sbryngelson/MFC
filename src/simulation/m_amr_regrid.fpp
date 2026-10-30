@@ -681,7 +681,7 @@ contains
                     ok = .false.; exit
                 end if
                 ! a snapped box can land touching, or one cell from, a box that did not snap
-                if (ib .and. .not. f_amr_boxes_compatible(snapped(k)%lo, snapped(k)%hi, snapped(kk)%lo, snapped(kk)%hi)) then
+                if (.not. f_amr_boxes_compatible(snapped(k)%lo, snapped(k)%hi, snapped(kk)%lo, snapped(kk)%hi)) then
                     ok = .false.; exit
                 end if
             end do
