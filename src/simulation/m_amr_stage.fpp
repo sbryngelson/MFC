@@ -91,10 +91,11 @@ contains
     end subroutine s_amr_stage_fine
 
     !> Subcycled fine advance (amr_subcycle): after level 0's step (q_old = its step-start state, q_new = its end state, coarse
-    !! registers holding its dt-weighted face-flux integral) level 1 takes two substeps of dt/2. Each stage fills the fine ghosts
-    !! from the coarse state interpolated linearly in time to the stage time and advances the level-1 blocks through the batched
-    !! path with dt/2, accumulating the fine registers over both substeps; after each level-1 substep level 2 (if any) takes its two
-    !! substeps (s_amr_subcycle_l2). Then the registers correct the coarse state (Berger-Colella) and the caller's fold restricts.
+    !! registers holding its dt-weighted face-flux integral) level 1 takes two substeps of dt/2. The level-1 patch rings of q_old
+    !! and q_new are gathered once (s_amr_pc_gather); each stage blends them linearly in time to the stage time, fills the fine
+    !! ghosts and advances the level-1 blocks through the batched path with dt/2, accumulating the fine registers over both
+    !! substeps; after each level-1 substep level 2 (if any) takes its two substeps (s_amr_subcycle_l2). Then the registers correct
+    !! the coarse state (Berger-Colella) and the caller's fold restricts.
     impure subroutine s_amr_subcycle_fine(q_new, q_old, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
 
         type(scalar_field), dimension(sys_size), intent(inout)     :: q_new, q_old
@@ -104,23 +105,12 @@ contains
         real(stp), dimension(:,:,:,:,:), intent(inout)             :: pb_in, mv_in
         real(wp), dimension(:,:,:,:,:), intent(inout)              :: rhs_pb, rhs_mv
         integer, intent(in)                                        :: t_step
-        real(wp)                                                   :: dt0, theta
-        integer                                                    :: k, s, i
+        real(wp)                                                   :: dt0
+        integer                                                    :: k, s
 
         amr_cons_ghosts_valid = .false.  ! level 0's last stage may have set it; the fine RHS converts and exchanges as lock-step
-        if (.not. amr_qlerp_ready) then
-            @:ALLOCATE(amr_qlerp%vf(1:sys_size))
-            do i = 1, sys_size
-                @:ALLOCATE(amr_qlerp%vf(i)%sf(idwbuff(1)%beg:idwbuff(1)%end, idwbuff(2)%beg:idwbuff(2)%end, &
-                           & idwbuff(3)%beg:idwbuff(3)%end))
-            end do
-            @:ACC_SETUP_VFs(amr_qlerp)
-            amr_qlerp_ready = .true.
-        end if
-        call s_phase_tic(PH_HALO)
-        call s_amr_exchange_coarse_cons_halo(q_old)
-        call s_amr_exchange_coarse_cons_halo(q_new)
-        call s_phase_toc(PH_HALO)
+        call s_amr_pc_gather(q_old, 0)
+        call s_amr_pc_gather(q_new, 1)
         dt0 = dt
         dt = 0.5_wp*dt0
         $:GPU_UPDATE(device='[dt]')
@@ -128,13 +118,11 @@ contains
             amr_sub_first = k == 0
             amr_adv_level = 1
             do s = 1, 3
-                theta = 0.5_wp*(real(k, wp) + c_stage(s))
-                call s_amr_lerp_coarse(q_old, q_new, theta)
-                call s_amr_fill_levels(amr_qlerp%vf, 1, 1)
+                call s_amr_fill_levels(q_new, 1, 1, 0.5_wp*(real(k, wp) + c_stage(s)))
                 call s_amr_fine_stage_advance_batched(s, coefs(s,:), bc_type, q_T_sf, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
             end do
-            if (amr_max_level >= 2) call s_amr_subcycle_l2(q_new, q_old, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, &
-                & t_step, 0.5_wp*real(k + 1, wp), dt0)
+            if (amr_max_level >= 2) call s_amr_subcycle_l2(q_new, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, t_step, &
+                & 0.5_wp*real(k + 1, wp), dt0)
         end do
         amr_adv_level = 0
         dt = dt0
@@ -150,9 +138,9 @@ contains
     !> Level 2's two substeps of dt0/4 after a level-1 substep ending at coarse time fraction th_end. The level-1 ghosts are first
     !! refilled at th_end (the level-2 parent patches can reach into them); each level-2 stage then fills from its parents blended
     !! between their substep-start backup and end state (amr_par_theta), and finally level 2 is synced into level 1.
-    impure subroutine s_amr_subcycle_l2(q_new, q_old, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, t_step, th_end, dt0)
+    impure subroutine s_amr_subcycle_l2(q_new, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, t_step, th_end, dt0)
 
-        type(scalar_field), dimension(sys_size), intent(inout)     :: q_new, q_old
+        type(scalar_field), dimension(sys_size), intent(inout)     :: q_new
         real(wp), intent(in)                                       :: coefs(:,:)
         type(scalar_field), intent(inout)                          :: q_T_sf
         type(integer_field), dimension(1:num_dims,1:2), intent(in) :: bc_type
@@ -162,8 +150,7 @@ contains
         real(wp), intent(in)                                       :: th_end, dt0
         integer                                                    :: j, s
 
-        call s_amr_lerp_coarse(q_old, q_new, th_end)
-        call s_amr_fill_levels(amr_qlerp%vf, 1, 1)
+        call s_amr_fill_levels(q_new, 1, 1, th_end)
         dt = 0.25_wp*dt0
         $:GPU_UPDATE(device='[dt]')
         amr_adv_level = 2
@@ -171,7 +158,7 @@ contains
             amr_sub_first = j == 0
             do s = 1, 3
                 amr_par_theta = 0.5_wp*(real(j, wp) + c_stage(s))
-                call s_amr_fill_levels(amr_qlerp%vf, 2, 2)
+                call s_amr_fill_levels(q_new, 2, 2)
                 call s_amr_fine_stage_advance_batched(s, coefs(s,:), bc_type, q_T_sf, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
             end do
         end do
@@ -185,16 +172,24 @@ contains
 
     end subroutine s_amr_subcycle_l2
 
-    !> Ghost fill of levels lev_lo..lev_hi: the level-1 wave from the coarse q_cons (lev_lo = 1), then the parent waves; the
-    !! fine-fine seam reads stage-entry interiors only, so it is posted before the fills and drained after.
-    impure subroutine s_amr_fill_levels(q_cons, lev_lo, lev_hi)
+    !> Ghost fill of levels lev_lo..lev_hi: the level-1 wave from the coarse q_cons (lev_lo = 1), or with theta from the patch cache
+    !! at that coarse time fraction (subcycling), then the parent waves; the fine-fine seam reads stage-entry interiors only, so it
+    !! is posted before the fills and drained after.
+    impure subroutine s_amr_fill_levels(q_cons, lev_lo, lev_hi, theta)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons
         integer, intent(in)                                    :: lev_lo, lev_hi
+        real(wp), intent(in), optional                         :: theta
         integer                                                :: ilev
 
         call s_amr_fine_fine_post()
-        if (lev_lo == 1) call s_amr_stage_fill_wave(q_cons)
+        if (lev_lo == 1) then
+            if (present(theta)) then
+                call s_amr_pc_fill(theta)
+            else
+                call s_amr_stage_fill_wave(q_cons)
+            end if
+        end if
         do ilev = max(lev_lo, 2), lev_hi
             call s_amr_parent_fill_wave(ilev)
         end do
@@ -204,28 +199,81 @@ contains
 
     end subroutine s_amr_fill_levels
 
-    !> amr_qlerp = (1 - theta) q_old + theta q_new over the whole buffered coarse domain.
-    impure subroutine s_amr_lerp_coarse(q_old, q_new, theta)
+    !> Gather every owned level-1 block's coarse patch ring from q (the ring-clipped fill wave into the pooled amr_cg) and keep the
+    !! pool as time level t (0: step start, 1: step end), once per coarse step; the stages then blend in time with no wave or halo.
+    impure subroutine s_amr_pc_gather(q, t)
 
-        type(scalar_field), dimension(sys_size), intent(in) :: q_old, q_new
-        real(wp), intent(in)                                :: theta
-        integer                                             :: i, j, k, l
+        type(scalar_field), dimension(sys_size), intent(inout) :: q
+        integer, intent(in)                                    :: t
+
+        call s_amr_l1_fill_exchange(q, .false.)
+        call s_amr_l1_pool_gather(q)
+        call s_amr_pc_copy(t, 0._wp)
+
+    end subroutine s_amr_pc_gather
+
+    !> Level-1 ghost fill at coarse time fraction theta: blend the cached time levels into the pool, then the batched fill.
+    impure subroutine s_amr_pc_fill(theta)
+
+        real(wp), intent(in) :: theta
 
         call s_phase_tic(PH_LERP)
-        $:GPU_PARALLEL_LOOP(collapse=4)
+        call s_amr_pc_copy(-1, theta)
+        call s_phase_toc(PH_LERP)
+        call s_amr_l1_pool_fill()
+
+    end subroutine s_amr_pc_fill
+
+    !> The used pool (amr_cg_nuse patches) against the cache amr_pc: t >= 0 stores it as time level t (level 0 sizes the cache,
+    !! growing by doubling); t < 0 writes the pool = (1 - theta) * level 0 + theta * level 1.
+    impure subroutine s_amr_pc_copy(t, theta)
+
+        integer, intent(in)  :: t
+        real(wp), intent(in) :: theta
+        integer              :: i, g1, g2, g3, n1, n2, n3, nl, o, c
+
+        n1 = amr_cpat_hi(1) + 1; n2 = amr_cpat_hi(2) + 1; n3 = amr_cg_nuse*(amr_cpat_hi(3) + 1)
+        nl = sys_size*n1*n2*n3
+        if (t == 0) then
+            if (allocated(amr_pc)) then
+                if (size(amr_pc) < 2*nl) then
+                    @:DEALLOCATE(amr_pc)
+                end if
+            end if
+            if (.not. allocated(amr_pc)) then
+                @:ALLOCATE(amr_pc(1:max(4*nl, 1)))
+            end if
+        end if
+        if (t >= 0) then
+            o = t*nl
+            $:GPU_PARALLEL_LOOP(collapse=4, private='[c]')
+            do i = 1, sys_size
+                do g3 = 0, n3 - 1
+                    do g2 = 0, n2 - 1
+                        do g1 = 0, n1 - 1
+                            c = 1 + g1 + n1*(g2 + n2*(g3 + n3*(i - 1)))
+                            amr_pc(o + c) = amr_cg(i)%sf(g1, g2, g3)
+                        end do
+                    end do
+                end do
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+            return
+        end if
+        $:GPU_PARALLEL_LOOP(collapse=4, private='[c]')
         do i = 1, sys_size
-            do l = idwbuff(3)%beg, idwbuff(3)%end
-                do k = idwbuff(2)%beg, idwbuff(2)%end
-                    do j = idwbuff(1)%beg, idwbuff(1)%end
-                        amr_qlerp%vf(i)%sf(j, k, l) = (1._wp - theta)*q_old(i)%sf(j, k, l) + theta*q_new(i)%sf(j, k, l)
+            do g3 = 0, n3 - 1
+                do g2 = 0, n2 - 1
+                    do g1 = 0, n1 - 1
+                        c = 1 + g1 + n1*(g2 + n2*(g3 + n3*(i - 1)))
+                        amr_cg(i)%sf(g1, g2, g3) = (1._wp - theta)*amr_pc(c) + theta*amr_pc(nl + c)
                     end do
                 end do
             end do
         end do
         $:END_GPU_PARALLEL_LOOP()
-        call s_phase_toc(PH_LERP)
 
-    end subroutine s_amr_lerp_coarse
+    end subroutine s_amr_pc_copy
 
     impure subroutine s_amr_zero_rhs(rhs_vf)
 

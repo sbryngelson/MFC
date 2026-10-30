@@ -345,7 +345,7 @@ contains
             end if
         #:endfor
         #:for A in ['amr_my_blk', 'amr_l1r_blk', 'amr_l1p_blk', 'amr_fch_blk', 'amr_own_blk', 'amr_parent_blk', &
-            'amr_child_ptr', 'amr_child_idx']
+            'amr_child_ptr', 'amr_child_idx', 'amr_cg_pz']
             if (allocated(${A}$)) deallocate (${A}$)
         #:endfor
         do i = 1, sys_size
@@ -353,11 +353,8 @@ contains
         end do
         @:DEALLOCATE(amr_cg)
         @:DEALLOCATE(amr_slab_tab)
-        if (amr_qlerp_ready) then
-            do i = 1, sys_size
-                @:DEALLOCATE(amr_qlerp%vf(i)%sf)
-            end do
-            @:DEALLOCATE(amr_qlerp%vf)
+        if (allocated(amr_pc)) then
+            @:DEALLOCATE(amr_pc)
         end if
         call s_amr_free_swap_buffers()
 

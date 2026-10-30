@@ -272,15 +272,17 @@ module m_amr_state
     integer, allocatable            :: amr_slab_tab(:,:)
     integer                         :: amr_slab_n = 0  !< rows queued in amr_slab_tab (s_amr_slab_add)
     integer                         :: amr_cg_np = 1  !< patches amr_cg holds, stacked along dim 3 (s_amr_cg_reserve)
+    integer                         :: amr_cg_nuse = 0  !< patches the level-1 pool gather filled (s_amr_l1_pool_gather)
+    integer, allocatable            :: amr_cg_pz(:)  !< dim-3 offset of each owned level-1 box's patch in the pool
     type(scalar_field), allocatable :: amr_cg(:)
     integer                         :: amr_cpat_mar = 0  !< coarse-cell stencil reach (f_amr_cpat_mar)
     integer                         :: amr_cpat_hi(3) = 0  !< amr_cg upper local bounds per dim (0 in collapsed dims)
     integer                         :: amr_cpat_off(3) = 0  !< global coarse index of amr_cg local cell 0 (region_lo - amr_cpat_mar)
     integer                         :: amr_wcur = 1  !< consume cursor into the open fill wave's receive transfers (box-major)
 
-    !> Subcycling: the coarse state interpolated in time for the fine ghost fills (allocated on first use).
-    type(vector_field) :: amr_qlerp
-    logical            :: amr_qlerp_ready = .false.
+    !> Subcycling patch cache: the pooled level-1 patches (amr_cg, amr_cg_nuse patches) at the step start (time level 0) then the
+    !! step end (1), each flat with g1 fastest, then g2, g3, variable.
+    real(stp), allocatable :: amr_pc(:)
 
     !> Level-0 tiling (l0_ntile > 0, amr off): tile the base grid into l0_ntile**num_dims base-resolution (refinement-ratio-1)
     !! blocks and advance each through the same swap-based per-block solver the AMR fine overlay uses, with tile-tile same-level

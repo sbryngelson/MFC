@@ -34,7 +34,7 @@ module m_amr_exchange
         & s_amr_fine_fine_halo, s_amr_fine_fine_post, s_amr_fill_wave_done, s_amr_l1_fill_exchange, s_amr_l1_fill_consume, &
         & s_amr_parent_fill_exchange, s_amr_parent_fill_consume, s_amr_parent_fill_wave, s_amr_stage_fill_wave, &
         & s_l0_pack_unpack_block_sf, s_l0_pack_unpack_block_st, s_amr_slab_add, s_amr_unpack_rows, s_amr_restrict_rows_sf, &
-        & s_amr_restrict_rows_wire
+        & s_amr_restrict_rows_wire, s_amr_l1_pool_gather, s_amr_l1_pool_fill
 
 contains
 
@@ -1510,18 +1510,29 @@ contains
     impure subroutine s_amr_l1_fill_batched(q_cons_coarse)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_coarse
-        integer, allocatable                                :: pz(:)
-        integer                                             :: k, kk, np, isl, msl, t
+
+        call s_amr_l1_pool_gather(q_cons_coarse)
+        call s_amr_l1_pool_fill()
+
+    end subroutine s_amr_l1_fill_batched
+
+    !> Consume the open level-1 fill wave into the pooled amr_cg: owned box k's patch at dim-3 offset amr_cg_pz(k), amr_cg_nuse
+    !! patches in all.
+    impure subroutine s_amr_l1_pool_gather(q_cons_coarse)
+
+        type(scalar_field), dimension(sys_size), intent(in) :: q_cons_coarse
+        integer                                             :: k, kk, isl, msl, t
         integer                                             :: plo(3), phi(3), crlo(3), crhi(3), bl(3), bh(3), tb(3, 6), te(3, 6)
 
         call s_phase_tic(PH_GATHER)
-        allocate (pz(amr_max_blocks)); np = 0
+        if (.not. allocated(amr_cg_pz)) allocate (amr_cg_pz(amr_max_blocks))
+        amr_cg_nuse = 0
         do kk = 1, amr_n_my
             k = amr_my_blk(kk)
             if (amr_block_level(k) /= 1) cycle
-            pz(k) = np*(amr_cpat_hi(3) + 1); np = np + 1
+            amr_cg_pz(k) = amr_cg_nuse*(amr_cpat_hi(3) + 1); amr_cg_nuse = amr_cg_nuse + 1
         end do
-        call s_amr_cg_reserve(np)
+        call s_amr_cg_reserve(amr_cg_nuse)
         call s_amr_rank_coarse_range(proc_rank, crlo, crhi)
         do kk = 1, amr_n_my
             k = amr_my_blk(kk)
@@ -1531,7 +1542,7 @@ contains
             if (any(bl > bh)) cycle
             call s_amr_l1_slice_slabs(k, plo, phi, bl, bh, .false., msl, tb, te)
             do isl = 1, msl
-                call s_amr_slab_add(tb(:,isl), te(:,isl), 0, plo, plo - [0, 0, pz(k)])
+                call s_amr_slab_add(tb(:,isl), te(:,isl), 0, plo, plo - [0, 0, amr_cg_pz(k)])
             end do
         end do
         call s_amr_gather_own_rows(q_cons_coarse, amr_cg, amr_sidx(1), amr_sidx(2), amr_sidx(3))
@@ -1540,12 +1551,20 @@ contains
                 k = amr_wrecv%blk(t)
                 call s_amr_wave_hdr_check(amr_wrecv, amr_fw_rq, t, XA_F1W_SND)
                 call s_amr_patch_box(k, plo, phi)
-                call s_amr_slab_add(amr_wrecv%bl(:,t), amr_wrecv%bh(:,t), amr_wrecv%off(t) + XA_NH, plo, plo - [0, 0, pz(k)])
+                call s_amr_slab_add(amr_wrecv%bl(:,t), amr_wrecv%bh(:,t), amr_wrecv%off(t) + XA_NH, plo, plo - [0, 0, amr_cg_pz(k)])
             end do
             call s_amr_unpack_rows(amr_fw_rq(1:amr_wrecv%words), amr_cg)
         end if
         amr_wcur = amr_wrecv%nx + 1
         call s_phase_toc(PH_GATHER)
+
+    end subroutine s_amr_l1_pool_gather
+
+    !> Ghost-fill every owned level-1 box from its pooled patch (s_amr_l1_pool_gather's layout) in one kernel.
+    impure subroutine s_amr_l1_pool_fill()
+
+        integer :: k, kk, plo(3), phi(3)
+
         call s_phase_tic(PH_GFILL)
         do kk = 1, amr_n_my
             k = amr_my_blk(kk)
@@ -1553,12 +1572,12 @@ contains
             call s_amr_select_slot(k)
             call s_amr_patch_box(k, plo, phi)
             amr_cpat_off = plo
-            call s_amr_queue_ghost_slabs(amr_loc_of(k), pz(k))
+            call s_amr_queue_ghost_slabs(amr_loc_of(k), amr_cg_pz(k))
         end do
         call s_amr_fill_ghost_rows(amr_cg)
         call s_phase_toc(PH_GFILL)
 
-    end subroutine s_amr_l1_fill_batched
+    end subroutine s_amr_l1_pool_fill
 
     !> Padded parent-patch extents of a child with parent footprint [plo, phi] (amr_cpat_mar coarse cells each side).
     pure subroutine s_amr_patch_width(plo, phi, w1, w2, w3)
