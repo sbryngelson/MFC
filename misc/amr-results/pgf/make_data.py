@@ -4,7 +4,7 @@ import csv, json, math, os
 
 B = "/lustre/orion/cfd154/scratch/sbryngelson/"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-NP = [8, 64, 128, 512]
+NP = [8, 64, 128, 512, 1024]
 CODES = {"mfc1": "MFC v1", "mfc2": "MFC v2", "amrex": "AMReX CNS", "pelec": "PeleC"}
 os.makedirs(OUT, exist_ok=True)
 

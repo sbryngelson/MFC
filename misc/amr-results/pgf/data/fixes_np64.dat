@@ -2,3 +2,5 @@ i,label,s
 0,Before fixes,1.953
 1,All fixes but placement,1.052
 2,+ owner placement,0.7974
+3,+ subcycling driver,0.7523
+4,+ swap packing,0.6988
