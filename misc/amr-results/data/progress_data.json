@@ -291,13 +291,13 @@
    ]
   },
   {
-   "title": "MFC before vs after (integrated build, 8-128 GPUs in)",
+   "title": "Newest: subcycling driver + swap packing",
    "tag": "new",
    "items": [
-    "<b>Subcycled s/step</b> 1.574/1.953/2.020 -> <b>0.765/0.797/0.833</b> at 8/64/128 GPUs (2.0-2.4x faster); lock-step 0.478/0.455/0.464 -> 0.251/0.261/0.263. np128 subcycled now runs all 240 steps (v1 ran out of memory at the last regrid).",
-    "<b>Weak scaling 8->128 GPUs</b>: MFC subcycled +9% vs AMReX +31%, PeleC +39%; lock-step MFC +5% vs AMReX +33%. MFC now matches PeleC per step at 64-128 GPUs; AMReX still ~1.35x faster subcycled.",
-    "<b>AMR-only s/step</b> now below AMReX in both modes and below PeleC at 64-128 GPUs (subcycled 0.217/0.233/0.260). Owner placement accounts for 24% of the np64 subcycled step (1.052 off vs 0.797 on).",
-    "Pending: 512-GPU reps (queued for this afternoon/evening), final validation round on the integrated branch, then push."
+    "<b>Pushed</b> to spike/amr-integrate (7273d602); bitwise identical to the previous build, AMR tests pass.",
+    "<b>Subcycled s/step</b> 0.762 -> 0.674 (np8), 0.787 -> 0.699 (np64), about 12% faster; AMR-only time down ~40% (0.231 -> 0.141 s at np64). Lock-step 0.251 -> 0.231 (np8).",
+    "Running this build at 128/512/1024 GPUs so the slide shows the best MFC at every rung; 1024-GPU ladder for all codes starts ~03:12.",
+    "<b>Tile clustering</b>: not ready. Subcycled runs exhaust GPU memory at the step-140 regrid (store slots are sized for full 64^3 blocks); lock-step is 2-2.7x slower with no coverage gain. Fix = per-block slot sizing, post-meeting."
    ]
   }
  ],
@@ -326,7 +326,7 @@
   },
   {
    "path": "/lustre/orion/cfd154/scratch/sbryngelson/amr-report/pgf/fig_fixes.png",
-   "caption": "What each fix bought, MFC subcycled at 64 GPUs; next fixes (subcycling driver, swap packing, tile clustering) are being measured."
+   "caption": "What each fix bought, MFC subcycled at 64 GPUs: 1.95 -> 0.70 s/step (2.8x). With the subcycling driver and swap packing, MFC is 13% faster than PeleC here. Tile clustering is not shown: it currently runs out of memory with subcycling (store slots sized for full blocks; post-meeting fix)."
   },
   {
    "path": "/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple/scaling.png",

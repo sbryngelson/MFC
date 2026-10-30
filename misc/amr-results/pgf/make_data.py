@@ -13,6 +13,8 @@ for path in ("mfc-simple-v2/results.csv", "mfc-simple-v3/results.csv"):
     if not os.path.exists(B + path):
         continue
     for r in csv.DictReader(open(B + path)):
+        if "v3" in path and not r["code"].startswith("MFC v3"):
+            continue  # v3 adds MFC variants only; the main ladder stays authoritative
         try:
             tab[(r["code"], r["mode"], int(r["np"]))] = (float(r["s_per_step"]), float(r["amr_only_s_per_step"]),
                                                        float(r["tts_s"]))

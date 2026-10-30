@@ -1,0 +1,25 @@
+code,mode,np,window,reps,s_per_step,s_per_step_sd,tts_s,tts_sd,amr_only_s_per_step,amr_only_tts_s,rhs_imb,coarse_imb,cov_pct,t_phys,source
+MFC v2,lock,8,40->240,2,0.251,0.0009725,55.65,0.1785,0.06223,13.25,1.031,1.009,19.51,0.048,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v2/np8_lock_s{40,240}_r{1,2}"
+MFC v2,lock,64,40->240,2,0.261,0.0004075,57.89,0.0325,0.06377,13.65,1.026,1.012,19.51,0.048,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v2/np64_lock_s{40,240}_r{1,2}"
+MFC v3 subdrv+swap,lock,8,40->240,2,0.2312,0.0004875,51.62,0.094,0.04413,9.583,1.032,1.008,19.51,0.048,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np8_lock_s{40,240}_r{1,2}_sw"
+MFC v3 subdrv+swap,lock,64,40->240,2,0.238,0.001305,53.35,0.004,0.0457,9.949,1.031,1.014,19.51,0.048,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np64_lock_s{40,240}_r{1,2}_sw"
+MFC v3 +tiles,lock,8,40->240,2,0.5054,0.001545,106.5,0.325,0.1057,21.9,1.054,1.128,19.46,0.048,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np8_lock_s{40,240}_r{1,2}_tiles"
+MFC v3 +tiles,lock,64,40->240,2,0.6416,0.0003375,133.9,0.059,0.1344,27.66,1.205,1.267,19.46,0.048,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np64_lock_s{40,240}_r{1,2}_tiles"
+AMReX CNS,lock,8,40->240,2,0.169,2.03e-05,35.91,0.002409,0.0954,,1.023,,15.45,0.048,/lustre/orion/cfd154/scratch/sbryngelson/amrex-bench/runs_blast/np8-L-nosub-j5789437 (fair_metrics.csv)
+AMReX CNS,lock,64,40->240,2,0.2202,5.887e-07,46.6,0.0009915,0.1456,,1.056,,15.45,0.048,/lustre/orion/cfd154/scratch/sbryngelson/amrex-bench/runs_blast/np64-L-nosub-j5789438 (fair_metrics.csv)
+MFC v2,sub,8,40->240,2,0.7647,0.001422,159.9,0.2695,0.2167,45.48,1.016,1.05,40.52,0.096,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v2/np8_sub_s{40,240}_r{1,2}"
+MFC v2,sub,64,40->240,2,0.7974,2.25e-05,167,0.0185,0.2329,48.99,1.03,1.064,40.52,0.096,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v2/np64_sub_s{40,240}_r{1,2}"
+MFC v3 ctl e341896a,sub,8,40->240,2,0.7617,0.003745,159.3,0.764,0.2156,45.25,1.01,1.032,40.52,0.096,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np8_sub_s{40,240}_r{1,2}_ctl"
+MFC v3 ctl e341896a,sub,64,40->240,2,0.7868,0.0001,165.2,0.3815,0.2307,48.7,1.022,1.062,40.52,0.096,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np64_sub_s{40,240}_r{1,2}_ctl"
+MFC v3 subdrv,sub,8,40->240,2,0.7286,0.002358,151.5,0.469,0.1826,37.37,1.015,1.032,40.52,0.096,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np8_sub_s{40,240}_r{1,2}_sd"
+MFC v3 subdrv,sub,64,40->240,2,0.7523,0.00736,156.6,1.592,0.1925,39.38,1.02,1.074,40.52,0.096,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np64_sub_s{40,240}_r{1,2}_sd"
+MFC v3 subdrv+swap,sub,8,40->240,2,0.6736,0.004883,140.5,0.989,0.1308,27.02,1.01,1.027,40.52,0.096,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np8_sub_s{40,240}_r{1,2}_sw"
+MFC v3 subdrv+swap,sub,64,40->240,2,0.6988,0.005632,146,1.365,0.1406,29.01,1.021,1.056,40.52,0.096,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np64_sub_s{40,240}_r{1,2}_sw"
+MFC v3 +tiles,sub,8,,0,,,,,,,,,,,failed: device out of memory at the step-140 regrid (see README)
+MFC v3 +tiles,sub,64,,0,,,,,,,,,,,failed: device out of memory at the step-140 regrid (see README)
+MFC v3 +tiles mgs32,sub,8,40->240,1,0.9983,0,205.4,0,0.2055,42.03,1.026,1.072,36.4,0.096,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np8_sub_s{40,240}_r{1,2}_tilesg32"
+MFC v3 +tiles mgs32,sub,64,40->240,1,1.042,0,214.4,0,0.2206,45.08,1.042,1.062,36.4,0.096,"/lustre/orion/cfd154/scratch/sbryngelson/mfc-simple-v3/np64_sub_s{40,240}_r{1,2}_tilesg32"
+AMReX CNS,sub,8,40->240,2,0.4666,1.463e-05,95.44,0.004391,0.2805,,1.018,,30.25,0.096,/lustre/orion/cfd154/scratch/sbryngelson/amrex-bench/runs_blast/np8-L-sub-j5789437 (fair_metrics.csv)
+AMReX CNS,sub,64,40->240,2,0.5995,8.254e-06,122.5,0.001832,0.4081,,1.045,,30.25,0.096,/lustre/orion/cfd154/scratch/sbryngelson/amrex-bench/runs_blast/np64-L-sub-j5789438 (fair_metrics.csv)
+PeleC,sub,8,40->240,2,0.5998,0.0003683,125,0.07284,0.1413,,1.016,,30.25,0.096,/lustre/orion/cfd154/scratch/sbryngelson/pelec-bench/runs/np8-L-j5789644 (fair_metrics.csv)
+PeleC,sub,64,40->240,2,0.8021,0.0004927,166.3,0.09076,0.3278,,1.034,,30.25,0.096,/lustre/orion/cfd154/scratch/sbryngelson/pelec-bench/runs/np64-L-j5789645 (fair_metrics.csv)
