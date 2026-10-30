@@ -48,3 +48,11 @@ Representative frames are in `stills/`.
 - `curtain64_{flow,wake,cut,hero}_{144,440,904,1696}.jpg`: Mach 2.5 shock through a curtain of 64 force-driven spheres
   (viscous, collisions on, 80 GPUs) at t = 0.49, 1.50, 3.09, 5.80: bow shocks, vortex wakes, refinement on the cut face, close view.
 - `curtain_test_midplane_slice.jpg`: mid-plane slice of the 22-sphere curtain test (8 GPUs).
+- `curtain64_hero4k_{close,wide,cut}[_caption].jpg`: 4K hero renders (1600-px copies here; full-resolution images in amr-report/hero/):
+  close view at step 1400 with vortex rings, wide view at step 704 with dozens of bow shocks, cutaway at step 904.
+- `curtain64_movie_f_*.jpg`: frames from the curtain movie (flow with vortex cores, the transmitted-shock callout, the closing shot).
+
+## Scaling, single MFC build
+`figures/scaling_simple_deck.png`, `data/scaling_simple_deck.csv`: MFC (one case-optimized build of 651b6d88, 5-equation single
+fluid, mp_weno off, AMReX tag rule, 2 reps) vs AMReX CNS and PeleC at 8/64/128 GPUs; wall s/step and AMR-only s/step.
+Subcycled MFC's weak-scaling loss is almost entirely regrid (0.039 -> 0.412 s/step from 8 to 64 GPUs) plus gather waiting.
