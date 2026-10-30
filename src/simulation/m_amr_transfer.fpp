@@ -66,11 +66,11 @@ contains
 
     end subroutine s_amr_reflux_faces_for
 
-    !> The per-stage level-1 reflux-face exchange as one wave: every face a rank refluxes for a block another rank owns is packed
-    !! on the owner's device into one pool, crosses as one message per peer and is unpacked on the device, so a stage costs one
-    !! host copy each way per rank rather than one per face. Both ends list a peer's faces in ascending block, then dim, low before
-    !! high, from the same predicates (s_amr_reflux_faces_for, f_amr_reflux_participates), so the pool layouts agree with no
-    !! handshake. The register arrays are sized up front: the apply can reallocate them, so nothing may post into freg before
+    !> The per-stage level-1 reflux-face exchange as one wave: every face a rank refluxes for a block another rank owns is packed on
+    !! the owner's device into one pool, crosses as one message per peer and is unpacked on the device, so a stage costs one host
+    !! copy each way per rank rather than one per face. Both ends list a peer's faces in ascending block, then dim, low before high,
+    !! from the same predicates (s_amr_reflux_faces_for, f_amr_reflux_participates), so the pool layouts agree with no handshake.
+    !! The register arrays are sized up front: the apply can reallocate them, so nothing may post into freg before
     !! s_amr_reg_prepare.
     impure subroutine s_amr_reflux_faces_wave()
 
