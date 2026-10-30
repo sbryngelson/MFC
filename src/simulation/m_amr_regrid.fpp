@@ -1436,31 +1436,32 @@ contains
 
     end subroutine s_amr_regrid_boxes_unchanged
 
-    !> Device pack of an owned old block's stash into its wire-pool slice (wp wire, stp store) and the mirror unpack of a received
-    !! slice into its stash replica: the store is device-authoritative during the rebuild, so move the data where it lives; the
-    !! slice stays on the device when the pools are device-resident (amr_fw_dev) and crosses otherwise. Wire layout: gi fastest,
-    !! then gj, gk, ii.
+    !> Device pack of fine window [l, h] of an owned old block's stash into its wire-pool slice (wp wire, stp store) and the mirror
+    !! unpack of a received slice into its stash replica: the store is device-authoritative during the rebuild, so move the data
+    !! where it lives; the slice stays on the device when the pools are device-resident (amr_fw_dev) and crosses otherwise. Wire
+    !! layout: gi fastest, then gj, gk, ii.
     #:for DIR in ['pack', 'unpack']
-        impure subroutine s_amr_mig_${DIR}$_device(loc, e1, e2, e3, buf)
+        impure subroutine s_amr_mig_${DIR}$_device(loc, l1, l2, l3, h1, h2, h3, buf)
 
-            integer, intent(in)                 :: loc, e1, e2, e3
+            integer, intent(in)                 :: loc, l1, l2, l3, h1, h2, h3
             real(wp), intent(inout), contiguous :: buf(:)
             integer                             :: ii, gk, gj, gi, n1, n2, n3
 
-            n1 = e1 + 1; n2 = e2 + 1; n3 = e3 + 1
+            n1 = h1 - l1 + 1; n2 = h2 - l2 + 1; n3 = h3 - l3 + 1
             #:if DIR == 'pack'
                 $:GPU_PARALLEL_LOOP(collapse=4, copyout='[buf]')
             #:else
                 $:GPU_PARALLEL_LOOP(collapse=4, copyin='[buf]')
             #:endif
             do ii = 1, sys_size
-                do gk = 0, e3
-                    do gj = 0, e2
-                        do gi = 0, e1
+                do gk = l3, h3
+                    do gj = l2, h2
+                        do gi = l1, h1
+                            #:set W = 'buf(1 + gi - l1 + n1*(gj - l2 + n2*(gk - l3 + n3*(ii - 1))))'
                             #:if DIR == 'pack'
-                                buf(1 + gi + n1*(gj + n2*(gk + n3*(ii - 1)))) = real(amr_stor_st(gi, gj, gk, ii, loc), wp)
+                                ${W}$ = real(amr_stor_st(gi, gj, gk, ii, loc), wp)
                             #:else
-                                amr_stor_st(gi, gj, gk, ii, loc) = real(buf(1 + gi + n1*(gj + n2*(gk + n3*(ii - 1)))), stp)
+                                amr_stor_st(gi, gj, gk, ii, loc) = real(${W}$, stp)
                             #:endif
                         end do
                     end do
@@ -1470,6 +1471,17 @@ contains
 
         end subroutine s_amr_mig_${DIR}$_device
     #:endfor
+
+    !> Fine-index window [flo, fhi] in level-1 old block ilo's stash of the coarse box [wlo, whi] (0:0 in collapsed dims).
+    pure subroutine s_amr_mig_window(wlo, whi, ilo, flo, fhi)
+
+        integer, intent(in)  :: wlo(3), whi(3), ilo(3)
+        integer, intent(out) :: flo(3), fhi(3)
+
+        flo = merge(amr_ref_ratio*(wlo - ilo), 0, amr_dim)
+        fhi = merge(amr_ref_ratio*(whi - ilo + 1) - 1, 0, amr_dim)
+
+    end subroutine s_amr_mig_window
 
     !> Device cons->stor stash copy of one owned old block's fine interior (the store is device-authoritative; no host staging).
     impure subroutine s_amr_stash_copy_device(loc, e1, e2, e3)
@@ -1529,8 +1541,9 @@ contains
         integer, intent(out)    :: old_np, old_ilo(:,:), old_ext(:,:), old_level(:)
         logical, intent(out)    :: old_owns(:)
         integer                 :: old_chi(3, amr_max_blocks), old_owner(amr_max_blocks)
-        integer                 :: k, ks, kk, k2, rr, cnt, ix, lo, hi
-        logical                 :: getk(amr_max_blocks), isdest(0:num_procs - 1)
+        integer                 :: k, ks, kk, k2, rr, cnt, ix, lo, hi, flo(3), fhi(3)
+        integer, allocatable    :: wlo(:,:), whi(:,:)  !< per-rank overlap window of the current old block
+        logical                 :: getk(amr_max_blocks)
 
         ! 5) stash every live slot's fine interior (dead-between-steps q_cons_stor bounce), keeping its old intersection origin
 
@@ -1538,7 +1551,7 @@ contains
         ! under coexist the level-0 L0-tile prefix [1..l0_slot_off] is not regrid-managed and must not be stashed or migrated.
 
         !> plain scalars for device routines (NVHPC -Minline)
-        integer :: loc_f_l0_slot_kk, loc_ks, old_ext1_k, old_ext1_kk, old_ext2_k, old_ext2_kk, old_ext3_k, old_ext3_kk
+        integer :: loc_f_l0_slot_kk, loc_ks, old_ext1_k, old_ext2_k, old_ext3_k
 
         old_np = amr_num_blocks - l0_slot_off
         do k = 1, old_np
@@ -1607,28 +1620,41 @@ contains
         call s_amr_assign_block_owners()
         ! The partition is decided here and nothing has moved yet; everything below redistributes data.
 
-        ! Cross-rank fine-state migration as one wave: each old owner ships its stashed fine state to every distinct new-block
-        ! owner whose region overlaps that old block, and the overlap-copy then reads every covering old block regardless of who
-        ! owned it. A received old block lands in a stash-only replica slot (freed by the rebuild's early-free or the reconcile;
-        ! a replica never touches q_prim/rhs, and full slots across a migration-heavy regrid's replica set would exhaust device
-        ! memory). Both sides enumerate old blocks ascending, so each peer pair's transfers line up. No-op at np=1.
+        ! Cross-rank fine-state migration as one wave: each old owner ships, to every other rank owning a new block it overlaps,
+        ! the bounding box of those overlaps; the overlap-copy then reads every covering old block regardless of who owned it.
+        ! Only level-1 old blocks under level-1 new blocks move: a level>=2 block re-prolongs from its parent. A received window
+        ! lands in a stash-only replica slot (freed by the rebuild's early-free or the reconcile; a replica never touches
+        ! q_prim/rhs, and full slots across a migration-heavy regrid's replica set would exhaust device memory). Both sides
+        ! enumerate old blocks ascending and derive the window from replicated data, so each peer pair's transfers line up.
         if (num_procs > 1) then
+            allocate (wlo(3,0:num_procs - 1), whi(3,0:num_procs - 1))
+            wlo = huge(0); whi = -huge(0)
             call s_amr_wave_open(amr_wave, 4)
             call s_amr_wave_reset(amr_wsend); call s_amr_wave_reset(amr_wrecv)
+            getk = .false.
             do kk = 1, old_np
-                cnt = sys_size*product(old_ext(:,kk) + 1)
-                isdest = .false.
+                if (old_level(kk) /= 1) cycle
                 do k2 = 1, nboxes
                     rr = amr_block_owner(f_l0_slot(k2))
-                    if (f_amr_boxes_overlap(boxes(k2)%lo, boxes(k2)%hi, old_ilo(:,kk), old_chi(:,kk))) isdest(rr) = .true.
+                    if (box_level(k2) /= 1 .or. rr == old_owner(kk)) cycle
+                    if (.not. f_amr_boxes_overlap(boxes(k2)%lo, boxes(k2)%hi, old_ilo(:,kk), old_chi(:,kk))) cycle
+                    wlo(:,rr) = min(wlo(:,rr), max(boxes(k2)%lo, old_ilo(:,kk)))
+                    whi(:,rr) = max(whi(:,rr), min(boxes(k2)%hi, old_chi(:,kk)))
                 end do
-                getk(kk) = isdest(proc_rank) .and. .not. old_owns(kk)
-                if (getk(kk)) call s_amr_wave_add(amr_wrecv, old_owner(kk), kk, old_ilo(:,kk), old_chi(:,kk), cnt)
-                if (.not. old_owns(kk)) cycle
                 do rr = 0, num_procs - 1
-                    if (isdest(rr) .and. rr /= proc_rank) call s_amr_wave_add(amr_wsend, rr, kk, old_ilo(:,kk), old_chi(:,kk), cnt)
+                    if (whi(1, rr) < wlo(1, rr)) cycle
+                    call s_amr_mig_window(wlo(:,rr), whi(:,rr), old_ilo(:,kk), flo, fhi)
+                    cnt = sys_size*product(fhi - flo + 1)
+                    if (rr == proc_rank) then
+                        getk(kk) = .true.
+                        call s_amr_wave_add(amr_wrecv, old_owner(kk), kk, wlo(:,rr), whi(:,rr), cnt)
+                    else if (old_owns(kk)) then
+                        call s_amr_wave_add(amr_wsend, rr, kk, wlo(:,rr), whi(:,rr), cnt)
+                    end if
+                    wlo(:,rr) = huge(0); whi(:,rr) = -huge(0)
                 end do
             end do
+            deallocate (wlo, whi)
             call s_amr_wave_close(amr_wsend, amr_fw_sq, amr_fw_dev)
             call s_amr_wave_close(amr_wrecv, amr_fw_rq, amr_fw_dev)
             call s_amr_prereserve_stash(getk, old_np)
@@ -1639,11 +1665,9 @@ contains
             do ix = 1, amr_wsend%nx
                 kk = amr_wsend%blk(ix)
                 call s_amr_wave_slice(amr_wsend, ix, lo, hi)
+                call s_amr_mig_window(amr_wsend%bl(:,ix), amr_wsend%bh(:,ix), old_ilo(:,kk), flo, fhi)
                 loc_f_l0_slot_kk = amr_loc_of(f_l0_slot(kk))
-                old_ext1_kk = old_ext(1, kk)
-                old_ext2_kk = old_ext(2, kk)
-                old_ext3_kk = old_ext(3, kk)
-                call s_amr_mig_pack_device(loc_f_l0_slot_kk, old_ext1_kk, old_ext2_kk, old_ext3_kk, amr_fw_sq(lo:hi))
+                call s_amr_mig_pack_device(loc_f_l0_slot_kk, flo(1), flo(2), flo(3), fhi(1), fhi(2), fhi(3), amr_fw_sq(lo:hi))
                 call s_amr_wave_hdr_pack(amr_wsend, amr_fw_sq, ix, XA_F4_SND)
             end do
             call s_amr_wave_send(amr_wave, amr_wsend, amr_fw_sq, XA_F4_SND, amr_fw_dev)
@@ -1652,11 +1676,9 @@ contains
                 kk = amr_wrecv%blk(ix)
                 call s_amr_wave_hdr_check(amr_wrecv, amr_fw_rq, ix, XA_F4_SND)
                 call s_amr_wave_slice(amr_wrecv, ix, lo, hi)
+                call s_amr_mig_window(amr_wrecv%bl(:,ix), amr_wrecv%bh(:,ix), old_ilo(:,kk), flo, fhi)
                 loc_f_l0_slot_kk = amr_loc_of(f_l0_slot(kk))
-                old_ext1_kk = old_ext(1, kk)
-                old_ext2_kk = old_ext(2, kk)
-                old_ext3_kk = old_ext(3, kk)
-                call s_amr_mig_unpack_device(loc_f_l0_slot_kk, old_ext1_kk, old_ext2_kk, old_ext3_kk, amr_fw_rq(lo:hi))
+                call s_amr_mig_unpack_device(loc_f_l0_slot_kk, flo(1), flo(2), flo(3), fhi(1), fhi(2), fhi(3), amr_fw_rq(lo:hi))
             end do
         end if
 
