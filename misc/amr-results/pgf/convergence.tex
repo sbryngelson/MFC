@@ -1,0 +1,17 @@
+\documentclass[border=4pt]{standalone}
+\input{style}
+\begin{document}
+\begin{tikzpicture}
+\begin{loglogaxis}[width=7.5cm, height=6cm, xlabel={Level-0 $\Delta t$}, ylabel={max $|q_\mathrm{sub} - q_\mathrm{lock}|$},
+  title={Subcycling order of accuracy}, legend pos=outer north east,
+  xtick={0.0005,0.001,0.002}, xticklabels={0.0005,0.001,0.002}, xmin=0.0004, xmax=0.0025]
+  \addplot[color=pelec, thick, mark=o] table[x=dt, y=err] {data/conv0.dat}; \addlegendentry{1 level, minmod}
+  \addplot[color=pelec, thick, dashed, mark=square] table[x=dt, y=err] {data/conv2.dat}; \addlegendentry{2 levels, minmod}
+  \addplot[mfc2] table[x=dt, y=err] {data/conv1.dat}; \addlegendentry{1 level, quartic}
+  \addplot[color=mfc, very thick, mark=square*] table[x=dt, y=err] {data/conv3.dat}; \addlegendentry{2 levels + regrid, quartic}
+  % reference slopes
+  \addplot[black, domain=0.0005:0.002, samples=2, densely dotted] {2e-5*(x/0.002)}; \addlegendentry{1st order}
+  \addplot[black, domain=0.0005:0.002, samples=2] {4e-6*(x/0.002)^2}; \addlegendentry{2nd order}
+\end{loglogaxis}
+\end{tikzpicture}
+\end{document}

@@ -1,0 +1,19 @@
+\documentclass[border=4pt]{standalone}
+\input{style}
+\input{data/refs_np64.tex}
+\pgfplotstableread[col sep=comma]{data/fixes_np64.dat}\fixtab
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[width=9cm, height=5.6cm, xbar, bar width=11pt, xmin=0, grid=none, xmajorgrids, y dir=reverse,
+  title={What each fix bought: MFC subcycled, 64 GPUs}, xlabel={seconds per coarse step},
+  ytick=data, yticklabels from table={\fixtab}{label}, ymin=-0.6, ymax=\nfix+0.6,
+  nodes near coords, nodes near coords style={font=\scriptsize, /pgf/number format/fixed, /pgf/number format/precision=2},
+  axis lines*=left, enlarge x limits={upper, value=0.12}, clip=false, title style={yshift=8pt}]
+  \addplot[fill=mfc, draw=none] table[x=s, y=i] {\fixtab};
+  \draw[amrex, thick, dashed] (axis cs:\amrexsub,-0.6) -- (axis cs:\amrexsub,\nfix+0.6)
+    node[pos=0, above, font=\scriptsize, color=amrex, anchor=south east] {AMReX};
+  \draw[pelec, thick, dashed] (axis cs:\pelecsub,-0.6) -- (axis cs:\pelecsub,\nfix+0.6)
+    node[pos=0, above, font=\scriptsize, color=pelec, anchor=south west] {PeleC};
+\end{axis}
+\end{tikzpicture}
+\end{document}

@@ -1,0 +1,14 @@
+\documentclass[border=4pt]{standalone}
+\input{style}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[width=8.5cm, height=6cm, ybar, bar width=14pt, ymin=0, grid=none, ymajorgrids,
+  title={Time to solution, 128 GPUs}, ylabel={wall seconds to the same physical time},
+  xtick={0,1,2,3}, xticklabels={MFC before,MFC after,AMReX CNS,PeleC}, xmin=-0.6, xmax=3.6,
+  legend pos=north east, nodes near coords, nodes near coords style={font=\scriptsize, /pgf/number format/fixed,
+  /pgf/number format/precision=0}]
+  \addplot[fill=mfc, draw=none] table[x=i, y=sub] {data/tts_np128.dat}; \addlegendentry{subcycled}
+  \addplot[fill=mfc!35, draw=none] table[x=i, y=lock] {data/tts_np128.dat}; \addlegendentry{lock-step}
+\end{axis}
+\end{tikzpicture}
+\end{document}

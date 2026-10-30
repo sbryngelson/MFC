@@ -1,0 +1,25 @@
+% Shared look for the sponsor figures
+\usepackage{pgfplots}
+\usepgfplotslibrary{groupplots}
+\pgfplotsset{compat=1.18}
+\usepackage[scaled]{helvet}
+\renewcommand\familydefault{\sfdefault}
+\usepackage[T1]{fontenc}
+\pgfplotsset{/pgf/number format/assume math mode=true}
+\definecolor{mfc}{HTML}{1F5FBF}
+\definecolor{amrex}{HTML}{4D4D4D}
+\definecolor{pelec}{HTML}{9A9A9A}
+\pgfplotsset{
+  every axis/.append style={
+    width=6.2cm, height=5cm, axis lines=left, tick align=outside,
+    grid=major, grid style={gray!20}, unbounded coords=jump,
+    label style={font=\small}, tick label style={font=\sffamily\footnotesize},
+    title style={font=\small\bfseries}, legend style={draw=none, fill=none, font=\footnotesize},
+    legend cell align=left},
+  gpus/.style={xmode=log, log basis x=2, xtick={8,64,128,512}, xticklabels={8,64,128,512},
+    xlabel={GPUs (8M base cells each)}, xmin=6, xmax=650},
+  mfc2/.style={color=mfc, very thick, mark=*, mark size=2.2pt},
+  mfc1/.style={color=mfc, thick, dashed, mark=o, mark size=2.2pt, mark options={solid, fill=white}},
+  amrex/.style={color=amrex, thick, mark=square*, mark size=2pt},
+  pelec/.style={color=pelec, thick, mark=triangle*, mark size=2.6pt},
+}
