@@ -1,0 +1,24 @@
+np  8 lock         w40=[15.099] w240=[127.293] s/step=0.5610 cov40=None cov240=0.2160 ncov=10 bin=['8f2b3c301b']/['8f2b3c301b'] nt=[]/[] dt=0.0002/0.0002 stop=40/240 t=12:01/12:03
+np  8 lock_abs     w40=[15.292] w240=[131.058] s/step=0.5788 cov40=None cov240=0.2270 ncov=10 bin=['8f2b3c301b']/['8f2b3c301b'] nt=[]/[] dt=0.0002/0.0002 stop=40/240 t=14:22/14:24
+np  8 lock_abs_oc  w40=[15.3] w240=[130.637] s/step=0.5767 cov40=None cov240=0.2270 ncov=10 bin=[]/[] nt=[]/[] dt=None/None stop=None/None t=13:27/13:29
+np  8 sub          w40=[19.604] w240=[371.796] s/step=1.7610 cov40=0.0393 cov240=0.4390 ncov=11 bin=['8f2b3c301b']/['8f2b3c301b'] nt=[]/[] dt=0.0004/0.0004 stop=40/240 t=12:01/12:07
+np  8 sub_abs      w40=[19.768] w240=[417.405] s/step=1.9882 cov40=0.0393 cov240=0.4901 ncov=11 bin=['8f2b3c301b']/['8f2b3c301b'] nt=[]/[] dt=0.0004/0.0004 stop=40/240 t=14:22/14:29
+np  8 sub_abs_oc   w40=[19.534] w240=[415.713] s/step=1.9809 cov40=0.0393 cov240=0.4901 ncov=11 bin=[]/[] nt=[]/[] dt=None/None stop=None/None t=13:27/13:33
+np 64 lock         w40=[13.698] w240=[120.612] s/step=0.5346 cov40=None cov240=0.2160 ncov=10 bin=['8f2b3c301b']/['8f2b3c301b'] nt=[]/[] dt=0.0002/0.0002 stop=40/240 t=12:26/12:28
+np64 lock_abs: missing/incomplete False False
+np64 lock_abs_oc: missing/incomplete False False
+np 64 sub          w40=[18.364] w240=[415.417] s/step=1.9853 cov40=0.0393 cov240=0.4390 ncov=11 bin=['8f2b3c301b']/['8f2b3c301b'] nt=[]/[] dt=0.0004/0.0004 stop=40/240 t=12:32/12:39
+np64 sub_abs: missing/incomplete False False
+np64 sub_abs_oc: missing/incomplete False False
+np128 lock         w40=[14.034] w240=[124.752] s/step=0.5536 cov40=None cov240=0.2160 ncov=10 bin=['8f2b3c301b']/['8f2b3c301b'] nt=[]/[] dt=0.0002/0.0002 stop=40/240 t=20:18/20:24
+np128 lock_abs: missing/incomplete False False
+np128 lock_abs_oc: missing/incomplete False False
+np128 sub          w40=[19.227] w240=[442.153] s/step=2.1146 cov40=0.0393 cov240=0.4390 ncov=11 bin=['8f2b3c301b']/['8f2b3c301b'] nt=[]/[] dt=0.0004/0.0004 stop=40/240 t=20:26/20:39
+np128 sub_abs: missing/incomplete False False
+np128 sub_abs_oc: missing/incomplete False False
+np512 lock         w40=[14.355] w240=[130.819] s/step=0.5823 cov40=None cov240=0.2160 ncov=10 bin=['8f2b3c301b']/['8f2b3c301b'] nt=[]/[] dt=0.0002/0.0002 stop=40/240 t=18:22/18:27
+np512 lock_abs: missing/incomplete False False
+np512 lock_abs_oc: missing/incomplete False False
+np512 sub          w40=[19.087] w240=[467.833] s/step=2.2437 cov40=0.0393 cov240=0.4390 ncov=11 bin=['8f2b3c301b']/['8f2b3c301b'] nt=[]/[] dt=0.0004/0.0004 stop=40/240 t=18:23/18:42
+np512 sub_abs: missing/incomplete False False
+np512 sub_abs_oc: missing/incomplete False False

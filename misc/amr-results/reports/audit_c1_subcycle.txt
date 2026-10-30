@@ -1,0 +1,114 @@
+  mfc-subtest/sub_2e-3: dt=0.002 lev=1 sub=T pro=None rg=0 last=125 t=0.25 | mfc-subtest/lock_2e-3: dt=0.001 sub=F last=250 t=0.25 | maxdiff=4.7965e-05 | drift sub=0.00e+00 lock=1.11e-16
+  mfc-subtest/sub_1e-3: dt=0.001 lev=1 sub=T pro=None rg=0 last=250 t=0.25 | mfc-subtest/lock_1e-3: dt=0.0005 sub=F last=500 t=0.25 | maxdiff=1.9865e-05 | drift sub=1.11e-16 lock=1.27e-16
+  mfc-subtest/sub_5e-4: dt=0.0005 lev=1 sub=T pro=None rg=0 last=500 t=0.25 | mfc-subtest/lock_5e-4: dt=0.00025 sub=F last=1000 t=0.25 | maxdiff=9.7535e-06 | drift sub=1.11e-16 lock=0.00e+00
+mfc-subtest/sub_@ vs mfc-subtest/lock_@: 4.7965e-05 1.9865e-05 9.7535e-06  orders 1.272 1.026
+  mfc-subtest/Qsub_2e-3: dt=0.002 lev=1 sub=T pro=2 rg=0 last=125 t=0.25 | mfc-subtest/Qlock_2e-3: dt=0.001 sub=F last=250 t=0.25 | maxdiff=9.7748e-06 | drift sub=0.00e+00 lock=1.11e-16
+  mfc-subtest/Qsub_1e-3: dt=0.001 lev=1 sub=T pro=2 rg=0 last=250 t=0.25 | mfc-subtest/Qlock_1e-3: dt=0.0005 sub=F last=500 t=0.25 | maxdiff=2.4376e-06 | drift sub=0.00e+00 lock=0.00e+00
+  mfc-subtest/Qsub_5e-4: dt=0.0005 lev=1 sub=T pro=2 rg=0 last=500 t=0.25 | mfc-subtest/Qlock_5e-4: dt=0.00025 sub=F last=1000 t=0.25 | maxdiff=6.5191e-07 | drift sub=0.00e+00 lock=1.11e-16
+mfc-subtest/Qsub_@ vs mfc-subtest/Qlock_@: 9.7748e-06 2.4376e-06 6.5191e-07  orders 2.004 1.903
+  mfc-subtest/L2sub_2e-3: dt=0.002 lev=2 sub=T pro=1 rg=10 last=120 t=0.24 | mfc-subtest/L2lock_2e-3: dt=0.0005 sub=F last=480 t=0.24 | maxdiff=5.2694e-05 | drift sub=0.00e+00 lock=1.31e-15
+  mfc-subtest/L2sub_1e-3: dt=0.001 lev=2 sub=T pro=1 rg=20 last=240 t=0.24 | mfc-subtest/L2lock_1e-3: dt=0.00025 sub=F last=960 t=0.24 | maxdiff=2.6247e-05 | drift sub=4.37e-16 lock=3.50e-15
+  mfc-subtest/L2sub_5e-4: dt=0.0005 lev=2 sub=T pro=1 rg=40 last=480 t=0.24 | mfc-subtest/L2lock_5e-4: dt=0.000125 sub=F last=1920 t=0.24 | maxdiff=1.3117e-05 | drift sub=1.31e-15 lock=7.87e-15
+mfc-subtest/L2sub_@ vs mfc-subtest/L2lock_@: 5.2694e-05 2.6247e-05 1.3117e-05  orders 1.005 1.001
+  mfc-subtest/QL2sub_2e-3: dt=0.002 lev=2 sub=T pro=2 rg=10 last=120 t=0.24 | mfc-subtest/QL2lock_2e-3: dt=0.0005 sub=F last=480 t=0.24 | maxdiff=2.4536e-05 | drift sub=1.26e-16 lock=1.31e-15
+  mfc-subtest/QL2sub_1e-3: dt=0.001 lev=2 sub=T pro=2 rg=20 last=240 t=0.24 | mfc-subtest/QL2lock_1e-3: dt=0.00025 sub=F last=960 t=0.24 | maxdiff=1.1622e-05 | drift sub=4.37e-16 lock=3.50e-15
+  mfc-subtest/QL2sub_5e-4: dt=0.0005 lev=2 sub=T pro=2 rg=40 last=480 t=0.24 | mfc-subtest/QL2lock_5e-4: dt=0.000125 sub=F last=1920 t=0.24 | maxdiff=5.6873e-06 | drift sub=1.31e-15 lock=7.87e-15
+mfc-subtest/QL2sub_@ vs mfc-subtest/QL2lock_@: 2.4536e-05 1.1622e-05 5.6873e-06  orders 1.078 1.031
+  mfc-subtest/R1sub_2e-3: dt=0.002 lev=1 sub=T pro=2 rg=10 last=120 t=0.24 | mfc-subtest/R1lock_2e-3: dt=0.001 sub=F last=240 t=0.24 | maxdiff=2.4453e-05 | drift sub=1.26e-16 lock=4.37e-16
+  mfc-subtest/R1sub_1e-3: dt=0.001 lev=1 sub=T pro=2 rg=20 last=240 t=0.24 | mfc-subtest/R1lock_1e-3: dt=0.0005 sub=F last=480 t=0.24 | maxdiff=1.1744e-05 | drift sub=2.19e-16 lock=1.31e-15
+  mfc-subtest/R1sub_5e-4: dt=0.0005 lev=1 sub=T pro=2 rg=40 last=480 t=0.24 | mfc-subtest/R1lock_5e-4: dt=0.00025 sub=F last=960 t=0.24 | maxdiff=5.7749e-06 | drift sub=1.31e-15 lock=3.50e-15
+mfc-subtest/R1sub_@ vs mfc-subtest/R1lock_@: 2.4453e-05 1.1744e-05 5.7749e-06  orders 1.058 1.024
+  mfc-regrid-dbg/QS1sub_2e-3: dt=0.002 lev=1 sub=T pro=2 rg=10 last=120 t=0.24 | mfc-regrid-dbg/QS1lock_2e-3: dt=0.001 sub=F last=240 t=0.24 | maxdiff=1.5090e-05 | drift sub=1.26e-16 lock=2.19e-16
+  mfc-regrid-dbg/QS1sub_1e-3: dt=0.001 lev=1 sub=T pro=2 rg=20 last=240 t=0.24 | mfc-regrid-dbg/QS1lock_1e-3: dt=0.0005 sub=F last=480 t=0.24 | maxdiff=3.7111e-06 | drift sub=4.37e-16 lock=1.31e-15
+  mfc-regrid-dbg/QS1sub_5e-4: dt=0.0005 lev=1 sub=T pro=2 rg=40 last=480 t=0.24 | mfc-regrid-dbg/QS1lock_5e-4: dt=0.00025 sub=F last=960 t=0.24 | maxdiff=9.1899e-07 | drift sub=1.31e-15 lock=3.50e-15
+mfc-regrid-dbg/QS1sub_@ vs mfc-regrid-dbg/QS1lock_@: 1.5090e-05 3.7111e-06 9.1899e-07  orders 2.024 2.014
+  mfc-regrid-dbg/QS2sub_2e-3: dt=0.002 lev=2 sub=T pro=2 rg=10 last=120 t=0.24 | mfc-regrid-dbg/QS2lock_2e-3: dt=0.0005 sub=F last=480 t=0.24 | maxdiff=2.1627e-05 | drift sub=1.26e-16 lock=1.31e-15
+  mfc-regrid-dbg/QS2sub_1e-3: dt=0.001 lev=2 sub=T pro=2 rg=20 last=240 t=0.24 | mfc-regrid-dbg/QS2lock_1e-3: dt=0.00025 sub=F last=960 t=0.24 | maxdiff=5.3732e-06 | drift sub=4.37e-16 lock=3.50e-15
+  mfc-regrid-dbg/QS2sub_5e-4: dt=0.0005 lev=2 sub=T pro=2 rg=40 last=480 t=0.24 | mfc-regrid-dbg/QS2lock_5e-4: dt=0.000125 sub=F last=1920 t=0.24 | maxdiff=1.3366e-06 | drift sub=1.53e-15 lock=7.87e-15
+mfc-regrid-dbg/QS2sub_@ vs mfc-regrid-dbg/QS2lock_@: 2.1627e-05 5.3732e-06 1.3366e-06  orders 2.009 2.007
+  mfc-regrid-dbg/D_QS1sub_2e-3: dt=0.002 lev=1 sub=T pro=2 rg=10 last=120 t=0.24 | mfc-regrid-dbg/D_QS1lock_2e-3: dt=0.001 sub=F last=240 t=0.24 | maxdiff=1.5090e-05 | drift sub=1.26e-16 lock=2.19e-16
+  mfc-regrid-dbg/D_QS1sub_1e-3: dt=0.001 lev=1 sub=T pro=2 rg=20 last=240 t=0.24 | mfc-regrid-dbg/D_QS1lock_1e-3: dt=0.0005 sub=F last=480 t=0.24 | maxdiff=3.7111e-06 | drift sub=4.37e-16 lock=1.31e-15
+  mfc-regrid-dbg/D_QS1sub_5e-4: dt=0.0005 lev=1 sub=T pro=2 rg=40 last=480 t=0.24 | mfc-regrid-dbg/D_QS1lock_5e-4: dt=0.00025 sub=F last=960 t=0.24 | maxdiff=9.1899e-07 | drift sub=1.31e-15 lock=3.50e-15
+mfc-regrid-dbg/D_QS1sub_@ vs mfc-regrid-dbg/D_QS1lock_@: 1.5090e-05 3.7111e-06 9.1899e-07  orders 2.024 2.014
+  mfc-regrid-dbg/D_QS2sub_2e-3: dt=0.002 lev=2 sub=T pro=2 rg=10 last=120 t=0.24 | mfc-regrid-dbg/D_QS2lock_2e-3: dt=0.0005 sub=F last=480 t=0.24 | maxdiff=2.1627e-05 | drift sub=1.26e-16 lock=1.31e-15
+  mfc-regrid-dbg/D_QS2sub_1e-3: dt=0.001 lev=2 sub=T pro=2 rg=20 last=240 t=0.24 | mfc-regrid-dbg/D_QS2lock_1e-3: dt=0.00025 sub=F last=960 t=0.24 | maxdiff=5.3732e-06 | drift sub=4.37e-16 lock=3.50e-15
+  mfc-regrid-dbg/D_QS2sub_5e-4: dt=0.0005 lev=2 sub=T pro=2 rg=40 last=480 t=0.24 | mfc-regrid-dbg/D_QS2lock_5e-4: dt=0.000125 sub=F last=1920 t=0.24 | maxdiff=1.3366e-06 | drift sub=1.53e-15 lock=7.87e-15
+mfc-regrid-dbg/D_QS2sub_@ vs mfc-regrid-dbg/D_QS2lock_@: 2.1627e-05 5.3732e-06 1.3366e-06  orders 2.009 2.007
+
+per-variable drift (max over all sub/lock runs of each family):
+  mfc-subtest/B1lock_1e-3: drift per var 1.1e-16 1.1e-16 1.1e-16 1.3e-16 0.0e+00
+  mfc-subtest/B1sub_1e-3: drift per var 1.1e-16 0.0e+00 1.1e-16 0.0e+00 0.0e+00
+  mfc-subtest/L2lock_1e-3: drift per var 3.3e-15 3.5e-15 3.3e-15 1.4e-15 0.0e+00
+  mfc-subtest/L2lock_2e-3: drift per var 1.3e-15 1.3e-15 1.3e-15 5.1e-16 0.0e+00
+  mfc-subtest/L2lock_5e-4: drift per var 7.9e-15 7.9e-15 7.7e-15 3.5e-15 0.0e+00
+  mfc-subtest/L2sub_1e-3: drift per var 4.4e-16 4.4e-16 4.4e-16 1.3e-16 0.0e+00
+  mfc-subtest/L2sub_2e-3: drift per var 0.0e+00 0.0e+00 0.0e+00 0.0e+00 0.0e+00
+  mfc-subtest/L2sub_5e-4: drift per var 1.3e-15 1.3e-15 1.3e-15 3.8e-16 0.0e+00
+  mfc-subtest/L2sub_np4: drift per var 4.4e-16 4.4e-16 4.4e-16 1.3e-16 0.0e+00
+  mfc-subtest/QL2lock_1e-3: drift per var 3.3e-15 3.5e-15 3.3e-15 1.4e-15 0.0e+00
+  mfc-subtest/QL2lock_2e-3: drift per var 1.3e-15 1.3e-15 1.3e-15 3.8e-16 0.0e+00
+  mfc-subtest/QL2lock_5e-4: drift per var 7.7e-15 7.9e-15 7.9e-15 3.7e-15 0.0e+00
+  mfc-subtest/QL2sub_1e-3: drift per var 4.4e-16 4.4e-16 4.4e-16 1.3e-16 0.0e+00
+  mfc-subtest/QL2sub_2e-3: drift per var 0.0e+00 0.0e+00 0.0e+00 1.3e-16 0.0e+00
+  mfc-subtest/QL2sub_5e-4: drift per var 1.3e-15 1.3e-15 1.3e-15 3.8e-16 0.0e+00
+  mfc-subtest/QL2sub_np4: drift per var 4.4e-16 4.4e-16 4.4e-16 1.3e-16 0.0e+00
+  mfc-subtest/Qlock_1e-3: drift per var 0.0e+00 0.0e+00 0.0e+00 0.0e+00 0.0e+00
+  mfc-subtest/Qlock_2e-3: drift per var 1.1e-16 0.0e+00 0.0e+00 0.0e+00 0.0e+00
+  mfc-subtest/Qlock_5e-4: drift per var 1.1e-16 0.0e+00 0.0e+00 0.0e+00 0.0e+00
+  mfc-subtest/Qsub_1e-3: drift per var 0.0e+00 0.0e+00 0.0e+00 0.0e+00 0.0e+00
+  mfc-subtest/Qsub_2e-3: drift per var 0.0e+00 0.0e+00 0.0e+00 0.0e+00 0.0e+00
+  mfc-subtest/Qsub_5e-4: drift per var 0.0e+00 0.0e+00 0.0e+00 0.0e+00 0.0e+00
+  mfc-subtest/Qsub_np4: drift per var 0.0e+00 0.0e+00 0.0e+00 0.0e+00 0.0e+00
+  mfc-subtest/R1lock_1e-3: drift per var 1.3e-15 1.3e-15 1.3e-15 5.1e-16 0.0e+00
+  mfc-subtest/R1lock_2e-3: drift per var 2.2e-16 4.4e-16 2.2e-16 1.3e-16 0.0e+00
+  mfc-subtest/R1lock_5e-4: drift per var 3.5e-15 3.5e-15 3.5e-15 1.3e-15 0.0e+00
+  mfc-subtest/R1sub_1e-3: drift per var 2.2e-16 2.2e-16 2.2e-16 1.3e-16 0.0e+00
+  mfc-subtest/R1sub_2e-3: drift per var 0.0e+00 0.0e+00 0.0e+00 1.3e-16 0.0e+00
+  mfc-subtest/R1sub_5e-4: drift per var 1.3e-15 1.3e-15 1.3e-15 5.1e-16 0.0e+00
+  mfc-subtest/lock_1e-3: drift per var 1.1e-16 1.1e-16 1.1e-16 1.3e-16 0.0e+00
+  mfc-subtest/lock_2e-3: drift per var 1.1e-16 0.0e+00 1.1e-16 0.0e+00 0.0e+00
+  mfc-subtest/lock_5e-4: drift per var 0.0e+00 0.0e+00 0.0e+00 0.0e+00 0.0e+00
+  mfc-subtest/sub_1e-3: drift per var 1.1e-16 0.0e+00 1.1e-16 0.0e+00 0.0e+00
+  mfc-subtest/sub_2e-3: drift per var 0.0e+00 0.0e+00 0.0e+00 0.0e+00 0.0e+00
+  mfc-subtest/sub_5e-4: drift per var 1.1e-16 1.1e-16 0.0e+00 0.0e+00 0.0e+00
+  mfc-subtest/sub_np4: drift per var 1.1e-16 0.0e+00 1.1e-16 0.0e+00 0.0e+00
+  WORST mfc-subtest/*_*: (np.float64(7.869984440801076e-15), 'mfc-subtest/L2lock_5e-4', 0)
+  mfc-regrid-dbg/QS1lock_1e-3: drift per var 1.3e-15 1.1e-15 1.3e-15 5.1e-16 0.0e+00
+  mfc-regrid-dbg/QS1lock_2e-3: drift per var 2.2e-16 2.2e-16 2.2e-16 1.3e-16 0.0e+00
+  mfc-regrid-dbg/QS1lock_5e-4: drift per var 3.5e-15 3.5e-15 3.3e-15 1.3e-15 0.0e+00
+  mfc-regrid-dbg/QS1sub_1e-3: drift per var 4.4e-16 2.2e-16 2.2e-16 1.3e-16 0.0e+00
+  mfc-regrid-dbg/QS1sub_2e-3: drift per var 0.0e+00 0.0e+00 0.0e+00 1.3e-16 0.0e+00
+  mfc-regrid-dbg/QS1sub_5e-4: drift per var 1.3e-15 1.3e-15 1.3e-15 3.8e-16 0.0e+00
+  mfc-regrid-dbg/QS2lock_1e-3: drift per var 3.3e-15 3.5e-15 3.5e-15 1.1e-15 0.0e+00
+  mfc-regrid-dbg/QS2lock_2e-3: drift per var 1.3e-15 1.3e-15 1.3e-15 3.8e-16 0.0e+00
+  mfc-regrid-dbg/QS2lock_5e-4: drift per var 7.9e-15 7.7e-15 7.7e-15 3.4e-15 0.0e+00
+  mfc-regrid-dbg/QS2sub_1e-3: drift per var 4.4e-16 4.4e-16 4.4e-16 1.3e-16 0.0e+00
+  mfc-regrid-dbg/QS2sub_2e-3: drift per var 0.0e+00 0.0e+00 0.0e+00 1.3e-16 0.0e+00
+  mfc-regrid-dbg/QS2sub_5e-4: drift per var 1.5e-15 1.3e-15 1.3e-15 3.8e-16 0.0e+00
+  WORST mfc-regrid-dbg/QS*_*: (np.float64(7.869984440801076e-15), 'mfc-regrid-dbg/QS2lock_5e-4', 0)
+  mfc-regrid-dbg/D_QS1lock_1e-3: drift per var 1.3e-15 1.1e-15 1.3e-15 5.1e-16 0.0e+00
+  mfc-regrid-dbg/D_QS1lock_2e-3: drift per var 2.2e-16 2.2e-16 2.2e-16 1.3e-16 0.0e+00
+  mfc-regrid-dbg/D_QS1lock_5e-4: drift per var 3.5e-15 3.5e-15 3.3e-15 1.3e-15 0.0e+00
+  mfc-regrid-dbg/D_QS1sub_1e-3: drift per var 4.4e-16 2.2e-16 2.2e-16 1.3e-16 0.0e+00
+  mfc-regrid-dbg/D_QS1sub_2e-3: drift per var 0.0e+00 0.0e+00 0.0e+00 1.3e-16 0.0e+00
+  mfc-regrid-dbg/D_QS1sub_5e-4: drift per var 1.3e-15 1.3e-15 1.3e-15 3.8e-16 0.0e+00
+  mfc-regrid-dbg/D_QS1sub_np4: drift per var 4.4e-16 2.2e-16 2.2e-16 1.3e-16 0.0e+00
+  mfc-regrid-dbg/D_QS2lock_1e-3: drift per var 3.3e-15 3.5e-15 3.5e-15 1.1e-15 0.0e+00
+  mfc-regrid-dbg/D_QS2lock_2e-3: drift per var 1.3e-15 1.3e-15 1.3e-15 3.8e-16 0.0e+00
+  mfc-regrid-dbg/D_QS2lock_5e-4: drift per var 7.9e-15 7.7e-15 7.7e-15 3.4e-15 0.0e+00
+  mfc-regrid-dbg/D_QS2sub_1e-3: drift per var 4.4e-16 4.4e-16 4.4e-16 1.3e-16 0.0e+00
+  mfc-regrid-dbg/D_QS2sub_2e-3: drift per var 0.0e+00 0.0e+00 0.0e+00 1.3e-16 0.0e+00
+  mfc-regrid-dbg/D_QS2sub_5e-4: drift per var 1.5e-15 1.3e-15 1.3e-15 3.8e-16 0.0e+00
+  mfc-regrid-dbg/D_QS2sub_np4: drift per var 4.4e-16 4.4e-16 4.4e-16 1.3e-16 0.0e+00
+  WORST mfc-regrid-dbg/D_QS*_*: (np.float64(7.869984440801076e-15), 'mfc-regrid-dbg/D_QS2lock_5e-4', 0)
+
+np4 vs 1 rank:
+  mfc-subtest/sub_np4 (last 250) vs mfc-subtest/sub_1e-3 (last 250): maxdiff 0.000e+00 bytes-identical=True
+  mfc-subtest/Qsub_np4 (last 250) vs mfc-subtest/Qsub_1e-3 (last 250): maxdiff 0.000e+00 bytes-identical=True
+  mfc-subtest/L2sub_np4 (last 240) vs mfc-subtest/L2sub_1e-3 (last 240): maxdiff 0.000e+00 bytes-identical=True
+  mfc-subtest/QL2sub_np4 (last 240) vs mfc-subtest/QL2sub_1e-3 (last 240): maxdiff 0.000e+00 bytes-identical=True
+   mfc-subtest/sub_np8 mfc-subtest/sub_1e-3 list index out of range
+  mfc-regrid-dbg/D_QS1sub_np4 (last 240) vs mfc-regrid-dbg/D_QS1sub_1e-3 (last 240): maxdiff 0.000e+00 bytes-identical=True
+  mfc-regrid-dbg/D_QS2sub_np4 (last 240) vs mfc-regrid-dbg/D_QS2sub_1e-3 (last 240): maxdiff 0.000e+00 bytes-identical=True
+  mfc-regrid-dbg/F_QS1sub_np4 (last 240) vs mfc-regrid-dbg/QS1sub_1e-3 (last 240): maxdiff 0.000e+00 bytes-identical=True
+  mfc-regrid-dbg/F_QS2sub_np4 (last 240) vs mfc-regrid-dbg/QS2sub_1e-3 (last 240): maxdiff 0.000e+00 bytes-identical=True

@@ -1,0 +1,101 @@
+variant,group,ns_per_cell
+a_hip_afar,Flux divergence,0.2066
+a_hip_afar,Fused prim+WENO5+HLLC,1.4061
+a_hip_afar,Launch/idle gaps,0
+a_hip_afar,Total RHS (un-profiled wall),1.6068
+a_hip_afar,Kernels per RHS,4.0
+a_hip_afar,HBM bytes per cell,866.2
+a_hip_afar,Achieved HBM GB/s (busy),537.1
+a_hip_rocm702,Flux divergence,0.2095
+a_hip_rocm702,Fused prim+WENO5+HLLC,1.4289
+a_hip_rocm702,Launch/idle gaps,0.0004
+a_hip_rocm702,Total RHS (un-profiled wall),1.6387
+a_hip_rocm702,Kernels per RHS,4.0
+a_hip_rocm702,HBM bytes per cell,983.1
+a_hip_rocm702,Achieved HBM GB/s (busy),600.0
+b0_omp_fused_tmp,Fused prim+WENO5+HLLC,4.6596
+b0_omp_fused_tmp,Flux divergence,0.3514
+b0_omp_fused_tmp,Launch/idle gaps,0.0955
+b0_omp_fused_tmp,Total RHS (un-profiled wall),5.1064
+b0_omp_fused_tmp,Kernels per RHS,4.0
+b0_omp_fused_tmp,HBM bytes per cell,3107.3
+b0_omp_fused_tmp,Achieved HBM GB/s (busy),620.1
+b_omp_fused,Fused prim+WENO5+HLLC,1.9933
+b_omp_fused,Flux divergence,0.3517
+b_omp_fused,Launch/idle gaps,0.0901
+b_omp_fused,Total RHS (un-profiled wall),2.4351
+b_omp_fused,Kernels per RHS,4.0
+b_omp_fused,HBM bytes per cell,2508.9
+b_omp_fused,Achieved HBM GB/s (busy),1069.9
+bx_fast,Fused prim+WENO5+HLLC,1.9914
+bx_fast,Flux divergence,0.3513
+bx_fast,Launch/idle gaps,0.0921
+bx_fast,Total RHS (un-profiled wall),2.4349
+bx_fast,Kernels per RHS,4.0
+bx_fast,HBM bytes per cell,2509.2
+bx_fast,Achieved HBM GB/s (busy),1071.0
+bx_promote,Fused prim+WENO5+HLLC,24.0617
+bx_promote,Flux divergence,0.3512
+bx_promote,Launch/idle gaps,0.176
+bx_promote,Total RHS (un-profiled wall),24.5889
+bx_promote,Kernels per RHS,4.0
+bx_promote,HBM bytes per cell,23469.2
+bx_promote,Achieved HBM GB/s (busy),961.3
+bx_scalaridx,Fused prim+WENO5+HLLC,2.0351
+bx_scalaridx,Flux divergence,0.3516
+bx_scalaridx,Launch/idle gaps,0.0414
+bx_scalaridx,Total RHS (un-profiled wall),2.428
+bx_scalaridx,Kernels per RHS,4.0
+bx_scalaridx,HBM bytes per cell,2510.1
+bx_scalaridx,Achieved HBM GB/s (busy),1051.7
+bx_tl128,Fused prim+WENO5+HLLC,2.0454
+bx_tl128,Flux divergence,0.3509
+bx_tl128,Launch/idle gaps,0.0893
+bx_tl128,Total RHS (un-profiled wall),2.4857
+bx_tl128,Kernels per RHS,4.0
+bx_tl128,HBM bytes per cell,2496.7
+bx_tl128,Achieved HBM GB/s (busy),1041.9
+bx_tl512,Fused prim+WENO5+HLLC,2.0422
+bx_tl512,Flux divergence,0.3515
+bx_tl512,Launch/idle gaps,0.0805
+bx_tl512,Total RHS (un-profiled wall),2.4742
+bx_tl512,Kernels per RHS,4.0
+bx_tl512,HBM bytes per cell,2517.8
+bx_tl512,Achieved HBM GB/s (busy),1051.9
+bx_tl64,Fused prim+WENO5+HLLC,2.0568
+bx_tl64,Flux divergence,0.351
+bx_tl64,Launch/idle gaps,0.0805
+bx_tl64,Total RHS (un-profiled wall),2.4883
+bx_tl64,Kernels per RHS,4.0
+bx_tl64,HBM bytes per cell,2500.6
+bx_tl64,Achieved HBM GB/s (busy),1038.5
+bx_unroll,Fused prim+WENO5+HLLC,1.3805
+bx_unroll,Flux divergence,0.3513
+bx_unroll,Launch/idle gaps,0.0661
+bx_unroll,Total RHS (un-profiled wall),1.7979
+bx_unroll,Kernels per RHS,4.0
+bx_unroll,HBM bytes per cell,992.1
+bx_unroll,Achieved HBM GB/s (busy),572.9
+bx_unroll_scal,Fused prim+WENO5+HLLC,1.3736
+bx_unroll_scal,Flux divergence,0.3511
+bx_unroll_scal,Launch/idle gaps,0.0681
+bx_unroll_scal,Total RHS (un-profiled wall),1.7928
+bx_unroll_scal,Kernels per RHS,4.0
+bx_unroll_scal,HBM bytes per cell,997.3
+bx_unroll_scal,Achieved HBM GB/s (busy),578.3
+c_omp_split,Prim conversion,0.0715
+c_omp_split,WENO5 reconstruction,1.1449
+c_omp_split,HLLC Riemann,0.4191
+c_omp_split,Flux divergence,0.3068
+c_omp_split,Launch/idle gaps,0.0561
+c_omp_split,Total RHS (un-profiled wall),1.9984
+c_omp_split,Kernels per RHS,10.0
+c_omp_split,HBM bytes per cell,1291.1
+c_omp_split,Achieved HBM GB/s (busy),664.7
+d_c_omp_fused,Fused prim+WENO5+HLLC,1.665
+d_c_omp_fused,Flux divergence,0.2092
+d_c_omp_fused,Launch/idle gaps,0.0251
+d_c_omp_fused,Total RHS (un-profiled wall),1.8994
+d_c_omp_fused,Kernels per RHS,4.0
+d_c_omp_fused,HBM bytes per cell,1267.8
+d_c_omp_fused,Achieved HBM GB/s (busy),676.4

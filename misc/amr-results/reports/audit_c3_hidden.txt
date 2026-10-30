@@ -1,0 +1,8 @@
+sub: files 1/1; kernel span diff/200 = 1.6465 s/step
+  capture  gpu 0.0131  gap 0.2163  total 0.2293 s/step  launches 49/step
+  brcopy   gpu 0.0158  gap 0.0642  total 0.0800 s/step  launches 13/step
+  other    gpu 0.8339  gap 0.5033  total 1.3372 s/step  launches 631/step
+lock: files 1/1; kernel span diff/200 = 0.5751 s/step
+  capture  gpu 0.0025  gap 0.0806  total 0.0830 s/step  launches 18/step
+  brcopy   gpu 0.0026  gap 0.0147  total 0.0173 s/step  launches 3/step
+  other    gpu 0.2565  gap 0.2181  total 0.4747 s/step  launches 218/step

@@ -1,0 +1,19 @@
+mode,step,saving_s,after_s,kind
+sub,MFC today,0,1.98818,measured
+sub,Tile clustering coverage (tiles merged to today's block size),0.234533,1.75365,estimated
+sub,"Batch per-block work (fill, halo, reflux, swap, launches)",0.789446,0.964201,estimated
+sub,Regrid store / migration,0.134116,0.830084,estimated
+sub,RHS: case-opt build,0.0804362,0.749648,measured
+sub,RHS: host syncs + copies,0.145211,0.604438,estimated
+sub,RHS: MP-WENO fusion,0.115086,0.489352,estimated
+sub,Owner placement,0.009588,0.479764,estimated
+sub,necessary floor,0.2703,0.209464,computed
+lock,MFC today,0,0.57883,measured
+lock,Tile clustering coverage (tiles merged to today's block size),0.0214892,0.557341,estimated
+lock,"Batch per-block work (fill, halo, reflux, swap, launches)",0.245648,0.311693,estimated
+lock,Regrid store / migration,0.009437,0.302256,estimated
+lock,RHS: case-opt build,0.0315457,0.27071,measured
+lock,RHS: host syncs + copies,0.0569491,0.213761,estimated
+lock,RHS: MP-WENO fusion,0.0451346,0.168626,estimated
+lock,Owner placement,0,0.168626,estimated
+lock,necessary floor,0.0834597,0.0851667,computed

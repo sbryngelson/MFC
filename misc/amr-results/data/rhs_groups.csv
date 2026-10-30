@@ -1,0 +1,12 @@
+group_ns_per_cell_per_stage,mfc,mfc_nomp,mfc_caseopt,mini
+WENO5 reconstruction,2.131,2.131,1.3216,0
+MP-WENO limiter,1.3929,0,1.4877,0
+Copies & packing,0.6597,0.6581,0.6588,0
+HLLC Riemann,0.784,0.7836,0.7588,0
+Flux divergence,0.3924,0.3923,0.3906,0.2047
+Prim conversion,0.1134,0.1135,0.0997,0
+Halo / BC,0.0822,0.0831,0.083,0.0332
+Alpha source (eq. 6),0.1101,0.1104,0.11,0
+Fused prim+WENO5+HLLC,0,0,0,1.4569
+"Idle gaps (launch, host sync)",0.919,0.884,0.8432,0.0009
+Total RHS,6.5846,5.156,5.753,1.6969

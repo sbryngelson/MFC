@@ -1,0 +1,366 @@
+{
+ "updated": "2026-10-30 01:30 EDT (numbers audited)",
+ "weak": {
+  "title": "Weak scaling, blast lattice L, subcycled",
+  "unit": "s per coarse step",
+  "x": [
+   8,
+   64,
+   512
+  ],
+  "series": [
+   {
+    "name": "Mini-app (C/HIP)",
+    "y": [
+     0.261,
+     0.317,
+     0.352
+    ]
+   },
+   {
+    "name": "Mini-app, owner placement",
+    "y": [
+     0.25,
+     0.257,
+     null
+    ]
+   },
+   {
+    "name": "AMReX CNS",
+    "y": [
+     0.467,
+     0.6,
+     0.678
+    ]
+   },
+   {
+    "name": "PeleC",
+    "y": [
+     0.6,
+     0.802,
+     0.952
+    ]
+   },
+   {
+    "name": "MFC",
+    "y": [
+     1.761,
+     1.985,
+     null
+    ]
+   }
+  ],
+  "note": "Same physics, grid and dt. Owner placement (each refined block on the rank that owns the coarse cells under it, neighbour-first load repair) cuts off-rank traffic 2-7x and lifts the mini-app's np8->np64 efficiency from 0.82 to 0.97, bit-identical results. Refined share at the end: mini-app 30.0%, AMReX 30.3%, MFC 43.9% (MFC with the new tile clustering: 32.5%). np512 runs pending in the batch queue."
+ },
+ "conv": {
+  "title": "MFC: subcycled minus lock-step solution vs level-0 dt",
+  "unit": "max |subcycled - lock-step|",
+  "series": [
+   {
+    "name": "1 level, minmod",
+    "x": [
+     0.002,
+     0.001,
+     0.0005
+    ],
+    "y": [
+     4.8e-05,
+     1.99e-05,
+     9.75e-06
+    ],
+    "order": "1.0-1.3"
+   },
+   {
+    "name": "1 level, quartic",
+    "x": [
+     0.002,
+     0.001,
+     0.0005
+    ],
+    "y": [
+     9.775e-06,
+     2.438e-06,
+     6.519e-07
+    ],
+    "order": "1.9-2.0"
+   },
+   {
+    "name": "2 levels, minmod",
+    "x": [
+     0.002,
+     0.001,
+     0.0005
+    ],
+    "y": [
+     5.27e-05,
+     2.62e-05,
+     1.31e-05
+    ],
+    "order": "1.0"
+   },
+   {
+    "name": "2 levels + regrid, quartic (fixed)",
+    "x": [
+     0.002,
+     0.001,
+     0.0005
+    ],
+    "y": [
+     2.16e-05,
+     5.37e-06,
+     1.34e-06
+    ],
+    "order": "2.0"
+   },
+   {
+    "name": "1 level + regrid, quartic (fixed)",
+    "x": [
+     0.002,
+     0.001,
+     0.0005
+    ],
+    "y": [
+     1.51e-05,
+     3.71e-06,
+     9.19e-07
+    ],
+    "order": "2.0"
+   }
+  ],
+  "note": "Plotted: max difference between subcycled and lock-step solutions (not error vs exact). Conservation: subcycled runs within 1.5e-15, lock-step two-level runs within 7.9e-15 (roundoff); 1 and 4 ranks bit-identical. Quartic prolongation (amr_prolong = 2) makes subcycling second order; with regrid, new fine cells must also be seeded with the quartic (fix found by diffing against the mini-app)."
+ },
+ "cov": {
+  "title": "Refined share of the domain at matched time",
+  "unit": "% of domain",
+  "groups": [
+   "Lock-step (grid used at steps 220-240)",
+   "Subcycled (grid used at steps 220-240)"
+  ],
+  "series": [
+   {
+    "name": "MFC",
+    "y": [
+     18.5,
+     43.9
+    ]
+   },
+   {
+    "name": "MFC, tile clustering (new)",
+    "y": [
+     15.3,
+     29.6
+    ]
+   },
+   {
+    "name": "AMReX CNS",
+    "y": [
+     15.45,
+     30.25
+    ]
+   },
+   {
+    "name": "Mini-app",
+    "y": [
+     15.5,
+     30.0
+    ]
+   }
+  ],
+  "note": "Coverage of the grid actually used in the last timed steps (regrid after step 220) for every code. MFC required same-level blocks to meet face to face, so each blast became one bounding cube; the new opt-in tile clustering brings MFC to AMReX's refined volume (15.3% vs 15.45%, 29.6% vs 30.25%), currently 4x slower per step until its per-block work is batched."
+ },
+ "phase": {
+  "title": "Where MFC's time goes, blast L, 8 GPUs",
+  "unit": "s per level-0 step",
+  "rows": [
+   "Lock-step",
+   "Subcycled"
+  ],
+  "parts": [
+   "Level-0 RHS",
+   "Fine RHS",
+   "Fill and halo",
+   "Reflux and restrict",
+   "Regrid",
+   "Other"
+  ],
+  "values": [
+   [
+    0.2389,
+    0.1368,
+    0.0571,
+    0.0454,
+    0.0128,
+    0.0211
+   ],
+   [
+    0.2331,
+    0.8039,
+    0.2556,
+    0.0423,
+    0.083,
+    0.0934
+   ]
+  ],
+  "note": "Fill and halo = gather + gfill + halo + seam. Other = swap + rk. Level-0 RHS alone is 80 ms per stage for 8M cells per GPU; the mini-app's whole non-subcycled step is 95 ms."
+ },
+ "convm": {
+  "title": "Mini-app: the same test, minmod vs quartic",
+  "unit": "max |subcycled - lock-step|",
+  "series": [
+   {
+    "name": "Minmod",
+    "x": [
+     0.001,
+     0.0005,
+     0.00025
+    ],
+    "y": [
+     1.156e-05,
+     5.257e-06,
+     2.549e-06
+    ],
+    "order": "1.1"
+   },
+   {
+    "name": "Quartic",
+    "x": [
+     0.001,
+     0.0005,
+     0.00025
+    ],
+    "y": [
+     2.152e-06,
+     5.302e-07,
+     1.316e-07
+    ],
+    "order": "2.0"
+   }
+  ],
+  "note": "The C/HIP reference implementation found the prolongation limit first (finding F1) and predicted the quartic fix that MFC now confirms."
+ },
+ "amr": {
+  "title": "AMR-only cost per coarse step, subcycled (everything except each code's own hydro RHS)",
+  "unit": "seconds per coarse step",
+  "x": [
+   8,
+   64,
+   512
+  ],
+  "series": [
+   {
+    "name": "MFC (44% refined)",
+    "y": [
+     0.905,
+     1.198,
+     1.417
+    ]
+   },
+   {
+    "name": "AMReX CNS",
+    "y": [
+     0.281,
+     0.408,
+     0.486
+    ]
+   },
+   {
+    "name": "PeleC",
+    "y": [
+     0.141,
+     0.328,
+     0.478
+    ]
+   },
+   {
+    "name": "Mini-app",
+    "y": [
+     0.1,
+     0.157,
+     0.192
+    ]
+   },
+   {
+    "name": "Mini-app, owner placement",
+    "y": [
+     0.09,
+     0.097,
+     null
+    ]
+   }
+  ],
+  "note": "Blast lattice L, steps 40-240, everything except each code's own hydro RHS. Audit caveats: MFC rows are single runs and its np8/np64 runs used an earlier build than np512 (same-build reruns in progress); MFC refines more volume (43.9% vs 30%). MFC's flux capture and copies are moved out of its RHS using a 1-GPU estimate that is mostly idle gap; counting kernel time only, MFC subcycled is 0.625/0.917/1.137 s/step. Growth 8->512: mini-app +0.09, AMReX +0.21, PeleC +0.34, MFC +0.51 (two thirds regrid migration)."
+ },
+ "status": [
+  {
+   "title": "Flagship: shock through a particle curtain",
+   "tag": "post-processing",
+   "items": [
+    "<b>Mach 2.5</b> planar shock through a random curtain of <b>64 free (force-driven) spheres</b>, viscous, collisions on, one dynamic AMR level, <b>80 GPUs</b>.",
+    "Base grid 253x221x221, 22-27 fine cells per sphere diameter, 1697 steps to t = 5.8, 213 frames saved.",
+    "Simulation finished; post-processing running. Volumetric stills for review next, then the movie.",
+    "Exposed MFC limits: memory set by block count (sliver blocks around carved spheres), IB rank-count cap, restart on a different rank count segfaults."
+   ]
+  },
+  {
+   "title": "Fixes landed (pushed)",
+   "tag": "main branch",
+   "items": [
+    "<b>6db8415a, 7ccf99b6</b>: subcycling for one and two refined levels; conservative to 1e-15, bit-identical across ranks.",
+    "<b>f625519f</b>: amr_tag_abs (AMReX/PeleC tagging, for fair comparisons).",
+    "<b>2a970f6e</b>: amr_prolong = 2 quartic ghost prolongation; second-order subcycling.",
+    "<b>651b6d88</b>: snap fix; default MFC crashed at step ~420 on long lock-step blast runs (and silently made a reflux hazard in subcycled runs).",
+    "Pending merge: quartic seeding of new fine cells (restores second order with regrid), tile clustering (matched AMReX coverage), per-block batching."
+   ]
+  },
+  {
+   "title": "Root causes found",
+   "tag": "evidence",
+   "items": [
+    "<b>First-order subcycling with regrid</b>: new fine cells seeded with minmod; found by diffing MFC against the mini-app (post-regrid coarse-fine flux mismatch spiked 50x).",
+    "<b>Coverage 1.5x AMReX</b>: MFC required same-level blocks to meet face to face, so each blast became one bounding cube.",
+    "<b>Extra AMR cost</b>: host-side per-block work (693 launches and ~8,800 small copies per step vs 81 and 0.5 in the mini-app), not traffic or GPU work.",
+    "<b>Subcycled scaling growth</b>: two thirds is regrid migration (device store regrowth and unnecessary moves).",
+    "<b>Halo skew</b>: uneven parent-data gathering; owner placement is the fix (mini-app: 0.82 -> 0.97 efficiency at 64 GPUs).",
+    "<b>RHS per cell 3.9x the mini-app</b>: MFC's own code (separate MP-WENO pass, copies, host syncs, heavy WENO kernel), not OpenMP or the compiler."
+   ]
+  },
+  {
+   "title": "Running now",
+   "tag": "in flight",
+   "items": [
+    "<b>Audit done</b>: most numbers reproduce exactly; corrections applied here (coverage window, conservation bound, MFC RHS-adjustment caveat). MFC np8/np64 being rerun on the same build as np512, 2 reps.",
+    "<b>Code review done</b>: 2 bugs (quartic + L0 tiles margin; subcycle + active_box) and 4 risks; fixes being implemented and verified.",
+    "Per-block batching of MFC's AMR work (timebox Sat noon); mode-off A/B for a possible regression.",
+    "Regrid migration A/B; interface error vs uniform grid; MFC regression test suite on the pushed head.",
+    "Independent audit of every headline number; fresh code review of all AMR commits.",
+    "np128 rung for all codes; np512 for the mini-app placement."
+   ]
+  }
+ ],
+ "figs": [
+  {
+   "path": "/lustre/orion/cfd154/scratch/sbryngelson/amr-report/waste-budget/waterfall.png",
+   "caption": "Waste budget: MFC subcycled step time today vs after each pending fix vs the necessary floor (np8 blast). Hatched = estimated saving."
+  },
+  {
+   "path": "/lustre/orion/cfd154/scratch/sbryngelson/amr-report/fair-metrics/stacked_sub.png",
+   "caption": "AMR-only cost by category at 8/64/512 GPUs, all four codes (each code's own hydro RHS excluded)."
+  },
+  {
+   "path": "/lustre/orion/cfd154/scratch/sbryngelson/mfc-overhead/figs/subcycled_overhead_breakdown.png",
+   "caption": "Where MFC's subcycled AMR overhead goes, by root cause (np8)."
+  },
+  {
+   "path": "/lustre/orion/cfd154/scratch/sbryngelson/rhs-profile/rhs_breakdown.png",
+   "caption": "Hydro RHS per cell: MFC vs the mini-app on one GPU, by kernel group."
+  },
+  {
+   "path": "/lustre/orion/cfd154/scratch/sbryngelson/omp-vs-hip/omp_vs_hip.png",
+   "caption": "Same algorithm in HIP vs Fortran OpenMP with MFC's compiler: the programming model is not MFC's problem."
+  },
+  {
+   "path": "/lustre/orion/cfd154/scratch/sbryngelson/mfc-curtain/test/slices/slice_600.png",
+   "caption": "Particle-curtain test run (8 GPUs, 22 spheres): mid-plane slice with bow shocks and the curved transmitted shock."
+  }
+ ]
+}

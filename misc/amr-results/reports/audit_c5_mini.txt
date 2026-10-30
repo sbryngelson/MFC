@@ -1,0 +1,24 @@
+np128-L-nosub-j5795105           reps=2 0.1301 0.1305 mean=0.1303  cov@220 L1=15.5232
+np128-L-sub-j5795105             reps=2 0.3298 0.3301 mean=0.3300  cov@220 L1=30.0238
+np512-L-nosub-j5792706           reps=2 0.1387 0.1388 mean=0.1388  cov@220 L1=15.5232
+np512-L-sub-j5792706             reps=2 0.3517 0.3519 mean=0.3518  cov@220 L1=30.0238
+np64-L-nosub-j5792705            reps=2 0.1251 0.1252 mean=0.1251  cov@220 L1=15.5232
+np64-L-nosub-j5792829            reps=1 0.1250 mean=0.1250  cov@220 L1=15.5232
+np64-L-sub-j5792705              reps=2 0.3167 0.3167 mean=0.3167  cov@220 L1=30.0238
+np64-L-sub-j5792829              reps=1 0.3172 mean=0.3172  cov@220 L1=30.0238
+np64-L-sub-morton-j5794442       reps=2 0.3201 0.3199 mean=0.3200  cov@220 L1=30.0238
+np64-L-sub-owner-j5794442        reps=2 0.2558 0.2557 mean=0.2558  cov@220 L1=30.0238
+np64-L-sub-owner2-j5794958       reps=2 0.2567 0.2568 mean=0.2567  cov@220 L1=30.0238
+np8-L-nosub-j5792704             reps=2 0.0948 0.0949 mean=0.0949  cov@220 L1=15.5216
+np8-L-nosub-j5792707             reps=1 0.0946 mean=0.0946  cov@220 L1=15.5216
+np8-L-sub-j5792704               reps=2 0.2607 0.2604 mean=0.2605  cov@220 L1=30.0248
+np8-L-sub-j5792707               reps=1 0.2596 mean=0.2596  cov@220 L1=30.0248
+np8-L-sub-morton-j5794436        reps=0   cov@220 
+np8-L-sub-morton-j5794441        reps=2 0.2615 0.2615 mean=0.2615  cov@220 L1=30.0248
+np8-L-sub-morton-j5794576        reps=2 0.2608 0.2608 mean=0.2608  cov@220 L1=30.0248
+np8-L-sub-morton-j5795075        reps=0   cov@220 
+np8-L-sub-owner-j5794436         reps=0   cov@220 
+np8-L-sub-owner-j5794441         reps=2 0.2497 0.2499 mean=0.2498  cov@220 L1=30.0248
+np8-L-sub-owner-j5794576         reps=2 0.2510 0.2509 mean=0.2509  cov@220 L1=30.0248
+np8-L-sub-owner-j5795075         reps=0   cov@220 
+np8-L-sub-owner2-j5794957        reps=2 0.2502 0.2498 mean=0.2500  cov@220 L1=30.0248

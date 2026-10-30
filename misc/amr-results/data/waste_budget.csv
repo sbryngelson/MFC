@@ -1,0 +1,57 @@
+config,mode,category,necessary_s,waste_s,actual_s,total_s,cov_window_avg_pct,cov_floor_avg_pct,cell_updates_per_gpu,ghost_ratio,blocks_end,insitu_ns_per_cell,source,byte_floor_cat4_s,cov_floor_end_pct
+MFC default,lock,1 refined volume,0,0.00977245,0.00977245,0.57883,8.09,5.39398,1.31776e+07,1.15828,64,7.32564,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_lock_s240_abs,,13.4568
+MFC default,lock,2 ghost work,0,0.0366294,0.0366294,0.57883,8.09,5.39398,1.31776e+07,1.15828,64,7.32564,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_lock_s240_abs,,13.4568
+MFC default,lock,3 hydro per cell,0.0648614,0.180548,0.24541,0.57883,8.09,5.39398,1.31776e+07,1.15828,64,7.32564,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_lock_s240_abs,,13.4568
+MFC default,lock,"4 C/F fill, halo, reflux, restrict",0.0159522,0.189969,0.205921,0.57883,8.09,5.39398,1.31776e+07,1.15828,64,7.32564,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_lock_s240_abs,0.00216452,13.4568
+MFC default,lock,5 regrid,0.004353,0.009437,0.01379,0.57883,8.09,5.39398,1.31776e+07,1.15828,64,7.32564,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_lock_s240_abs,,13.4568
+MFC default,lock,6 host overhead,0,0.0571569,0.0571569,0.57883,8.09,5.39398,1.31776e+07,1.15828,64,7.32564,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_lock_s240_abs,,13.4568
+MFC default,lock,7 load balance,0,0.01015,0.01015,0.57883,8.09,5.39398,1.31776e+07,1.15828,64,7.32564,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_lock_s240_abs,,13.4568
+MFC tile,lock,1 refined volume,0,0.00465428,0.00465428,2.28761,6.678,5.39398,1.22739e+07,1.4688,4040,24.9476,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_lock_s240,,13.4568
+MFC tile,lock,2 ghost work,0,0.101052,0.101052,2.28761,6.678,5.39398,1.22739e+07,1.4688,4040,24.9476,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_lock_s240,,13.4568
+MFC tile,lock,3 hydro per cell,0.0648614,0.186091,0.250952,2.28761,6.678,5.39398,1.22739e+07,1.4688,4040,24.9476,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_lock_s240,,13.4568
+MFC tile,lock,"4 C/F fill, halo, reflux, restrict",0.0159522,1.11404,1.13,2.28761,6.678,5.39398,1.22739e+07,1.4688,4040,24.9476,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_lock_s240,0.00216452,13.4568
+MFC tile,lock,5 regrid,0.004353,0.020922,0.025275,2.28761,6.678,5.39398,1.22739e+07,1.4688,4040,24.9476,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_lock_s240,,13.4568
+MFC tile,lock,6 host overhead,0,0.755375,0.755375,2.28761,6.678,5.39398,1.22739e+07,1.4688,4040,24.9476,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_lock_s240,,13.4568
+MFC tile,lock,7 load balance,0,0.0203,0.0203,2.28761,6.678,5.39398,1.22739e+07,1.4688,4040,24.9476,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_lock_s240,,13.4568
+mini-app Morton,lock,1 refined volume,0,0.00504227,0.00504227,0.0948525,6.78504,5.39398,1.23424e+07,1,,1.73022,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-nosub-j5792704,,13.4568
+mini-app Morton,lock,2 ghost work,0,0,0,0.0948525,6.78504,5.39398,1.23424e+07,1,,1.73022,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-nosub-j5792704,,13.4568
+mini-app Morton,lock,3 hydro per cell,0.0648614,0.00214758,0.067009,0.0948525,6.78504,5.39398,1.23424e+07,1,,1.73022,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-nosub-j5792704,,13.4568
+mini-app Morton,lock,"4 C/F fill, halo, reflux, restrict",0.0159522,0,0.0159522,0.0948525,6.78504,5.39398,1.23424e+07,1,,1.73022,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-nosub-j5792704,0.00216452,13.4568
+mini-app Morton,lock,5 regrid,0.004353,0,0.004353,0.0948525,6.78504,5.39398,1.23424e+07,1,,1.73022,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-nosub-j5792704,,13.4568
+mini-app Morton,lock,6 host overhead,0,0.00128416,0.00128416,0.0948525,6.78504,5.39398,1.23424e+07,1,,1.73022,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-nosub-j5792704,,13.4568
+mini-app Morton,lock,7 load balance,0,0.00121175,0.00121175,0.0948525,6.78504,5.39398,1.23424e+07,1,,1.73022,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-nosub-j5792704,,13.4568
+MFC default,sub,1 refined volume,0,0.0716196,0.0716196,1.98818,23.394,13.7062,3.79443e+07,1.22054,216,8.44732,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_sub_s240_abs,,26.2493
+MFC default,sub,2 ghost work,0,0.146966,0.146966,1.98818,23.394,13.7062,3.79443e+07,1.22054,216,8.44732,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_sub_s240_abs,,26.2493
+MFC default,sub,3 hydro per cell,0.147531,0.565062,0.712593,1.98818,23.394,13.7062,3.79443e+07,1.22054,216,8.44732,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_sub_s240_abs,,26.2493
+MFC default,sub,"4 C/F fill, halo, reflux, restrict",0.052802,0.563529,0.616331,1.98818,23.394,13.7062,3.79443e+07,1.22054,216,8.44732,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_sub_s240_abs,0.00282913,26.2493
+MFC default,sub,5 regrid,0.009131,0.134794,0.143925,1.98818,23.394,13.7062,3.79443e+07,1.22054,216,8.44732,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_sub_s240_abs,,26.2493
+MFC default,sub,6 host overhead,0,0.265415,0.265415,1.98818,23.394,13.7062,3.79443e+07,1.22054,216,8.44732,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_sub_s240_abs,,26.2493
+MFC default,sub,7 load balance,0,0.031335,0.031335,1.98818,23.394,13.7062,3.79443e+07,1.22054,216,8.44732,/lustre/orion/cfd154/scratch/sbryngelson/mfc-blast/L_np8_sub_s240_abs,,26.2493
+MFC tile,sub,1 refined volume,0,0.024003,0.024003,7.31815,16.953,13.7062,2.96998e+07,1.83246,7592,35.7728,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_sub_s240,,26.2493
+MFC tile,sub,2 ghost work,0,0.434207,0.434207,7.31815,16.953,13.7062,2.96998e+07,1.83246,7592,35.7728,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_sub_s240,,26.2493
+MFC tile,sub,3 hydro per cell,0.147531,0.520539,0.66807,7.31815,16.953,13.7062,2.96998e+07,1.83246,7592,35.7728,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_sub_s240,,26.2493
+MFC tile,sub,"4 C/F fill, halo, reflux, restrict",0.052802,3.19192,3.24472,7.31815,16.953,13.7062,2.96998e+07,1.83246,7592,35.7728,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_sub_s240,0.00282913,26.2493
+MFC tile,sub,5 regrid,0.009131,0.037969,0.0471,7.31815,16.953,13.7062,2.96998e+07,1.83246,7592,35.7728,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_sub_s240,,26.2493
+MFC tile,sub,6 host overhead,0,2.79774,2.79774,7.31815,16.953,13.7062,2.96998e+07,1.83246,7592,35.7728,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_sub_s240,,26.2493
+MFC tile,sub,7 load balance,0,0.1023,0.1023,7.31815,16.953,13.7062,2.96998e+07,1.83246,7592,35.7728,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/C8M16_np8_sub_s240,,26.2493
+mini-app Morton,sub,1 refined volume,0,0.025926,0.025926,0.260503,17.2131,13.7062,3.00328e+07,1,,1.77866,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-j5792704,,26.2493
+mini-app Morton,sub,2 ghost work,0,0,0,0.260503,17.2131,13.7062,3.00328e+07,1,,1.77866,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-j5792704,,26.2493
+mini-app Morton,sub,3 hydro per cell,0.147531,0.00522571,0.152756,0.260503,17.2131,13.7062,3.00328e+07,1,,1.77866,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-j5792704,,26.2493
+mini-app Morton,sub,"4 C/F fill, halo, reflux, restrict",0.052802,0.0072902,0.0600922,0.260503,17.2131,13.7062,3.00328e+07,1,,1.77866,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-j5792704,0.00282913,26.2493
+mini-app Morton,sub,5 regrid,0.009131,0.0006775,0.0098085,0.260503,17.2131,13.7062,3.00328e+07,1,,1.77866,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-j5792704,,26.2493
+mini-app Morton,sub,6 host overhead,0,0.00740555,0.00740555,0.260503,17.2131,13.7062,3.00328e+07,1,,1.77866,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-j5792704,,26.2493
+mini-app Morton,sub,7 load balance,0,0.004514,0.004514,0.260503,17.2131,13.7062,3.00328e+07,1,,1.77866,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-j5792704,,26.2493
+mini-app owner,sub,1 refined volume,0,0.025926,0.025926,0.250915,17.2131,13.7062,3.00328e+07,1,,1.78162,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-owner-j5794576,,26.2493
+mini-app owner,sub,2 ghost work,0,0,0,0.250915,17.2131,13.7062,3.00328e+07,1,,1.78162,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-owner-j5794576,,26.2493
+mini-app owner,sub,3 hydro per cell,0.147531,0.00534801,0.152879,0.250915,17.2131,13.7062,3.00328e+07,1,,1.78162,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-owner-j5794576,,26.2493
+mini-app owner,sub,"4 C/F fill, halo, reflux, restrict",0.052802,0,0.052802,0.250915,17.2131,13.7062,3.00328e+07,1,,1.78162,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-owner-j5794576,0.00282913,26.2493
+mini-app owner,sub,5 regrid,0.009131,0,0.009131,0.250915,17.2131,13.7062,3.00328e+07,1,,1.78162,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-owner-j5794576,,26.2493
+mini-app owner,sub,6 host overhead,0,0.0076058,0.0076058,0.250915,17.2131,13.7062,3.00328e+07,1,,1.78162,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-owner-j5794576,,26.2493
+mini-app owner,sub,7 load balance,0,0.00257175,0.00257175,0.250915,17.2131,13.7062,3.00328e+07,1,,1.78162,/lustre/orion/cfd154/scratch/sbryngelson/amr-miniapp/runs/blast/np8-L-sub-owner-j5794576,,26.2493
+MFC boxes-build default (ref),lock,1 refined volume,0,0.0129079,0.0129079,1.86334,8.955,5.39398,1.37312e+07,1.23212,367,26.1558,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/L_np8_lock_s240,,13.4568
+MFC boxes-build default (ref),lock,2 ghost work,0,0.0559751,0.0559751,1.86334,8.955,5.39398,1.37312e+07,1.23212,367,26.1558,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/L_np8_lock_s240,,13.4568
+MFC boxes-build default (ref),lock,3 hydro per cell,0.0648614,0.204065,0.268927,1.86334,8.955,5.39398,1.37312e+07,1.23212,367,26.1558,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/L_np8_lock_s240,,13.4568
+MFC boxes-build default (ref),lock,"4 C/F fill, halo, reflux, restrict",0.0159522,0.345799,0.361751,1.86334,8.955,5.39398,1.37312e+07,1.23212,367,26.1558,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/L_np8_lock_s240,0.00216452,13.4568
+MFC boxes-build default (ref),lock,5 regrid,0.004353,0.168332,0.172685,1.86334,8.955,5.39398,1.37312e+07,1.23212,367,26.1558,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/L_np8_lock_s240,,13.4568
+MFC boxes-build default (ref),lock,6 host overhead,0,0.936264,0.936264,1.86334,8.955,5.39398,1.37312e+07,1.23212,367,26.1558,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/L_np8_lock_s240,,13.4568
+MFC boxes-build default (ref),lock,7 load balance,0,0.05483,0.05483,1.86334,8.955,5.39398,1.37312e+07,1.23212,367,26.1558,/lustre/orion/cfd154/scratch/sbryngelson/mfc-boxtest/blast/L_np8_lock_s240,,13.4568
