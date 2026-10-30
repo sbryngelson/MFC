@@ -37,7 +37,7 @@ instructions in `pgf/README.md`.
 | `rhs_models` | RHS ns/cell for the same numerics in HIP vs OpenMP variants |
 | `convergence` | subcycling order of accuracy (quartic: second order) |
 
-`figures/slide_scaling.png` is the matplotlib version of `scaling_slide` (script `pgf/make_slide.py`).
+Rebuild everything with `pgf/build_all.sh`.
 
 ## Ladders (`data/`)
 - `scaling_simple_deck_v2.csv`, `ladder_v2/` (README, VERSIONS, scripts), `figures/scaling_simple_deck_v2.png`: integrated
