@@ -7,7 +7,7 @@
 #! This is safe because every conditionally allocated module array a kernel here names launches
 #! only under its allocation's own condition (blkmod/alpha/Kterm: alt_soundspeed;
 #! flux_n/flux_gsrc_n/rhs_hat*: dual pass; nc_iface_vel_n: alpha_iface + alt_soundspeed, a subset
-#! of use_nc_iface_vel; tau_Re_vf: viscous; qL/qR_*: .not. igr; flux_gsrc_rsx_vf: cyl_coord;
+#! of use_nc_iface_vel; tau_Re_vf: viscous; qL/qR_*, cons_copy_idx: .not. igr; flux_gsrc_rsx_vf: cyl_coord;
 #! dy/y_cc/dz: idir <= num_dims). Without it every launch re-maps the descriptor of each named
 #! allocatable. A kernel naming an unallocated array aborts under present, so keep that invariant
 #! when adding kernels.
@@ -59,7 +59,11 @@ module m_rhs
     type(vector_field) :: q_cons_qp  !< WENO-reconstructed cell-average conservative variables at quadrature points
     $:GPU_DECLARE(create='[q_cons_qp]')
 
-    type(vector_field) :: q_prim_qp  !< Primitive variables at cell-interior quadrature points
+    !> Components copied into q_cons_qp each RHS: those q_prim_qp aliases, or all when cons_copy_all
+    integer, allocatable, dimension(:) :: cons_copy_idx
+    $:GPU_DECLARE(create='[cons_copy_idx]')
+    logical            :: cons_copy_all  !< Physics reads (or mpp_lim rescales) the full q_cons_qp
+    type(vector_field) :: q_prim_qp      !< Primitive variables at cell-interior quadrature points
     $:GPU_DECLARE(create='[q_prim_qp]')
 
     !> @name The first-order spatial derivatives of the primitive variables at cell- interior Gaussian quadrature points. These are
@@ -221,6 +225,8 @@ contains
             $:GPU_ENTER_DATA(copyin='[q_prim_qp%vf(eqn_idx%psi)%sf]')
             $:GPU_ENTER_DATA(attach='[q_prim_qp%vf(eqn_idx%psi)%sf]')
         end if
+
+        if (.not. igr) call s_initialize_cons_copy()
 
         if (hypo_nc_mode == hypo_nc_mode_dual_pass) then
             @:ALLOCATE(flux_n(1:num_dims))
@@ -588,6 +594,22 @@ contains
 
     end subroutine s_initialize_rhs_module
 
+    !> Select the q_cons_qp components the per-RHS copy must fill. Otherwise the conversion reads q_cons_vf directly, and only the
+    !! components q_prim_qp aliases (written by the conversion as primitives) need the copy for their ghost layers.
+    impure subroutine s_initialize_cons_copy
+
+        integer :: l
+        logical :: sel(sys_size)
+
+        cons_copy_all = qbmm .or. acoustic_source .or. bubbles_euler .or. bubbles_lagrange .or. chemistry .or. reactive_burn &
+            & .or. cont_damage
+        sel = [(cons_copy_all .or. associated(q_prim_qp%vf(l)%sf, q_cons_qp%vf(l)%sf), l=1, sys_size)]
+        @:ALLOCATE(cons_copy_idx(1:count(sel)))
+        cons_copy_idx = pack([(l, l=1, sys_size)], sel)
+        $:GPU_UPDATE(device='[cons_copy_idx]')
+
+    end subroutine s_initialize_cons_copy
+
     !> Compute the right-hand side of the semi-discrete governing equations for a single time stage
     impure subroutine s_compute_rhs(q_cons_vf, q_T_sf, q_prim_vf, bc_type, rhs_vf, pb_in, rhs_pb, mv_in, rhs_mv, t_step, stage)
 
@@ -607,6 +629,7 @@ contains
         integer :: id
         integer(kind=8) :: i, j, k, l, q                     !< Generic loop iterators
         integer :: cbjlo, cbjhi, cbklo, cbkhi, cbllo, cblhi  !< Active-box + halo copy bounds
+        integer :: n_copy
 
         ! RHS: halo exchange -> reconstruct -> Riemann solve -> flux difference -> source terms
 
@@ -641,6 +664,7 @@ contains
             cbllo = idwbuff(3)%beg; cblhi = idwbuff(3)%end
             ab_int = idwint
         end if
+        if (amr_cons_ghosts_valid) ab_int = idwbuff
         if (ab_active) ab_prim_seeded = .true.
 
         ! ab_int must be refreshed on device EVERY call: the AMR fine advance swaps idwint to the fine-block
@@ -652,11 +676,13 @@ contains
 
         if (.not. igr) then
             ! Association/Population of Working Variables
-            $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
-            do i = 1, sys_size
+            n_copy = size(cons_copy_idx)
+            $:GPU_PARALLEL_LOOP(private='[i, j, k, l, q]', collapse=4)
+            do q = 1, n_copy
                 do l = cbllo, cblhi
                     do k = cbklo, cbkhi
                         do j = cbjlo, cbjhi
+                            i = cons_copy_idx(q)
                             q_cons_qp%vf(i)%sf(j, k, l) = q_cons_vf(i)%sf(j, k, l)
                         end do
                     end do
@@ -695,10 +721,10 @@ contains
         end if
         if (.not. igr) then
             call nvtxStartRange("RHS-CONVERT")
-            if (amr_cons_ghosts_valid) then
-                call s_convert_conservative_to_primitive_variables(q_cons_qp%vf, q_T_sf, q_prim_qp%vf, idwbuff)
-            else
+            if (cons_copy_all) then
                 call s_convert_conservative_to_primitive_variables(q_cons_qp%vf, q_T_sf, q_prim_qp%vf, ab_int)
+            else
+                call s_convert_conservative_to_primitive_variables(q_cons_vf, q_T_sf, q_prim_qp%vf, ab_int)
             end if
             call nvtxEndRange
 
@@ -2288,6 +2314,9 @@ contains
         end if
 
         @:DEALLOCATE(q_cons_qp%vf, q_prim_qp%vf)
+        if (.not. igr) then
+            @:DEALLOCATE(cons_copy_idx)
+        end if
 
         if (.not. igr) then
             @:DEALLOCATE(qL_rsx_vf, qR_rsx_vf)
