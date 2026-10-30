@@ -730,6 +730,7 @@ def _load():
     _r("amr_regrid_int", INT)
     _r("amr_tag_eps", REAL)
     _r("amr_tag_abs", LOG)
+    _r("amr_place_owner", LOG)
     _r("amr_buf", INT)
     _r("amr_snap", INT)
     _r("amr_device_pack", LOG)
@@ -1509,6 +1510,7 @@ _nv(
     "amr_regrid_int",
     "amr_tag_eps",
     "amr_tag_abs",
+    "amr_place_owner",
     "amr_buf",
     "amr_snap",
     "amr_device_pack",

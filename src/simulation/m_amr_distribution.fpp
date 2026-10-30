@@ -515,6 +515,105 @@ contains
 
     end subroutine s_amr_static_cut
 
+    !> Coarse-side overlap per rank of block k's region grown by g coarse cells: level 1 against the level-0 rank bricks, level >= 2
+    !! against the owners of the level-(l-1) blocks. Adds into vol(0:) and lists the touched ranks in rk(1:nr); the caller zeroes
+    !! vol(rk(1:nr)) after use.
+    impure subroutine s_amr_place_overlap(k, g, vol, rk, nr)
+
+        integer, intent(in)     :: k, g
+        real(wp), intent(inout) :: vol(0:)
+        integer, intent(out)    :: rk(:), nr
+        integer                 :: lo(3), hi(3), ilo(3), ihi(3), ol(3), oh(3), j, q
+
+        lo = amr_region_lo_all(:,k) - merge(g, 0, amr_dim); hi = amr_region_hi_all(:,k) + merge(g, 0, amr_dim)
+        nr = 0
+        if (amr_block_level(k) == 1) then
+            call s_amr_ranks_overlapping(lo, hi, rk, nr)
+            do j = 1, nr
+                call s_amr_rank_interior(rk(j), ilo, ihi)
+                call s_amr_box_isect(lo, hi, ilo, ihi, ol, oh)
+                vol(rk(j)) = product(real(max(oh - ol + 1, 0), wp))
+            end do
+            return
+        end if
+        do j = l0_slot_off + 1, amr_num_blocks
+            if (amr_block_level(j) /= amr_block_level(k) - 1) cycle
+            call s_amr_box_isect(lo, hi, amr_region_lo_all(:,j), amr_region_hi_all(:,j), ol, oh)
+            if (any(ol > oh)) cycle
+            q = amr_block_owner(j)
+            if (vol(q) <= 0._wp) then
+                nr = nr + 1; rk(nr) = q
+            end if
+            vol(q) = vol(q) + product(real(oh - ol + 1, wp))
+        end do
+
+    end subroutine s_amr_place_overlap
+
+    !> Owner-aware placement (amr_place_owner) of one level's na blocks (slots aidx, weights wt, Morton keys key): each block goes
+    !! to the rank owning most of the coarse cells under it, so its coarse-fine gather and restriction stay on that rank. A rank
+    !! above (1 + place_tol) x the mean sheds its last blocks in Morton order, first to the least-loaded rank owning coarse cells
+    !! next to the block, then to the least-loaded rank anywhere, never pushing the receiver above the cap. Replicated inputs in a
+    !! fixed order, so every rank computes the same owners.
+    impure subroutine s_amr_place_owner(key, wt, aidx, na, own)
+
+        integer, intent(in)         :: na, aidx(na)
+        integer(kind=8), intent(in) :: key(na)
+        real(wp), intent(in)        :: wt(na)
+        integer, intent(inout)      :: own(na)
+        real(wp), parameter         :: place_tol = 0.05_wp
+        real(wp), allocatable       :: vol(:), load(:)
+        integer, allocatable        :: rk(:), ord(:)
+        integer                     :: a, b, j, r, m, nr, pass, nmov
+        real(wp)                    :: cap
+
+        allocate (vol(0:num_procs - 1), load(0:num_procs - 1), rk(num_procs), ord(na))
+        vol = 0._wp; load = 0._wp
+        do a = 1, na
+            call s_amr_place_overlap(aidx(a), 0, vol, rk, nr)
+            do j = 1, nr  ! nr = 0 (no coarse owner found) keeps the SFC owner
+                if (j == 1) own(a) = rk(1)
+                if (vol(rk(j)) > vol(own(a)) .or. (vol(rk(j)) == vol(own(a)) .and. rk(j) < own(a))) own(a) = rk(j)
+            end do
+            vol(rk(1:nr)) = 0._wp
+            load(own(a)) = load(own(a)) + wt(a)
+        end do
+
+        cap = (1._wp + place_tol)*sum(load)/real(num_procs, wp)
+        call s_amr_sort_by_key(key, na, ord)
+        nmov = 0
+        do pass = 1, 2  ! 1: to a coarse neighbour, 2: anywhere
+            do r = 0, num_procs - 1
+                do b = na, 1, -1
+                    if (load(r) <= cap) exit
+                    a = ord(b)
+                    if (own(a) /= r) cycle
+                    if (pass == 1) then
+                        call s_amr_place_overlap(aidx(a), 1, vol, rk, nr)
+                        vol(rk(1:nr)) = 0._wp
+                        m = -1
+                        do j = 1, nr
+                            if (rk(j) == r) cycle
+                            if (m < 0) then
+                                m = rk(j)
+                            else if (load(rk(j)) < load(m) .or. (load(rk(j)) == load(m) .and. rk(j) < m)) then
+                                m = rk(j)
+                            end if
+                        end do
+                    else
+                        m = minloc(load, 1) - 1
+                    end if
+                    if (m < 0) cycle
+                    if (load(m) + wt(a) > cap) cycle
+                    own(a) = m; load(r) = load(r) - wt(a); load(m) = load(m) + wt(a); nmov = nmov + 1
+                end do
+            end do
+        end do
+        if (rank_time_wrt .and. proc_rank == 0) print '(A,I0,A,I0,A,I0,A,F8.3)', ' [amr-place] level ', amr_block_level(aidx(1)), &
+            & ': boxes ', na, ' shed ', nmov, ' max/mean ', maxval(load)*real(num_procs, wp)/sum(load)
+        deallocate (vol, load, rk, ord)
+
+    end subroutine s_amr_place_owner
+
     impure subroutine s_amr_assign_block_owners()
 
         integer :: k, a, lev, maxlev, na
@@ -559,6 +658,7 @@ contains
             if (na < 1) cycle
             call s_amr_sfc_cut(akey, awt, na, amr_fine_cut(:,lev), aown)
             if (f_amr_static_cut()) call s_amr_static_cut(akey, na, amr_fine_cut(:,lev), aown)
+            if (amr_place_owner) call s_amr_place_owner(akey, awt, aidx, na, aown)
             do a = 1, na
                 amr_block_owner(aidx(a)) = aown(a); amr_myblk_dirty = .true.
             end do
@@ -575,7 +675,7 @@ contains
     !> Install a recorded owner table instead of recomputing it (restart at the writer's rank count). The cost weights read live
     !! state (body markers) that differs between the regrid before the write and the restart, so recomputing can move a cut and
     !! disagree with the file. The table came from per-level SFC cuts, so each level's cut is the running max Morton key of each
-    !! rank's blocks; s_amr_validate_owner rejects a table that is not contiguous in that order.
+    !! rank's blocks; s_amr_validate_owner rejects a table that is not contiguous in that order (unless amr_place_owner).
     impure subroutine s_amr_adopt_block_owners(own)
 
         integer, intent(in) :: own(:)
@@ -700,6 +800,7 @@ contains
             ! slots are uninitialized at assigner time and carry a stale level with Morton key 0. The
             ! tile-init call site populates both cuts and validates them there.
             if (k <= l0_slot_off .and. amr_owner_cut(num_procs - 1) < 0_8) cycle
+            if (amr_place_owner .and. amr_block_level(k) >= 1) cycle  ! placed owners are not SFC-contiguous
             ! every block resolves: tiles (level 0) via amr_owner_cut (tile cut), fine blocks (level>=1) via amr_fine_cut. The
             ! caller guarantees the relevant cut is populated for the blocks present at each call site (assigner: fine cut; tile
             ! init: both).
