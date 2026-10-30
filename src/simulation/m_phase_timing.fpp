@@ -5,8 +5,8 @@
 #:include 'macros.fpp'
 
 !> @brief Per-phase wall-time budget of the AMR step, reported when rank_time_wrt is on. The brackets are disjoint and sum to the
-!! step-loop wall (the residual is printed), and each bracket drains the device first so a phase's time includes the GPU work it
-!! launched.
+!! step-loop wall (the residual is printed; the regrid sub-phases nest inside regrid), and each bracket drains the device first so a
+!! phase's time includes the GPU work it launched.
 module m_phase_timing
 
     use m_global_parameters
@@ -16,23 +16,33 @@ module m_phase_timing
 
     private
     public :: s_phase_tic, s_phase_toc, s_phase_step_tic, s_phase_step_toc, s_phase_report, PH_HALO, PH_GATHER, PH_GFILL, &
-        & PH_SEAM, PH_RHS, PH_RK, PH_REFLUX, PH_REGRID, PH_L0, PH_COARSE, PH_SWAP, PH_RESTR
+        & PH_SEAM, PH_RHS, PH_RK, PH_REFLUX, PH_REGRID, PH_L0, PH_COARSE, PH_SWAP, PH_RESTR, PH_RG_HALO, PH_RG_TAG, PH_RG_CLUS, &
+        & PH_RG_OWN, PH_RG_MIG, PH_RG_BUILD, PH_RG_REC
 
-    integer, parameter          :: PH_HALO = 1     !< coarse cons halo exchange (once per stage)
-    integer, parameter          :: PH_GATHER = 2   !< fill waves: coarse-patch gather into every block
-    integer, parameter          :: PH_GFILL = 3    !< ghost prolongation from the gathered patch
-    integer, parameter          :: PH_SEAM = 4     !< fine-fine seam halo
-    integer, parameter          :: PH_RHS = 5      !< fine-block RHS
-    integer, parameter          :: PH_RK = 6       !< fine-block RK update + IB
-    integer, parameter          :: PH_REFLUX = 7   !< level-1 reflux (faces wave + apply)
-    integer, parameter          :: PH_REGRID = 8   !< regrid
-    integer, parameter          :: PH_L0 = 9       !< L0 tile advance
-    integer, parameter          :: PH_COARSE = 10  !< coarse (base-grid) solver work
-    integer, parameter          :: PH_SWAP = 11    !< per-batch grid-state swap and restore
-    integer, parameter          :: PH_RESTR = 12   !< post-stage restrict + reflux-to-parent fold
-    integer, parameter          :: PH_N = 12
+    integer, parameter          :: PH_HALO = 1       !< coarse cons halo exchange (once per stage)
+    integer, parameter          :: PH_GATHER = 2     !< fill waves: coarse-patch gather into every block
+    integer, parameter          :: PH_GFILL = 3      !< ghost prolongation from the gathered patch
+    integer, parameter          :: PH_SEAM = 4       !< fine-fine seam halo
+    integer, parameter          :: PH_RHS = 5        !< fine-block RHS
+    integer, parameter          :: PH_RK = 6         !< fine-block RK update + IB
+    integer, parameter          :: PH_REFLUX = 7     !< level-1 reflux (faces wave + apply)
+    integer, parameter          :: PH_REGRID = 8     !< regrid
+    integer, parameter          :: PH_L0 = 9         !< L0 tile advance
+    integer, parameter          :: PH_COARSE = 10    !< coarse (base-grid) solver work
+    integer, parameter          :: PH_SWAP = 11      !< per-batch grid-state swap and restore
+    integer, parameter          :: PH_RESTR = 12     !< post-stage restrict + reflux-to-parent fold
+    integer, parameter          :: PH_NTOP = 12      !< the disjoint brackets above; the regrid sub-phases below nest in PH_REGRID
+    integer, parameter          :: PH_RG_HALO = 13   !< coarse halo + host copy for tagging
+    integer, parameter          :: PH_RG_TAG = 14    !< tagging
+    integer, parameter          :: PH_RG_CLUS = 15   !< clustering, shaping, nesting and box checks
+    integer, parameter          :: PH_RG_OWN = 16    !< stash and owner assignment
+    integer, parameter          :: PH_RG_MIG = 17    !< fine-state migration
+    integer, parameter          :: PH_RG_BUILD = 18  !< new-block build (fills, prolongation, overlap copy)
+    integer, parameter          :: PH_RG_REC = 19    !< slot reconcile, IB setup, seam check
+    integer, parameter          :: PH_N = 19
     character(len=8), parameter :: PH_NAME(PH_N) = [character(len=8)::'halo','gather', 'gfill', 'seam', 'rhs', 'rk', 'reflux', &
-              & 'regrid', 'L0', 'coarse', 'swap', 'restr']
+              & 'regrid', 'L0', 'coarse', 'swap', 'restr', ' rg.halo', ' rg.tag', ' rg.clus', ' rg.own', ' rg.mig', ' rg.build', &
+              & ' rg.rec']
 
     real(wp)   :: acc(PH_N) = 0._wp, wall = 0._wp  !< wall is the accumulated step-loop time the phases are budgeted against
     integer(8) :: ncall(PH_N) = 0, tic_c(PH_N) = 0, wall_c = 0
@@ -108,8 +118,8 @@ contains
             print '(A,A8,F10.3,F9.3,F9.1,A,F8.3,I12,F11.4)', '[phase] ', PH_NAME(i), mean, gmax(i), 100._wp*mean/wall, '%', &
                 & gmax(i)/mean, gcall(i)/int(num_procs, 8), 1000._wp*mean/max(real(gcall(i)/int(num_procs, 8), wp), 1._wp)
         end do
-        print '(A,F10.3,F19.1,A)', '[phase] RESIDUAL', wall - sum(gsum)/real(num_procs, wp), &
-            & 100._wp*(wall - sum(gsum)/real(num_procs, wp))/wall, '%'
+        print '(A,F10.3,F19.1,A)', '[phase] RESIDUAL', wall - sum(gsum(1:PH_NTOP))/real(num_procs, wp), &
+            & 100._wp*(wall - sum(gsum(1:PH_NTOP))/real(num_procs, wp))/wall, '%'
 
     end subroutine s_phase_report
 

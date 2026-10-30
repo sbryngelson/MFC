@@ -20,6 +20,7 @@ module m_amr_regrid
     use m_mpi_proxy, only: s_mpi_abort
     use m_mpi_common, only: s_mpi_allreduce_min, s_mpi_allreduce_max
     use m_amr_wave
+    use m_phase_timing
     use m_amr_cluster, only: s_amr_cluster, s_amr_tile_cluster
     use m_amr_distribution, only: s_amr_sort_by_key
     use m_amr, only: amr_slots, amr_cons_st, amr_stor_st, amr_loc_of, amr_slot_live, amr_my_blk, amr_n_my, &
@@ -443,25 +444,32 @@ contains
         ! valid coarse cons ghosts at internal rank boundaries: the tag sweep reads +/-1 across seams and the rebuild prolongation
         ! reads past the new intersection (all ranks call: pairwise per-direction exchange; complete no-op at np=1).
 
+        call s_phase_tic(PH_RG_HALO)
         call s_amr_exchange_coarse_cons_halo(q_cons_base)
         do i = 1, sys_size
             $:GPU_UPDATE(host='[q_cons_base(i)%sf]')
         end do
+        call s_phase_toc(PH_RG_HALO)
 
         ! Lagrangian-cloud exclusion bbox for this regrid (collective): smearing (mapCells) + stencil headroom (2) + drift
         ! margin until the next regrid (amr_buf)
         if (bubbles_lagrange) call s_amr_compute_lag_supp(mapCells + 2 + amr_buf)
 
         call s_amr_report_mem('regrid-start')
+        call s_phase_tic(PH_RG_TAG)
         call s_amr_regrid_tag_cells(q_cons_base, tag_grid, sidx)
+        call s_phase_toc(PH_RG_TAG)
         call s_amr_report_mem('tagged')
         call s_amr_cad_count(tag_grid, sidx)  ! [amr-cad] cadence containment audit (counts only; report at finalize)
+        call s_phase_tic(PH_RG_CLUS)
         call s_amr_regrid_cluster_tags(tag_grid, sidx, boxes, nboxes)
+        call s_phase_toc(PH_RG_CLUS)
         call s_amr_report_mem('clustered')
         if (nboxes == 0) return  ! nothing tagged on any rank; keep the current blocks
         call s_amr_regrid_shape_boxes(boxes, nboxes)
         call s_amr_report_mem('shaped')
         if (nboxes == 0) return  ! every box was confined to the domain margin
+        call s_phase_tic(PH_RG_CLUS)
         call s_amr_regrid_nest_children(boxes, nboxes, box_level)
         ! lattice boxes move by whole tiles, never by the few cells a snap absorbs
         if (amr_snap > 0 .and. .not. amr_tile_cluster) call s_amr_regrid_snap_boxes(boxes, nboxes, box_level)
@@ -469,6 +477,7 @@ contains
         call s_amr_check_box_disjoint(boxes, nboxes, box_level)  ! invariant: same-level boxes are pairwise disjoint
         if (rank_time_wrt .and. proc_rank == 0) call s_amr_report_coverage(boxes, nboxes, box_level)
         call s_amr_regrid_boxes_unchanged(boxes, nboxes, box_level, same)
+        call s_phase_toc(PH_RG_CLUS)
         call s_amr_report_mem('compared')
         if (same) return  ! identical box set and levels: keep the live slots
         call s_amr_regrid_stash_migrate(boxes, nboxes, box_level, old_np, old_ilo, old_ext, old_level, old_owns)
@@ -1576,6 +1585,7 @@ contains
         !> plain scalars for device routines (NVHPC -Minline)
         integer :: loc_f_l0_slot_kk, loc_ks, old_ext1_k, old_ext2_k, old_ext3_k
 
+        call s_phase_tic(PH_RG_OWN)
         old_np = amr_num_blocks - l0_slot_off
         do k = 1, old_np
             ks = f_l0_slot(k)
@@ -1641,6 +1651,7 @@ contains
         end block
         amr_num_levels = maxval(box_level(1:nboxes))
         call s_amr_assign_block_owners()
+        call s_phase_toc(PH_RG_OWN)
         ! The partition is decided here and nothing has moved yet; everything below redistributes data.
 
         ! Cross-rank fine-state migration as one wave: each old owner ships, to every other rank owning a new block it overlaps,
@@ -1648,6 +1659,7 @@ contains
         ! so each peer pair's transfers line up. Only level-1 old blocks under level-1 new blocks move: a level>=2 block
         ! re-prolongs from its parent. A received window stays in amr_mig_rq, where the rebuild's overlap copy reads it, so a
         ! migration allocates no store columns. No-op at np=1.
+        call s_phase_tic(PH_RG_MIG)
         allocate (amr_mig_win(7, old_np)); amr_mig_win = 0
         if (num_procs > 1) then
             allocate (wlo(3,0:num_procs - 1), whi(3,0:num_procs - 1))
@@ -1698,6 +1710,7 @@ contains
                 amr_mig_win(:,kk) = [lo, flo, fhi]
             end do
         end if
+        call s_phase_toc(PH_RG_MIG)
 
     end subroutine s_amr_regrid_stash_migrate
 
@@ -1722,6 +1735,7 @@ contains
         !> plain scalars for device routines (NVHPC -Minline)
         integer :: loc_kks, loc_ks, m_ks, n_ks, old_ext1_kk, old_ext2_kk, old_ext3_kk, p_ks, w1, w2, w3, w4, w5, w6, lo, hi
 
+        call s_phase_tic(PH_RG_BUILD)
         do k = 1, nboxes
             ks = f_l0_slot(k)
             if (amr_block_owner(ks) == proc_rank) cycle
@@ -1821,6 +1835,8 @@ contains
         end do
         deallocate (last_use, held, held_hi, vpos, amr_mig_win)
         call s_amr_mig_free(amr_mig_rq)
+        call s_phase_toc(PH_RG_BUILD)
+        call s_phase_tic(PH_RG_REC)
 
         ! one allreduce for the whole loop; sets amr_xchg_coarse_ghosts if any block needs it
         call s_amr_reduce_xchg_flag()
@@ -1834,6 +1850,7 @@ contains
         call s_amr_report_mem('post-ib-setup')
         call s_amr_select_slot(1)
         call s_amr_check_seam_topology()
+        call s_phase_toc(PH_RG_REC)
 
     end subroutine s_amr_regrid_rebuild_slots
 
