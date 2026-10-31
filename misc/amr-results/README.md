@@ -81,3 +81,17 @@ Data: `data/fair_metrics.csv`, `categories_long.csv`, `waste_budget.csv`, `water
   on, 80 GPUs) at t = 0.49, 1.50, 3.09, 5.80; `curtain64_movie_f_*.jpg`: movie frames.
 - `spheres8_{flow,cut,hero}_{400,900,1700}.jpg`, `spheres8_movie_f_*.jpg`: the 8-sphere run.
 - `curtain_test_midplane_slice.jpg`: mid-plane slice of the 22-sphere curtain test (8 GPUs).
+
+## Known issues (open)
+- **Quartic prolongation blowup in a dense IB cloud.** Sphere-cloud movie case (297 fixed spheres, Mach 2.5, 128 GPUs; case
+  `/lustre/orion/cfd154/scratch/sbryngelson/mfc-movie/case.py`, branch `spike/amr-movie`): with `amr_prolong = 2` the run goes
+  NaN at steps 363-386, 1-3 steps after a regrid, at a refined-block corner or the cloud edge. Not fixed by regrid every 4,
+  a 4-cell clear ring, dt x0.75, inviscid, or the older commit d8f901dd; `amr_prolong = 1` from the step-300 restart runs
+  cleanly (used for the movie). Likely cause: the unlimited 5-point quartic stencil straddles IB solid/ghost cells or a
+  shock and undershoots. Proposed fix: fall back to linear where the stencil touches IB cells or a strong gradient, plus a
+  positivity check on prolonged values. Reproducer: the step-300 restart.
+- **Tile clustering with subcycling runs out of GPU memory** (store slots sized for full blocks); lock-step tiles are
+  2-2.7x slower with no coverage gain on the blast lattice. Fix: per-block slot sizing.
+- **`3D -> synthetic_turbulence` regression test** fails on `up/mega` (7273d602) at round-off level (rel 3.3e-9 vs 1e-10
+  tolerance); to revisit when the branch is brought up to date with master.
+- Level 2 cannot span multiple level-1 parents; no AMR for `model_eqns = 1`; restart on a different rank count segfaults.
