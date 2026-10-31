@@ -5,14 +5,12 @@
 \begin{groupplot}[group style={group size=2 by 1, horizontal sep=1.8cm}, gpus, ymin=0]
 \nextgroupplot[title={AMR-only cost, subcycled}, ylabel={seconds per coarse step}, legend pos=north west]
   \addplot[mfc3] table[x=np, y=mfc3] {data/amr_sub.dat}; \addlegendentry{MFC}
-  \addplot[mfc2] table[x=np, y=mfc2] {data/amr_sub.dat}; \addlegendentry{MFC, previous build}
   \addplot[pelec] table[x=np, y=pelec] {data/amr_sub.dat}; \addlegendentry{PeleC}
   \ifamrex
   \addplot[amrex] table[x=np, y=amrex] {data/amr_sub.dat}; \addlegendentry{AMReX CNS}
   \fi
 \nextgroupplot[title={AMR-only cost, lock-step}, ylabel={seconds per step}]
   \addplot[mfc3] table[x=np, y=mfc3] {data/amr_lock.dat};
-  \addplot[mfc2] table[x=np, y=mfc2] {data/amr_lock.dat};
   \ifamrex
   \addplot[amrex] table[x=np, y=amrex] {data/amr_lock.dat};
   \fi

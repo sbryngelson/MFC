@@ -1,5 +1,5 @@
 {
- "updated": "2026-10-30 evening (newest build to 128 GPUs; previous build to 512)",
+ "updated": "2026-10-31 01:00 (fastest build to 512 GPUs)",
  "weak": {
   "title": "Weak scaling, blast lattice, subcycled: s per coarse step",
   "unit": "s per coarse step",
@@ -290,8 +290,8 @@
    "items": [
     "<b>Flagship movie</b>: Mach 2.5 shock through a curtain of 64 free spheres, 80 GPUs, volumetric shocks, vortex wakes, GPU-coloured cutaway with callouts, plus three 4K hero stills: <a href=\"https://claude.ai/artifact/Hn3vzo2opkRU4zHDMEyveF\" target=\"_blank\" rel=\"noopener\">curtain movie and stills</a>. Second example: <a href=\"https://claude.ai/artifact/2Hp8zbp2iSwKmQyUtb1uoE\" target=\"_blank\" rel=\"noopener\">8-sphere movie</a>.",
     "<b>Subcycling in MFC</b>: one and two refined levels, conservative to ~1e-15, bit-identical across ranks, second order with quartic prolongation (also with regrid). Quartic interfaces match a uniform fine grid; minmod is 10^4-10^5x worse (figure below). Full GPU regression suite 789/789.",
-    "<b>Weak scaling vs PeleC and AMReX</b>: newest MFC build at 128 GPUs is 0.716 s/step subcycled vs PeleC 0.832 and AMReX 0.613, efficiency 0.94 vs 0.72/0.76, time to solution 149 s vs PeleC 172 s. Previous build to 512 GPUs: efficiency 0.85 vs AMReX 0.69, PeleC 0.63, and faster than PeleC per step (0.90 vs 0.95 s).",
-    "<b>AMR-only cost</b> (each code's own RHS excluded): newest MFC 0.155 s/step subcycled at 128 GPUs vs AMReX 0.421 and PeleC 0.358; lock-step 0.048 vs AMReX 0.149.",
+    "<b>Weak scaling to 512 GPUs vs PeleC and AMReX</b>: subcycled efficiency MFC 0.87, AMReX 0.69, PeleC 0.63; MFC 0.78 s/step vs PeleC 0.95 (AMReX 0.68). Lock-step efficiency MFC 0.89 vs AMReX 0.68. Time to solution at 128 GPUs: MFC 149 s, PeleC 172 s. 1024-GPU rung running.",
+    "<b>AMR-only cost</b> (each code's own RHS excluded) at 512 GPUs: MFC 0.21 s/step subcycled vs AMReX 0.49, PeleC 0.48; lock-step 0.06 vs AMReX 0.18.",
     "<b>Reference mini-app</b>: 2.6-4.5x faster per step than AMReX/PeleC at 512 GPUs, 0.95-0.96 weak-scaling efficiency with owner placement; its findings drove the MFC fixes.",
     "<b>Found and fixed, with evidence</b>: reflux race (multi-rank nondeterminism), snap crash, first-order subcycling from minmod seeding, regrid out-of-memory at 128 GPUs, coverage matched to AMReX with tile clustering."
    ]
@@ -302,7 +302,7 @@
    "items": [
     "<b>Pushed</b> to spike/amr-integrate (7273d602); bitwise identical to the previous build, AMR tests pass.",
     "<b>Subcycled s/step</b> 0.762 -> 0.674 (np8), 0.787 -> 0.699 (np64), about 12% faster; AMR-only time down ~40% (0.231 -> 0.141 s at np64). Lock-step 0.251 -> 0.231 (np8).",
-    "<b>At 128 GPUs</b> (2 reps): subcycled 0.833 -> 0.716 s/step, lock-step 0.263 -> 0.243. The 512- and 1024-GPU runs of this build start ~05:12-06:12 tomorrow, alongside the 1024-GPU rung for AMReX and PeleC.",
+    "<b>At 512 GPUs</b> (2 reps): subcycled 0.899 -> 0.775 s/step (efficiency 0.87), lock-step 0.283 -> 0.259. 1024 GPUs for all codes running now; this build's 1024 rung ~11:12.",
     "<b>Tile clustering</b>: not ready. Subcycled runs exhaust GPU memory at the step-140 regrid (store slots are sized for full 64^3 blocks); lock-step is 2-2.7x slower with no coverage gain. Fix = per-block slot sizing, post-meeting."
    ]
   }
@@ -315,11 +315,11 @@
   },
   {
    "path": "/lustre/orion/cfd154/scratch/sbryngelson/amr-report/pgf/png/scaling_slide.png",
-   "caption": "MFC vs AMReX CNS vs PeleC, subcycled. Newest MFC build (subcycling driver + swap packing, 7273d602) at 8-128 GPUs: efficiency 0.94 at 128 (AMReX 0.76, PeleC 0.72), 0.716 s/step vs PeleC 0.832 and AMReX 0.613. Light line: previous build to 512 GPUs (efficiency 0.85 vs 0.69/0.63). Newest build at 512/1024 GPUs runs overnight."
+   "caption": "MFC vs AMReX CNS vs PeleC, subcycled, 8-512 GPUs: MFC efficiency 0.87 at 512 (AMReX 0.69, PeleC 0.63), adds the least AMR-only time with scale (+0.08 s vs +0.21/+0.34), and is faster than PeleC per step from 64 GPUs on (0.78 vs 0.95 s at 512). AMReX CNS remains ~1.15x faster per step."
   },
   {
    "path": "/lustre/orion/cfd154/scratch/sbryngelson/amr-report/pgf/png/scaling_slide_pelec.png",
-   "caption": "Sponsor version: MFC vs PeleC, subcycled. MFC is faster per step from 64 GPUs on (0.716 vs 0.832 s at 128), adds a tenth of PeleC's AMR cost with scale, and holds 0.94 efficiency at 128 GPUs vs 0.72."
+   "caption": "Sponsor version: MFC vs PeleC, subcycled, 8-512 GPUs. Efficiency 0.87 vs 0.63; AMR cost growth +0.08 vs +0.34 s/step; MFC 0.78 s/step vs PeleC 0.95 at 512 GPUs."
   },
   {
    "path": "/lustre/orion/cfd154/scratch/sbryngelson/amr-report/pgf/png/fixes.png",
@@ -327,11 +327,11 @@
   },
   {
    "path": "/lustre/orion/cfd154/scratch/sbryngelson/amr-report/pgf/png/amr_only.png",
-   "caption": "AMR-only cost (each code's own RHS excluded), newest MFC build: 0.155 s/step subcycled at 128 GPUs vs AMReX 0.421 and PeleC 0.358; lock-step 0.048 vs AMReX 0.149."
+   "caption": "AMR-only cost (each code's own RHS excluded): MFC 0.21 s/step subcycled at 512 GPUs vs AMReX 0.49 and PeleC 0.48; lock-step 0.06 vs AMReX 0.18."
   },
   {
    "path": "/lustre/orion/cfd154/scratch/sbryngelson/amr-report/pgf/png/lockstep.png",
-   "caption": "Lock-step, newest MFC build: 0.243 s/step at 128 GPUs vs AMReX 0.224, efficiency 0.95 vs 0.76; previous build 0.89 vs 0.68 at 512."
+   "caption": "Lock-step, 8-512 GPUs: MFC efficiency 0.89 vs AMReX CNS 0.68; 0.259 vs 0.250 s/step at 512."
   },
   {
    "path": "/lustre/orion/cfd154/scratch/sbryngelson/amr-report/pgf/png/tts_pelec.png",
@@ -347,7 +347,7 @@
   },
   {
    "path": "/lustre/orion/cfd154/scratch/sbryngelson/amr-report/pgf/png/coverage.png",
-   "caption": "Refined share of the domain: MFC refines ~1.3x more volume than AMReX/PeleC by default; tile clustering matches them but is not yet usable with subcycling (memory)."
+   "caption": "Refined share of the domain: MFC refines ~1.3x more volume than AMReX/PeleC under the same tag rule (its block clustering is coarser). Tile clustering does not yet close this on the benchmark (lock-step 19.5%, subcycled out of memory); post-meeting work."
   },
   {
    "path": "/lustre/orion/cfd154/scratch/sbryngelson/amr-report/pgf/png/rhs_models.png",
