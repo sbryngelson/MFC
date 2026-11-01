@@ -10,17 +10,19 @@ MFC: WENO5 + HLLC, 5-equation single fluid (`mp_weno = F`, `amr_tag_abs = T`, `a
 their second-order schemes. Same grid, dt, tag rule and refinement ratio; MFC refines ~1.3x more volume (40.5% vs 30.3%
 subcycled). AMR-only = wall minus each code's own hydro RHS.
 
-## Headline (subcycled, integrated build 5d8ab069)
+## Headline (subcycled, fastest MFC build 7273d602)
 | GPUs | MFC s/step | AMReX CNS | PeleC | MFC efficiency | AMReX | PeleC | MFC AMR-only | AMReX | PeleC |
 |---|---|---|---|---|---|---|---|---|---|
-| 8 | 0.765 | 0.467 | 0.600 | 1 | 1 | 1 | 0.217 | 0.281 | 0.141 |
-| 64 | 0.797 | 0.600 | 0.802 | 0.96 | 0.78 | 0.75 | 0.233 | 0.408 | 0.328 |
-| 128 | 0.833 | 0.613 | 0.832 | 0.92 | 0.76 | 0.72 | 0.260 | 0.421 | 0.358 |
-| 512 | 0.899 | 0.678 | 0.952 | 0.85 | 0.69 | 0.63 | 0.313 | 0.486 | 0.478 |
+| 8 | 0.674 | 0.467 | 0.600 | 1 | 1 | 1 | 0.131 | 0.281 | 0.141 |
+| 64 | 0.699 | 0.600 | 0.802 | 0.96 | 0.78 | 0.75 | 0.141 | 0.408 | 0.328 |
+| 128 | 0.716 | 0.613 | 0.832 | 0.94 | 0.76 | 0.72 | 0.155 | 0.421 | 0.358 |
+| 512 | 0.775 | 0.678 | 0.952 | 0.87 | 0.69 | 0.63 | 0.207 | 0.486 | 0.478 |
+| 1024 | 0.944 | 0.712 | 0.994 | 0.71 | 0.66 | 0.60 | 0.358 | 0.519 | 0.520 |
 
-Lock-step at 512 GPUs: MFC 0.282 s/step (efficiency 0.89) vs AMReX 0.250 (0.68). Before the fixes (651b6d88) MFC subcycled was
-1.574 -> 2.183 s/step (8 -> 512 GPUs). The subcycling driver + swap packing (7273d602) cut a further ~12%: 0.699 s/step at
-64 GPUs (AMR-only 0.141), see `data/scaling_simple_deck_v3.csv`. 1024-GPU rung and the 7273d602 build at 128-1024 GPUs pending.
+Lock-step: MFC 0.259 s/step at 512 GPUs (efficiency 0.89) vs AMReX 0.250 (0.68); at 1024 GPUs 0.289 vs 0.260 (0.80 vs 0.65).
+Before the fixes (651b6d88) MFC subcycled was 1.574 -> 2.183 s/step (8 -> 512 GPUs). From 512 to 1024 GPUs MFC's step grows 22%
+(AMReX and PeleC 4-5%), mostly regrid clustering and migration (see Known issues). Data: `data/scaling_simple_deck_v2.csv`
+(through 1024 GPUs for all codes; MFC v2 = previous build) and `data/scaling_simple_deck_v3.csv` (the fastest build).
 
 ## Sponsor figures (`pgf/`)
 pgfplots sources, data tables and PDFs; PNG previews in `pgf/png/`. `*_pelec` variants compare MFC with PeleC only. Rebuild
@@ -94,4 +96,6 @@ Data: `data/fair_metrics.csv`, `categories_long.csv`, `waste_budget.csv`, `water
   2-2.7x slower with no coverage gain on the blast lattice. Fix: per-block slot sizing.
 - **`3D -> synthetic_turbulence` regression test** fails on `up/mega` (7273d602) at round-off level (rel 3.3e-9 vs 1e-10
   tolerance); to revisit when the branch is brought up to date with master.
+- **Regrid scaling beyond 512 GPUs.** Subcycled regrid time at 1024 GPUs is ~48 s vs 18 s at 512 (clustering 9.5 -> 22.9 s,
+  migration 3.8 -> 18.7 s): likely global steps that grow with rank count; the mini-app regrid scales further.
 - Level 2 cannot span multiple level-1 parents; no AMR for `model_eqns = 1`; restart on a different rank count segfaults.

@@ -3,4 +3,4 @@ np mfc1 mfc2 mfc3 amrex pelec
 64 0.4547 0.261 0.238 0.2202 nan
 128 0.4643 0.2634 0.2429 0.224 nan
 512 0.4964 0.2825 0.2592 0.2502 nan
-1024 nan nan nan nan nan
+1024 nan 0.349 0.2892 0.26 nan
