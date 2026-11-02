@@ -1,489 +1,120 @@
 # AMR Implementation Reference
 
-`amr.md` describes *what* MFC's AMR does. This document describes *how it is built*: the index
-spaces, the data structures, the exact call sequences, and the invariants that hold between them.
+@ref amr says what AMR does; this page says how it is built: modules, index spaces, data layout, the step, regrid and
+communication, and the invariants that are easy to break. Routines are cited by name (greppable in
+`src/simulation/m_amr*.fpp`, `m_global_parameters.fpp`, `m_time_steppers.fpp`).
 
-It exists because the conceptual description is not sufficient to modify the code safely. Defects
-in this code typically come from a wrong belief about one of the items below, not from a wrong
-algorithm. Sections 2 and 11 are the two most load-bearing.
+## Modules
 
-Routines are cited by name rather than line number so this document ages gracefully; every name
-here is greppable in `src/simulation/m_amr*.fpp` (see the module map below),
-`src/simulation/m_global_parameters.fpp`, or `src/simulation/m_time_steppers.fpp`.
+Each module may `use` only those above it; `m_amr` re-exports the chain, so callers write `use m_amr, only: ...`.
 
----
+| Module | Responsibility |
+| :--- | :--- |
+| `m_global_parameters` | Block metadata pools, the working-slot mirrors, `s_amr_select_slot` |
+| `m_amr_state` | Per-block module state: flat store, wave buffers, swap mirrors (`sw_*`) |
+| `m_amr_distribution` | Block cost, SFC cut and owner placement, owned-block lists, box arithmetic |
+| `m_amr_store` | Flat store: local index, reserve/compact, slot alloc/free, solver bridge load/store |
+| `m_amr_wave` | Nonblocking exchange engine: pooled sides, post/send/wait |
+| `m_amr_exchange` | Coarse-patch gathers (fill waves), ghost fills, fine-fine seams, coarse halo |
+| `m_amr_frame` | Grid-state swap to a block or batch and back; 6-equation fine relaxation |
+| `m_amr_registers` | Flux registers: capture during the RHS and reflux apply |
+| `m_amr_transfer` | Prolongation, restriction, reflux and restriction waves |
+| `m_amr_advance` | Batched fine RHS + RK advance, IB and Lagrangian fine services |
+| `m_amr_cluster` | Berger-Rigoutsos clustering |
+| `m_amr_regrid` | Tagging, box shaping, nesting, migration and slot rebuild |
+| `m_amr_restart` | Hierarchy checkpoint (serial and MPI-IO) |
+| `m_amr_stage` | Hooks called by `s_tvd_rk`: stage begin, fine stage, subcycled fine step, end-of-step fold |
+| `m_phase_timing` | `rank_time_wrt` phase brackets and report |
 
-## 1. Module map
+## Index spaces
 
-| File | Responsibility |
-|---|---|
-| `src/simulation/m_global_parameters.fpp` | Slot pool metadata, working-slot mirrors, `s_amr_select_slot` |
-| `src/simulation/m_amr.fpp` | AMR driver: module init/finalize; re-exports the eight per-block modules below so `use m_amr` reaches all of them |
-| `src/simulation/m_amr_state.fpp` | All per-block module state (slot pool, flat store, wave buffers, `sw_*` swap mirrors) and leaf helpers |
-| `src/simulation/m_amr_distribution.fpp` | Rank decomposition, box arithmetic, SFC cut, block ownership and owned-block lists |
-| `src/simulation/m_amr_store.fpp` | Flat store slot machinery: dense index, reserve, alloc/free/reconcile, prim and bridge loaders |
-| `src/simulation/m_amr_exchange.fpp` | Gather plans, pack/unpack, seams, ghost fills, coarse halo, and the stage/parent fill waves |
-| `src/simulation/m_amr_frame.fpp` | The grid-state swap (`s_amr_swap_to_fine`/`s_amr_restore_coarse`) and the 6-equation fine relaxation |
-| `src/simulation/m_amr_transfer.fpp` | Prolongation, restriction, reflux and the restrict/reflux/freg waves |
-| `src/simulation/m_amr_advance.fpp` | Fine stage advance (fused and batched), IB/Lagrange fine services |
-| `src/simulation/m_amr_cluster.fpp` | Berger-Rigoutsos clustering: signatures, bisection, Morton order, min-separation merge |
-| `src/simulation/m_amr_regrid.fpp` | Tagging, box shaping, nesting, slot rebuild |
-| `src/simulation/m_amr_registers.fpp` | Flux registers (capture and application) |
-| `src/simulation/m_amr_restart.fpp` | Checkpoint of the hierarchy |
-| `src/simulation/m_amr_stage.fpp` | The RK-stage hooks: stage-top halo, fine stage, end-of-step fold |
-| `src/simulation/m_time_steppers.fpp` | The driver: calls the four `m_amr_stage` hooks around the coarse RHS and RK update |
+Four integer index spaces are in play and the compiler cannot tell them apart; mixing two gives a silent wrong answer.
 
-The eight `m_amr_*` modules form a chain (each may `use` only the ones listed above it); `m_amr_exchange.fpp` is the
-largest. Every symbol they export is re-exported by `m_amr`, so callers keep writing `use m_amr, only: ...`.
+1. **Global slot `k`** (`1:amr_num_blocks`), replicated on every rank: `amr_block_level(k)`, `amr_block_owner(k)`,
+   `amr_region_lo_all(:,k)`, `amr_region_hi_all(:,k)`, `amr_owns_all(k)`. Per-block routines read the *working* slot
+   `amr_cur` set by `s_amr_select_slot`; they take no slot argument. Block loops run on every rank and `cycle` on blocks
+   the rank does not own. Flux registers are indexed by the global slot (through the dense map `amr_reg_of`).
+2. **Local slot `loc = amr_loc_of(k)`** (`1:amr_loc_n`), per rank, defined only for owned blocks (`0` = not here). It
+   indexes the last dimension of the flat store. Indices are recycled and re-densified at every reconcile
+   (`s_amr_compact_store`).
+3. **Box index** during regrid: new boxes `1:nboxes` and the old set (`old_*`) are both in scope; reading one with the
+   other's index is the classic regrid bug.
+4. **Cells.** Block regions are stored in level-0 cell indices at every level. A level-`l` block's fine extent is
+   `amr_ref_ratio**l * (region width) - 1`.
 
----
+"Coarse" in the coupling routines means the block's parent level, which is level 0 only for level-1 blocks.
 
-## 2. The four index spaces
+## Flat store and the solver bridge
 
-**This is the section to read before touching anything.** Four distinct integer index spaces are
-in play, they are all `integer`, and nothing in the type system distinguishes them. Confusing two
-of them produces a silent wrong answer, never a compile error.
+`amr_cons_st(x, y, z, var, loc)` holds the conserved state of every owned block (`amr_stor_st` is the regrid stash);
+all slots share the buffered extents `mbuf_lo:mbuf_hi`, sized for the largest block. The shared solver
+(`s_compute_rhs` and the physics hooks) takes `scalar_field` arrays, so a batch is copied into the bridge `amr_cons_br`
+(`s_amr_br_load_batch`), advanced, and copied back. A batch stacks up to `amr_bat_lim` blocks of one level along the last
+dimension (offsets `amr_bat_off`); a smaller block joins a larger leader when padding wastes at most `amr_bat_pad` of
+its cells. Fine blocks share one pooled `q_prim`/`rhs` scratch.
 
-### 2.1 Global slot index: `k`, and the working value `amr_cur`
+The store grows by `s_amr_st_reserve` (never shrinks), on the device up to `amr_grow_dev_bytes` and through the host
+above it.
 
-Range `1 : amr_max_blocks`. **Replicated on every rank**: every rank knows the level, owner, and
-region of every block in the hierarchy, whether or not it owns it. This is what indexes:
+## Grid-state swap
 
-```
-amr_block_level(k)      amr_block_owner(k)      amr_slot_live(k)
-amr_region_lo_all(:,k)  amr_region_hi_all(:,k)
-amr_isect_lo_all(:,k)   amr_isect_hi_all(:,k)   amr_owns_all(k)
-```
+The solver reads module-level grid state (`m`, `n`, `p`, `idwint`, `idwbuff`, `x_cc`, `dx`, ...).
+`s_amr_swap_to_fine` installs a block's (or batch's) grid, recomputes the spacing-dependent coefficients and pushes them
+to the device; `s_amr_restore_coarse` puts the base grid back. Any module variable derived from the grid that a kernel
+reads during the fine advance must be swapped there (see the swap contract at the `sw_*` declarations in
+`m_amr_state`) or refreshed at its use site, including its device copy; CCE OpenACC reads a stale device copy.
 
-Fine blocks occupy slots `1 : amr_num_blocks` of the pool (capacity `amr_max_blocks`).
+## The step
 
-`amr_cur` is the *working* slot. `s_amr_select_slot(islot)` sets `amr_cur = islot` and copies that
-slot's region/intersection/ownership into the scalar working mirrors (`amr_region_lo`,
-`amr_isect_lo`, `amr_rank_owns_block`, ...) that the per-block machinery reads. Most per-block
-routines take no slot argument: **they read `amr_cur` implicitly**. Calling one without a
-preceding `s_amr_select_slot` operates on whatever block was selected last.
-
-`amr_num_blocks` is the number of currently active slots, and the loops are
-`do islot = 1, amr_num_blocks` **on every rank**, with a `cycle` for blocks the rank does not own.
-The loop is therefore collective in structure even where the work is not.
-
-### 2.2 Local dense index: `loc = amr_loc_of(k)`
-
-Range `1 : amr_loc_n`, **per-rank and private**. Defined only for blocks this rank owns;
-`amr_loc_of(k) == 0` means "not live here". This is the only thing that indexes the flat field
-store's slot dimension.
-
-The two spaces are related solely through `amr_loc_of`. There is no inverse map. `loc` values are
-handed out by a counter with a recycle stack, **not derived from the live set**; see §5 and
-§11.3 for why that distinction matters.
-
-> **The two per-block arrays disagree on index space.** The field store is indexed by the *local*
-> dense index; the **flux registers are indexed by the *global* slot index**
-> (`freg(d)%%lo(:,:,:,amr_cur)` in `m_amr_registers.fpp`) and sized `1:amr_reg_cap`, which grows
-> toward `amr_max_blocks`. So `amr_cons_st(...,amr_loc_of(k))` and `freg(d)%%lo(...,k)` refer to the
-> same block through different subscripts. Passing one where the other is expected compiles
-> cleanly and silently reads another block's data.
-
-### 2.3 Box index: `k` within a regrid
-
-During `s_amr_regrid_*`, freshly clustered boxes are numbered `1 : nboxes`. This is a *third*
-space, equal to the global slot index. The regrid code holds **old** and **new** box sets
-simultaneously (`old_np`, `old_ilo`, `old_ext`, `old_level`, `old_owns` describe the pre-regrid
-set), and both are indexed in this space. Reading `old_*` with a new box index, or vice versa, is
-the classic regrid bug.
-
-### 2.4 Cell index
-
-Block regions are stored **in level-0 cell indices at every level**. A level-`l` block's fine
-extent per dimension is `amr_ref_ratio**l * region_width - 1`. So `amr_region_lo_all` is *not* in
-the block's own resolution, and comparing a region bound against a fine-grid loop bound requires
-the scale factor.
-
----
-
-## 3. The flat field store
-
-```fortran
-real(stp), allocatable, dimension(:,:,:,:,:) :: amr_cons_st, amr_stor_st, amr_gst_a, amr_gst_b
-!                                               (x, y, z, var, LOCAL slot)
-$:GPU_DECLARE(create='[amr_cons_st, amr_stor_st, amr_gst_a, amr_gst_b]')
-integer :: amr_st_cap = 0
-```
-
-One contiguous device-resident array per role, replacing a per-slot vector of independently
-allocated `scalar_field`s. This is the layout AMReX's `MultiFab` single-chunk path uses and the
-prerequisite for batching one kernel over all blocks.
-
-| Array | Role |
-|---|---|
-| `amr_cons_st` | Conserved state. **Authoritative** for `q_cons` on fine blocks. |
-| `amr_stor_st` | Regrid stash: the pre-regrid state, read to seed new blocks |
-
-Every slot carries the same buffered extents (`mbuf*_lo : mbuf*_hi`), so one array serves them all.
-The cost of that uniformity is that every slot is sized for the *largest* block, not its own.
-
-`amr_st_cap` is the number of local slots the store is sized for.
-
-### 3.1 The copy bridge
-
-`s_compute_rhs`, `s_ibm_correct_state`, `s_pressure_relaxation_procedure` and
-`s_infinite_relaxation_k` all take `type(scalar_field), dimension(sys_size)` and also serve the
-monolithic (non-AMR) path, so the flat store cannot be passed to them. A pointer view into the
-store is **not attachable on the OpenMP-offload backend**.
-
-A single block-shaped `scalar_field` array bridges instead:
+`s_tvd_rk` calls, per RK stage:
 
 ```
-amr_cons_br  --s_amr_br_load-->  call  --s_amr_br_store-->  amr_cons_st
+s_amr_stage_begin          coarse cons halo for the coarse RHS
+s_compute_rhs              level 0                                           [PH_COARSE]
+s_amr_stage_fine           (lock-step only)
+  fill waves               level-1 patches from level 0, then each level from its parent   [PH_HALO, PH_GATHER]
+  seam halo                fine-fine faces between same-level blocks                       [PH_SEAM]
+  batched advance          RHS + RK per batch, registers captured in the RHS                [PH_RHS, PH_RK, PH_SWAP]
+  reflux                   level-1 faces as one wave, then one batched apply                [PH_REFLUX]
 ```
 
-All four dummies are `intent(inout)` (`s_compute_rhs` writes the buffer region through
-`s_populate_variables_buffers`), so **both directions are required at every crossing**. This
-round trip, once per block or batch per RK stage, is a first-order cost.
-
-`amr_br_batch` is the number of blocks the bridge spans (`amr_bat_max`, 8). In the batched
-advance (`s_amr_fine_stage_advance_batched`) owned blocks of equal level and extent are stacked
-two ghost shells apart along the last active dimension and served by one `s_compute_rhs` call;
-a smaller block joins a batch led by a larger one when padding it to the leader wastes at most a
-fixed fraction (0.10) of its cells. Physics with per-block fine-advance hooks that no batched
-equivalent serves (phase change, QBMM, moving particle clouds) is rejected by the case validator.
-
----
-
-## 4. Per-block geometry and the swap
-
-Because the shared solver reads module-scope grid state (`x_cb`, `dx`, `idwint`, `idwbuff`, ...),
-running it on a fine block requires **temporarily overwriting the global grid state** with that
-block's:
+and after the stage loop:
 
 ```
-s_amr_swap_to_fine     -> rebuild coords, extents, WENO coefficients; push to device
-   ... solver call ...
-s_amr_restore_coarse   -> put the coarse grid state back
+s_amr_subcycle_fine        (subcycled only) level 1 takes two dt/2 steps with time-interpolated ghosts,
+                           level 2 two steps per level-1 step; then the registers correct the coarse state
+s_amr_step_fold            restrict each level into its parent, bottom-up, and reflux level>=2 into its parent  [PH_RESTR]
 ```
 
-`s_amr_swap_to_fine` performs several host array copies plus heap allocations and calls
-`s_amr_sync_grid_state_to_device` (several `GPU_UPDATE` groups); `s_amr_restore_coarse` does the
-reverse. The swap is **not** a leading cost, but it is why the fine advance cannot simply be
-hoisted out of the per-block loop.
-
----
-
-## 5. Slot lifecycle and store sizing
-
-Six routines, in `m_amr_store.fpp`:
-
-| Routine | Effect |
-|---|---|
-| `s_amr_alloc_slot(islot)` | Full slot: dense index + geometry (+ per-slot `rhs`/gated `q_prim` for L0 **tile** slots only). Idempotent for full slots; **upgrades a live stash-only slot in place** (keeps its index and stor data, adds the arrays). |
-| `s_amr_alloc_slot_stash(islot)` | **Stash-only slot**: dense index + `amr_slot_live` only, no geometry or field arrays. Used for migration replicas, which only ever touch their `amr_stor_st` half. |
-| `s_amr_free_slot(islot)` | Idempotent, handles both flavors (each array family's teardown guarded on its own `allocated`; the full-vs-stash discriminator is `allocated(x_cb)`). Pushes the index onto `amr_loc_free`. |
-| `s_amr_st_reserve(nloc)` | Grows the store, increments capped at 16 slots. Never shrinks the allocation. |
-| `s_amr_scr_init()` | Allocates the **pooled `q_prim`/`rhs` advance scratch** (`amr_scr_prim`/`amr_scr_rhs`), once, on every rank. Called from module init, where `mbuf*` are final. |
-| `s_amr_compact_store()` | Re-densifies the local index space **in place on the device**, every reconcile. Does NOT realloc. |
-
-**Fine blocks carry NO per-slot `q_prim`/`rhs`.**
-The fused advance (`s_amr_fine_stage_advance_batched`: rhs then rk on one slab) leaves no
-cross-block lifetime, so all fine blocks share one slot-shaped scratch pair. Sharing the scratch
-keeps the per-slot footprint to its share of the flat store and avoids per-slot alloc/free
-churn on the device allocator. Per-slot device cost is the slot's share of the flat
-store (`amr_cons_st` + `amr_stor_st`).
-
-### 5.1 How the store grows and the host-coherence contract
-
-`s_amr_st_reserve` early-returns when `nloc <= amr_st_cap`. Otherwise it grows by
-`max(min(oldcap/4, 16), 8)` slots and reallocates, staging **through the host**:
-
-```
-GPU_UPDATE(host=...) -> tmp = store -> DEALLOCATE -> ALLOCATE(newcap) -> zero -> copy -> GPU_UPDATE(device=...)
-```
-
-The increment cap matters at scale: a proportional increment is itself store-sized, and its
-transient (old plus new allocation) can exceed device memory.
-
-**The host round trip is LOAD-BEARING, not incidental.** The rebuild's overlap carry-forward
-(`s_amr_regrid_rebuild_slots`) reads `amr_stor_st` on the HOST without pulling first. It relies
-on every store resize leaving host == device, so that the migration stash's host writes (pushed
-to device at write time) survive a mid-rebuild grow. A device-only resize breaks this path
-silently (wrong answers under regrid churn, not a crash). Until the carry-forward is converted
-to a device kernel, any change to `s_amr_st_reserve` must preserve: *after a resize, the full
-host copy equals the device copy*.
-
-### 5.2 Re-densification of the local index space
-
-`amr_loc_n` is `(live slots) + (recycle-stack depth)` mid-rebuild, and
-`s_amr_regrid_rebuild_slots` allocates new blocks while old stashes are live. Four mechanisms
-keep the store's capacity bounded:
-
-1. **`s_amr_compact_store()` runs at EVERY reconcile**, renumbering `amr_loc_of` densely and
-   moving slot data **in place on the device** (`s_amr_st_move_slot`, no staging array, no
-   realloc). In-place is safe because moves are processed in ascending source order: each
-   destination (the rank of its source among live indices) is <= its source, and every pending
-   source lies above the current destination. Moved slots' host copies go stale; that is the
-   store's normal state between rebuilds, and §5.1's contract applies to *resizes*, not moves.
-2. So `amr_loc_n` equals the live count at every reconcile, and `amr_st_cap` plateaus at
-   the **rebuild-transient high-water** (old + new generations coexisting) instead of growing
-   for the whole run. Without re-densification, at np >= 2 the owned set is a shifting SFC
-   window plus received replicas, so the union of indices ever handed out grows without bound.
-3. The rebuild loop **early-frees** old-only slots the moment their last covering new box is
-   built (`last_use` per old block, geometric region overlap as a conservative superset of every
-   stash read), so freed indices recycle into the very next allocations and the transient union
-   itself stays small.
-4. Replicas received in migration are **stash-only** slots (see table above).
-
-**Instrumentation:** `[amr-cap] rank r live n cap c` prints on stderr at every reconcile when
-`rank_time_wrt` is on. Per-rank store capacity is the invariant quantity (device memory =
-f(live local boxes)), and wall time cannot see it. `cap - live` is the transient envelope.
-
-> **Comparison.** AMReX and Parthenon have no analogous quantity, because neither *allocates* a
-> local index. AMReX's `localindex` is a binary search over the sorted owned-box list; Parthenon's
-> `lid = n - nbs` is recomputed contiguous every regrid. In both, the index space *is* the live
-> set by construction, so it cannot grow. Re-densification gets MFC the same invariant at
-> reconcile granularity; deleting `amr_loc_free`/`amr_loc_nfree` outright ("derive the index")
-> is a possible cleanliness follow-up. See §11.3.
-
----
-
-## 6. The timestep
-
-Within each RK stage `s`, `s_tvd_rk` (`m_time_steppers.fpp`) calls the `m_amr_stage` hooks:
-
-```
-            s_amr_stage_begin          ! cons halo hoisted ahead of the coarse RHS
-PH_COARSE   s_compute_rhs on the coarse (level-0) grid                          [1 per stage]
-
-            s_amr_stage_fine:
-  PH_HALO     s_amr_exchange_coarse_cons_halo                                   [1 per stage]
-  PH_GATHER   s_amr_stage_fill_wave     ! ALL level-1 fills as ONE F1 wave      [1 per stage]
-              do ilev = 2, amr_num_levels
-  PH_GATHER     s_amr_parent_fill_wave(ilev)  ! level-lev fills as one F2 wave  [1 per LEVEL]
-  PH_SEAM     s_amr_fine_fine_drain     ! all levels together                   [1 per stage]
-  PH_RHS/RK   s_amr_fine_stage_advance_batched                                  [1 per BATCH]
-  PH_REFLUX   s_amr_reflux_faces_wave   ! all L1 faces as one wave              [1 per stage]
-              s_amr_apply_reflux
-```
-
-Then after the stage loop, `s_amr_step_fold` (per-level waves at np>1; in reverse slot order at np=1):
-
-```
-PH_RESTR    s_amr_freg_wave
-            do islot = amr_num_blocks, 1, -1
-              s_restrict_fine_to_coarse
-              s_amr_reflux_to_parent
-```
-
-**Multiplicity is the thing to notice.** `PH_COARSE`, `PH_HALO` and `PH_SEAM` are once per stage;
-everything else is once per *batch*. With hundreds of
-blocks that is the difference between a handful of calls and hundreds of calls per step.
-
-Three facts that are easy to get wrong:
-
-- **`PH_COARSE` is not part of `PH_RHS`.** The coarse `s_compute_rhs` is bracketed separately.
-  Charging it to `PH_RHS` overstates the fine advance's share of device time.
-- **The reflux loop skips level >= 2**, so `PH_REFLUX` covers level-1 blocks only.
-- **The loops run on every rank** and `cycle` on non-owned blocks, so loop *trip count* is global
-  even though the work is local.
-
----
-
-## 7. The fill waves are the only coarse-patch gather
-
-A fine block's coarse-side data (`amr_cg`, the padded patch of its parent level) is assembled by exactly two exchange waves on
-the `m_amr_wave` engine: `s_amr_l1_fill_exchange` (level 1, from the coarse grid's owners) and `s_amr_parent_fill_exchange`
-(level >= 2, from the parent block's owner), each followed by a per-box `*_consume`. The per-stage ghost fill ships only the
-patch's hollow shell; init and the regrid rebuild call the same waves with `full = .true.` and prolong the whole block from the
-consumed patch, level by level, so every parent is built before its children read it. There is no per-box gather, no chunked
-plan and no deferred send pool any more; a rebuild is one wave per level, preceded by the stash-migration wave (band 4) that
-ships each old block's fine state to the ranks whose new boxes overlap it.
-
----
-
-## 8. Communication
-
-### 8.1 Inventory
-
-The `m_amr_*` modules (mostly `m_amr_exchange.fpp` and `m_amr_transfer.fpp`) mix blocking `MPI_SEND`/`MPI_RECV` sites with `MPI_ISEND`/`MPI_IRECV`/`MPI_WAITALL`
-waves and a few `MPI_ALLREDUCE`s; `m_amr_regrid.fpp` adds the regrid collectives
-(`MPI_ALLREDUCE`, `MPI_ALLGATHER(V)`).
-
-**Static call sites are not expanded counts.** Many sit inside Fypp `#:for` loops over
-dimensions, so a `grep` undercounts what actually executes: `s_amr_freg_faces_req` shows 2
-`s_amr_wave_req_raw` call sites but posts **6** requests in 3D (three dimensions x lo/hi). Read the
-Fypp, not the grep, when sizing a communication path.
-
-**Blocking calls in a globally ordered block loop with fixed tags** produce head-of-line
-blocking: rank A cannot progress past block *i*'s rendezvous even when block *i+1*'s partner is
-ready. This convoy effect is why the pre-wave exchanges were dominated by *wait* rather than
-bandwidth, and why every exchange now runs as one wave (section 7).
-
-### 8.2 Reflux exchange
-
-`s_amr_reflux_faces_wave` (band 0): every rank first posts one zero-copy `IRECV` per face it
-refluxes of every level-1 block another rank owns, straight into its own register slot
-(`s_amr_freg_faces_req`, `dir = 2`); the owners then pull the faces some other rank refluxes to
-the host (`s_amr_freg_faces_update`) and post one `ISEND` per (face, participating rank); one
-`WAITALL` closes the wave, after which receivers push their faces to the device. Each message
-carries its own keyed tag (`f_amr_m1_tag`), so matching does not depend on posting order.
-`s_amr_freg_wave` (band 1) is the same shape for the level>=2 child faces a parent's owner needs.
-Reflux is almost entirely communication, and its cost is per-call *wait*, not bytes.
-
-Reflux is the **sink** for load skew, not its source: imbalance originates in `PH_RHS` and is
-absorbed here.
-
----
-
-## 9. Regrid
-
-`s_amr_regrid` (`m_amr_regrid.fpp`), in order, with three early exits:
-
-```
-PH_RGHALO    s_amr_exchange_coarse_cons_halo
-             s_amr_compute_lag_supp                    (bubbles_lagrange only)
-PH_RGTAG     s_amr_regrid_tag_cells                    -> tag_grid
-PH_RGCLUS    s_amr_regrid_cluster_tags                 -> boxes, nboxes
-             if (nboxes == 0) return                   ! nothing tagged anywhere
-PH_RGSHAPE   s_amr_regrid_shape_boxes
-             if (nboxes == 0) return                   ! all boxes died in the domain margin
-             s_amr_regrid_nest_children
-             s_amr_check_box_caps                      ! invariant: no box exceeds its level cap
-             s_amr_regrid_boxes_unchanged -> same
-             if (same) return                          ! identical box set: keep live slots
-PH_RGMIG     s_amr_regrid_stash_migrate                -> amr_stor_st, ownership
-PH_RGBUILD   s_amr_regrid_rebuild_slots                -> amr_cons_st, new slots
-```
-
-The `same` early exit is what makes regrid cost bimodal: a regrid that changes nothing is nearly
-free, so averaging cost over regrid *calls* understates the cost of a real one. `amr_snap` widens
-this exit by letting a new box within a few cells of a live same-level block take that block's
-box.
-
-### 9.1 stash_migrate
-
-Writes each old block's state into `amr_stor_st` at its **old** local index, exchanges blocks whose
-owner changed, sets the new `amr_num_blocks`, and calls `s_amr_assign_block_owners`
-(SFC/work-balanced, `s_amr_sfc_cut`).
-
-### 9.2 rebuild_slots and the ordering constraint
-
-```fortran
-do k = 1, nboxes
-    ks = k
-    ...
-    if (amr_block_owner(ks) == proc_rank) call s_amr_alloc_slot(ks)
-    ...
-    amr_cons_st(fi,fj,fk,i, amr_loc_of(ks)) = amr_stor_st(ofi,ofj,ofk,i, amr_loc_of(kks))
-    !                       ^^ NEW slot                                  ^^ OLD slot, kks = kk
-```
-
-**This line is why old slots cannot be freed wholesale before the rebuild.** The stash is read at
-*old* local indices for `kk = 1, old_np` while new slots are being allocated, so both index sets
-must be simultaneously valid. A blanket free-before-allocate would produce silent wrong answers,
-not a crash. Instead the rebuild loop precomputes `last_use(kk)` (the last new box whose region
-overlaps old block `kk`, a conservative geometric superset of every stash read) and frees each
-old-only slot at the top of iteration `last_use(kk) + 1`. The freed dense indices recycle into
-the very next allocations, which is what keeps the transient union (and with it the store's
-capacity plateau) small.
-
-`s_amr_reconcile_slots` runs at the end (`PH_RBREC`), frees the remaining now-dead slots, and
-calls `s_amr_compact_store` (which re-densifies the index space every time, §5.2).
-
----
-
-## 10. Phase instrumentation
-
-`m_phase_timing.fpp` defines twelve top-level phase ids (`PH_HALO`, `PH_GATHER`, `PH_GFILL`,
-`PH_SEAM`, `PH_RHS`, `PH_RK`, `PH_REFLUX`, `PH_REGRID`, `PH_L0`, `PH_COARSE`, `PH_SWAP`,
-`PH_RESTR`) bracketed by `s_phase_tic` / `s_phase_toc`. Both ends issue `GPU_WAIT()`, so a bracket
-measures completed device work, not launch return. The brackets are disjoint, so the report's
-`RESIDUAL` (step-loop wall minus the sum of the phase means) is the unbracketed remainder; a
-re-entered bracket (a shared routine called from inside its own phase) measures only its
-outermost pair.
-
-Everything is gated on `rank_time_wrt`: with it off the brackets return immediately and nothing
-is reported. **Benchmark cases usually set it `.false.`** to keep the drains and I/O out of the
-timings, so the phase budget is invisible unless it is turned on deliberately. The report prints
-mean/max over ranks per phase, its share of the step-loop wall, imbalance (max/mean), calls per
-rank and ms/call. Zero-time phases are dropped from the report, so a declared id that is never
-`tic`'d is indistinguishable from one whose code is missing; per-call cost, not total, is the
-diagnostic quantity when block counts differ between runs.
-
----
-
-## 11. Invariants and traps
-
-### 11.1 Checkable invariants
-
-| Invariant | Where it can break |
-|---|---|
-| `amr_loc_n == live + amr_loc_nfree` | Recycle-stack bookkeeping in `alloc`/`free` |
-| `amr_loc_of(k) > 0` iff rank owns live block `k` | `alloc`/`free` ordering in rebuild |
-| `amr_st_cap >= amr_loc_n` | `s_amr_st_reserve` post-condition |
-| Every `@:ALLOCATE` has a matching `@:DEALLOCATE` | The store's realloc paths |
-| No box exceeds its level's slot cap | `s_amr_check_box_caps` |
-| `amr_reg_cap >= amr_num_blocks` | Flux registers are indexed by *global* slot (§2.2) |
-| Block regions are in L0 cell indices at all levels | Any new geometry code |
-
-### 11.2 Traps
-
-- **Implicit `amr_cur`.** Per-block routines take no slot argument. A missing `s_amr_select_slot`
-  silently operates on the previous block.
-- **Two-space confusion in regrid.** `old_*` arrays are indexed by old box index; the live arrays
-  by new. Both are `integer` and both are in scope.
-- **`amr_buf` does double duty**: it sets the ghost width *and* enters the box-merge threshold
-  `thr = buff_size + 2*amr_buf`. Changing it to tune ghosts also changes the box topology.
-- **`rocm-smi` GPU[N] enumeration need not match HIP device N.** Rank-to-device is
-  `dev = mod(local_rank, devNum)`; do not infer the slow rank from the busiest GPU row.
-- **Recycle-stack depth is tautological when read at a high-water print**: it is printed only when
-  the high-water rises, which requires the stack to be empty. Instrument where the value can vary.
-
-### 11.3 Known structural weaknesses
-
-1. **The local index is allocated, not derived** (§2.2, §5.2). AMReX derives it by binary search
-   over the sorted owned-box list; Parthenon recomputes `lid` contiguous every regrid. The index
-   space is re-densified at every reconcile, which gets the same invariant at reconcile
-   granularity; deriving it outright (deleting `amr_loc_free`/`amr_loc_nfree`) is a cleanliness
-   item, not a memory one.
-2. **Store growth stages on the device up to a byte budget, and through the host above it** (§5.1).
-   The carry-forward and the stash are device kernels (`s_amr_overlap_copy_device`,
-   `s_amr_stash_copy_device`), so growth no longer needs host == device; what remains is the
-   transient: the device-native path holds old + staging at the moment of growth, which is why
-   `amr_grow_dev_bytes` routes a large store to the slower host round trip instead.
-3. **Slots are sized for the maximum block, not their own** (§3). AMReX's single-chunk arena sums
-   actual per-box bytes. This is an independent multiplier equal to the max/mean box-volume ratio;
-   measure that ratio before deciding it is worth the change to non-uniform striding.
-4. **Coverage is concentrated in the mesh machinery, not the physics couplings.** 49 of the 60
-   AMR test cases pin `amr_max_grid_size` and 30 run dynamic regrid, but most physics couplings
-   carry one case each and only at a single rank: the 6-equation model, hypoelasticity (with
-   continuum damage), acoustic sources, 1D MHD/RMHD, body forces, `amr_ref_ratio = 4` and every
-   `num_fluids > 1` case are np=1 only. Chemistry (reactions, advection and species diffusion),
-   immersed boundaries and the multi-level hierarchy do have np>1 cases. Since
-   the coarse/fine seam and whole-block ownership are where the defects have been, a new test is
-   worth more as a multi-rank physics coupling than as another regrid variant.
-
----
-
-## 12. Related documents
-
-| Document | Content |
-|---|---|
-| `docs/documentation/amr.md` | User-facing overview, parameters, usage |
-
-## AMR levels (silent-index traps)
-
-- **A level-`l` block's fine extent is `amr_ref_ratio**l * (coarse-region width) - 1`, NOT `amr_ref_ratio*width`.**
-  The `amr_ref_ratio*width` form is correct only for the level-1 initial block; nested boxes compound by
-  `amr_ref_ratio` per level (`amr_ref_ratio**level`). Every fine-extent computation uses
-  `amr_ref_ratio**amr_block_level`: geometry (`s_set_amr_fine_geometry`), the restart-reader extent check,
-  load-weight, `fmul`. Assuming `amr_ref_ratio*width` rejects level>=2 blocks as corrupt (for example in a
-  restart reader's extent check).
-- **"coarse" in the AMR coupling routines means the block's PARENT level (`l-1`), not the base grid (level 0).**
-  For a level-1 block the parent IS L0; for level>=2 the block folds to/from its parent block's fine array.
-  the fill waves, `s_interpolate_coarse_to_fine`, and the restrict/reflux path all operate in the
-  parent-fine frame; assuming L0 silently corrupts level>=2 coupling.
-- **The fine advance SWAPS the coarse grid globals (`m/n/p`, `idwint/idwbuff`, coords, `acoustic_source`)
-  to a fine block and restores them after; see the SWAP CONTRACT block at the `sw_*` declarations
-  in `m_amr_state.fpp`.** Any module-level variable DERIVED from the grid that a kernel reads during the fine advance
-  must be swapped there or refreshed per fine call at its use site; if it is `GPU_DECLARE`'d, its DEVICE copy
-  must be refreshed too. A stale device copy of coarse bounds reads out of range on the fine grid under **CCE
-  OpenACC only** (NVHPC/CCE-omp evaluate bounds host-side). This is why `ab_int` is refreshed by an
-  unconditional `GPU_UPDATE` in `s_compute_rhs`. A CPU-only or NVHPC-acc pass does not exercise this class; it is CCE-acc-specific.
+## Regrid
+
+`s_amr_regrid`, every `amr_regrid_int` steps: halo, tag (`s_amr_regrid_tag_cells`), cluster
+(`s_amr_regrid_cluster_tags`), shape (pad, clamp, cap, keep clear of bodies, sources and bubble clouds), nest, check
+caps and disjointness, and return early if the box set is unchanged (`amr_snap` widens this). Otherwise
+`s_amr_regrid_stash_migrate` stashes each old block at its old local index, assigns owners and ships stashes to new
+owners, and `s_amr_regrid_rebuild_slots` builds the new blocks level by level: overlap with an old block is copied from
+the stash, the rest is prolonged. Old slots are freed only after their last reader (`last_use`), then
+`s_amr_reconcile_slots` compacts the store.
+
+## Communication
+
+Every exchange is a wave on `m_amr_wave`: all receives posted, sends packed and posted, one wait. Both sides derive the
+same transfer list from replicated metadata, so no handshake is needed, and messages carry keyed tags, so matching does
+not depend on posting order. Waves: coarse halo, level-1 and parent fill waves, seam halo, reflux faces, restriction and
+level>=2 register waves, regrid migration. With `amr_device_pack` the fill waves pack and unpack in one fused kernel
+per family. Regrid adds a few collectives (tag reductions, the box list, owners).
+
+## Instrumentation
+
+`rank_time_wrt = T` brackets the step phases (`PH_*` in `m_phase_timing`) with device-synchronizing timers and prints
+mean, max and imbalance per phase, plus the block-balance report at each regrid. With it off the brackets return
+immediately.
+
+## Invariants and traps
+
+- `amr_loc_of(k) > 0` exactly when this rank owns live block `k`; `amr_st_cap >= amr_loc_n`.
+- No box exceeds its level's cap (`s_amr_check_box_caps`); same-level boxes are disjoint (`s_amr_check_box_disjoint`);
+  a level>=2 box lies in exactly one parent.
+- A missing `s_amr_select_slot` makes a per-block routine act on the previous block.
+- `amr_buf` sets the tag padding and also enters the box-merge distance; changing it changes the box topology.
+- The rank-to-GPU map is `mod(local_rank, ndevices)`; `rocm-smi` numbering need not match.

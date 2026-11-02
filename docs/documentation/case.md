@@ -769,24 +769,6 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `cons_vars_wrt`         | Logical | Write conservative variables |
 | `prim_vars_wrt`         | Logical | Write primitive variables	|
 | `rank_time_wrt`         | Logical | Print the per-phase wall-time budget of the AMR step and the AMR instrument reports |
-| `amr`                   | Logical | (Experimental) Enable block-structured AMR: a 2:1 refined level-1 block with gradient-based dynamic regrid and conservative coupling with refluxing. Requires WENO reconstruction, SSP-RK3, model_eqns=2 or 3; num_fluids > 1 requires mpp_lim; supports physical viscosity. |
-| `amr_block_beg(i)`      | Integer | Refined-block start cell index in direction $i$ (level-0 index space) |
-| `amr_block_end(i)`      | Integer | Refined-block end cell index in direction $i$ (level-0 index space) |
-| `amr_regrid_int`        | Integer | Steps between AMR regrid events (0 = static block, i.e. NO adaptivity). The tag sweep is per-cell and flat in block count, so a larger interval is cheap: 8 measured 1.39x faster than 2 in 3D. Raise it unless the refined feature moves quickly |
-| `amr_tag_eps`           | Real    | Relative density-gradient threshold for AMR refinement tagging (default 0.1) |
-| `amr_tag_abs`            | Logical | Tag on the largest absolute face jump of density, max over directions of max(abs(rho(i+1)-rho(i)), abs(rho(i)-rho(i-1))) >= `amr_tag_eps` (a density), as AMReX's and PeleC's dengrad tagging does; for like-for-like comparisons with those codes. Default F (the relative central difference) |
-| `amr_place_owner`       | Logical | Owner-aware block placement: each refined block goes to the rank owning most of the coarse cells under it (level 1: the level-0 rank; level 2: the parent's owner), so the per-stage coarse-fine gather and the restriction stay on that rank. A rank more than 5% above the mean fine work sheds blocks, first to the least-loaded rank owning adjacent coarse cells, then to any rank. Results match the default placement to round-off. Default F (cost-weighted Morton cut) |
-| `amr_buf`               | Integer | Coarse-cell padding around tagged cells when regridding (default 3) |
-| `amr_snap`              | Integer | Regrid hysteresis: a new box within this many coarse cells per face of a live block of the same level takes the live block's box, so a feature drifting by a cell or two does not re-create every block; the whole regrid then skips when every box snaps. Must be <= `amr_buf` - 2. Default 0 in Fortran; the toolchain sets min(2, `amr_buf` - 2) with the batching default when `amr_regrid_int > 0` and `amr_buf >= 3` (an explicit value is never overridden) |
-| `amr_device_pack`       | Logical | Pack and unpack the per-stage coarse-patch gather (F1/F2) over the plan's flat transfer list instead of one launch per transfer. The sends fuse to one kernel per family per stage; the receives fuse per contiguous (box, peer) run, so measured at np=8 the pack dispatches fall about 89x and the unpack about 4.3x. Wire bytes and floating-point values are unchanged. Requires `amr`; the non-polytropic QBMM pb/mv twin keeps its per-transfer path. Default F in Fortran; the toolchain turns it on with the batching default when `amr_max_grid_size` is pinned at 64 or below (it pays where blocks are many and small: -9 % wall at cap 32, -0.14 s/step at cap 64, +4.5 % at cap 96). |
-| `amr_subcycle`          | Logical | Time subcycling: each refined level takes two steps per step of its parent, and `dt` is the level-0 step. Level 0 steps first; each refined level then takes two steps of half its parent's with ghosts interpolated in time from the parent state, and the face-flux registers correct the parent state afterwards (Berger-Colella), so the result is conservative. Up to two refined levels (`amr_max_level <= 2`), `amr_ref_ratio = 2` and SSP-RK3; not with moving immersed boundaries, chemistry, IGR or Lagrangian bubbles. Default F (every level advances at `dt`). |
-| `amr_prolong`           | Integer | Prolongation of the fine ghost cells from the parent level: 1 (default) minmod-limited linear; 2 the conservative quartic average of five parent cells per direction, falling back to MC-limited linear (for both halves of a parent cell together) where it would leave the range of its three nearest parents, so smooth flow gets a high-order coarse-fine interface and discontinuities stay non-oscillatory. 2 requires `amr_ref_ratio = 2`. Regrid seeding uses the same quartic, so newly refined cells match the ghosts at the coarse-fine faces; multi-fluid volume fractions keep the limited linear form |
-| `amr_max_blocks`       | Integer | Upper bound on the GLOBAL refined-block count. Sizes replicated per-rank METADATA (~11 kB/block); block slots themselves are allocated lazily for blocks a rank owns, so this is not N x device memory. Exceeding it silently truncates the refined region (the clusterer warns). Must be >= 1 (default 1024) |
-| `amr_max_grid_size`    | Integer | Absolute cap on a refined block's coarse-cell extent per dimension, the AMReX max_grid_size concept; must be >= 2 when set (default 0). With 0 the cap is derived from the decomposition and so shrinks as ranks are added, which tiles a fixed feature into more blocks the further you scale and makes the box set depend on the rank count. Setting it pins the cap, so the box set is identical at every rank count. The value may exceed half a rank subdomain: the solver scratch is then sized to the cap rather than to the subdomain, so per-rank memory grows as the cap raised to the number of dimensions |
-| `amr_max_level`        | Integer | Maximum AMR refinement depth (number of refined levels above L0); must be >= 1 (default 1). Multi-level nesting (>= 2) is supported: static AMR (`amr_regrid_int = 0`) nests up to level 2, dynamic regrid (`amr_regrid_int > 0`) nests deeper |
-| `amr_cluster_eff`       | Real    | Berger-Rigoutsos min tag efficiency a clustered block box reaches before splitting stops; must satisfy 0 < eff <= 1 (default 0.7) |
-| `amr_blocking_factor`   | Integer | Minimum block-box extent in coarse cells the Berger-Rigoutsos bisection may produce; raises the floor of 2 so clustering stops over-generating boxes that the min-separation merge then discards; must be >= 1 (default 4; 1 disables the minimum, which lets the bisection run to the block cap) |
-| `amr_ref_ratio`             | Integer | AMR refinement ratio between coarse and fine levels; must be 2 or 4 (default 2). Only amr_ref_ratio = 2 is supported with multi-level AMR. |
 | `alpha_rho_wrt(i)`      | Logical | Add the partial density of the fluid $i$ to the database \|
 | `rho_wrt`               | Logical | Add the mixture density to the database	 |
 | `mom_wrt(i)`            | Logical | Add the $i$-direction momentum to the database	 |
@@ -902,167 +884,34 @@ It also cannot be enabled with `flux_wrt`, `heat_ratio_wrt`, `pres_inf_wrt`, `c_
 
 ### 7.1. Adaptive Mesh Refinement (AMR) {#sec-amr}
 
-MFC supports block-structured AMR (Experimental) via up to `amr_max_blocks` 2:1 refined level-1 blocks
-that coexists with the base-level solve.
-The fine block is initialized from the base grid by piecewise-linear interpolation and
-remains continuously coupled to the base solve through conservative ghost-cell exchange
-and flux refluxing at the coarse–fine interface.
+Block-structured AMR (experimental): refined blocks over the base grid, rebuilt around high density gradients every
+`amr_regrid_int` steps, coupled to the base grid by conservative ghost fills, refluxing and restriction. Algorithm,
+supported physics and limitations: @ref amr. Requires `model_eqns = 2` or `3`, `time_stepper = 3`, WENO or IGR, and a
+uniform Cartesian grid.
 
-**Restrictions.**
-AMR requires WENO reconstruction (`recon_type = 1`, any order), SSP-RK3 time-stepping
-(`time_stepper = 3`), and the 5- or 6-equation model (`model_eqns = 2` or `3`; for 6-eq the per-stage pressure relaxation also runs on each fine block).
-Multiple fluids (`num_fluids > 1`) are supported and additionally require `mpp_lim`,
-whose volume-fraction clamp+renormalize maintains coarse/fine alpha consistency; the
-per-fluid masses are refluxed exactly, and volume fractions are prolonged with a
-sum-preserving closure (fine-level volume fractions sum to one by construction).
-Physical viscosity (`viscous = T`) is supported: the viscous stress/work travels through
-the momentum- and energy-equation source fluxes, which are captured into the same
-coarse–fine flux registers as the advective fluxes, so the interface is refluxed against
-the matched *total* (advective + viscous) flux and energy — including viscous work — is
-conserved. Fine-ghost velocity gradients at the coarse–fine boundary are taken from the
-conservative-linear prolongation of the coarse state (no special gradient reconstruction);
-that interface inconsistency is bounded and conservation is enforced by the flux-register
-matching. The density-gradient regrid tagger does not sense shear or boundary layers well,
-so viscous features may need a static or generously buffered block (error-estimator taggers
-are future work).
-Euler-Euler bubbles (`bubbles_euler`), QBMM (`qbmm`) and phase change (`relax`) are rejected
-under AMR.
-Chemistry (`chemistry = T`) is supported for reactions and advection: the species partial
-densities are flux-based conserved variables refluxed through the same registers, the
-cell-local reaction source runs on the fine block through the shared RHS (matching the
-coarse per-stage timing), and prolongation rescales the species so their sum equals the
-continuity density (`sum(Y_k) = 1`, `Y_k >= 0` on the fine level by construction). Chemistry
-AMR runs single- and multi-rank: the fine block's cons->prim conversion widens over the ghost
-shell, so the temperature (the reacting-EOS Newton guess) is halo-exchanged with the coarse
-state at rank seams (mirroring the diffusion path) — without it the seam-ghost guess is
-uninitialized and the conversion diverges to NaN. Species mass diffusion (`chem_params%%diffusion
-= T`) is also supported: the mixture-averaged species mass fluxes (and the thermal-conduction +
-enthalpy energy flux) travel through the source-flux array and are captured into the same coarse–fine
-registers as the advective fluxes — like the viscous stress fluxes — so element mass and total
-energy conserve across the block boundary through refluxed and regridded advances.
-Static immersed boundaries (`ib = T`) are supported: each fine block carries its own
-fine-grid IB state (markers, ghost points, levelset, image points, interpolation coefficients)
-computed from the body geometry at fine resolution once at initialization, and the fine
-advance applies the ghost-cell IB state correction on the block after each RK update (mirroring
-the coarse per-stage timing). A fixed body placed inside a static block is thus resolved on the
-refined level. The IB forcing is non-conservative by construction (the ghost-cell method injects
-mass/momentum/energy at the body), so the conservation defect is nonzero in the body region while
-the flux reflux still conserves to machine precision away from it. A body in prescribed motion
-(`moving_ibm = 1`) is also supported: the fine block's IB markers/ghost points are rebuilt each fine
-RK stage at the body's stage-time position, so the refined body tracks its prescribed trajectory. Supports one or more
-non-STL bodies, static or in prescribed motion; with dynamic regrid every candidate box expands
-to fully contain each body at its live position plus a margin, the fine IB state is rebuilt from
-geometry after each regrid, and a per-substage guard aborts if a moving body reaches its block
-boundary between regrids (reduce `amr_regrid_int` or increase `amr_buf`). Force-driven motion
-(`moving_ibm = 2`) and STL geometry are gated pending validation. Under MPI a body contained within one rank's
-subdomain is bit-exact across decompositions; a body spanning a rank seam is rejected at startup
-(the fine-IB image-point stencil across the seam is not yet decomposition-exact), so keep the body
-inside a single rank's subdomain (use fewer ranks or reposition it).
-Lagrangian bubbles are supported with the cloud excluded from fine blocks: two-way coupling
-lives on the coarse grid, regrid suppresses tags and clips boxes around the cloud's padded
-bounding box, EL volume fractions prolong without the sum-to-one closure (their sum is the
-local liquid fraction, not 1), and a per-stage guard aborts if the cloud reaches an active
-block (reduce `amr_regrid_int` or increase `amr_buf`).
-The IGR solver is supported with restriction-only coarse/fine coupling: the fine block runs
-its own fixed-iteration sigma solve seeded and Dirichlet-bounded by the converged coarse
-sigma; seam conservation is truncation-order (no reflux capture from the fused IGR flux
-kernels), and free-stream preservation is exact.
-AMR is incompatible with surface tension, cylindrical
-coordinates, grid stretching (the batched fine advance stacks equal-shape blocks on the batch leader's
-uniform Cartesian grid), 2D/3D MHD (measured: the coarse/fine seam is a
-continuous div(B) source that GLM cleaning cannot remove; 1D MHD/RMHD IS supported since
-div(B) = 0 by construction there), and Riemann-extrapolation
-boundaries (bc = -4). Acoustic sources are supported on the coarse grid only: the support must not overlap the initial
-block (startup abort) and dynamic regrid keeps its boxes clear of the support.
-Multi-rank runs are supported: each block has a single owner rank, assigned by
-Morton-ordered work balancing at every regrid (with state migration), and the
-coarse-side coupling moves through point-to-point coarse↔fine gather/scatter — so the
-block may span rank boundaries and move freely across them under dynamic regrid.
-The block may cover at most about half of the global extent per dimension (the fine
-advance reuses the rank-local solver scratch); wider features tile into adjacent blocks.
+| Parameter               | Type    | Description |
+| ---:                    | :----:  | :--- |
+| `amr`                   | Logical | Enable AMR (default F) |
+| `amr_block_beg(i)`      | Integer | Initial block start, level-0 cell index in direction $i$ (inclusive) |
+| `amr_block_end(i)`      | Integer | Initial block end, level-0 cell index in direction $i$ (inclusive) |
+| `amr_regrid_int`        | Integer | Steps between regrids; 0 keeps the initial block (default 0) |
+| `amr_tag_eps`           | Real    | Tagging threshold on the normalized density jump; > 0 with regrid (default 0.1) |
+| `amr_tag_abs`           | Logical | Tag on the absolute density jump; `amr_tag_eps` is then a density (default F) |
+| `amr_buf`               | Integer | Padding around tagged cells in coarse cells; >= 1 with regrid (default 3) |
+| `amr_cluster_eff`       | Real    | Minimum tag efficiency of a clustered box, in (0, 1] (default 0.7) |
+| `amr_blocking_factor`   | Integer | Minimum box width in coarse cells (default 4; 1 = none) |
+| `amr_max_grid_size`     | Integer | Maximum box width in coarse cells; 0 derives it from the decomposition (default 0) |
+| `amr_max_blocks`        | Integer | Maximum number of blocks (default 1024) |
+| `amr_max_level`         | Integer | Number of refined levels (default 1) |
+| `amr_ref_ratio`         | Integer | Refinement ratio, 2 or 4; 4 allows one level (default 2) |
+| `amr_subcycle`          | Logical | Two steps per parent step on each refined level; ratio 2, up to two levels (default F) |
+| `amr_prolong`           | Integer | Prolongation: 1 limited linear, 2 quartic with a positivity fallback (default 1) |
+| `amr_place_owner`       | Logical | Place each block on the rank owning most of its coarse cells (default F) |
+| `amr_snap`              | Integer | Regrid hysteresis in coarse cells, <= `amr_buf - 2` (default 0; set by the toolchain under regrid) |
+| `amr_device_pack`       | Logical | Fused device pack/unpack of the coarse-patch exchange (default F; set by the toolchain when `amr_max_grid_size <= 64`) |
 
-**AMR + surface tension (unsupported).**
-Surface tension (`surface_tension = T`) is prohibited under AMR. *What works:* the capillary
-contribution is a face flux captured into the same coarse–fine registers as the advective
-flux, so it is refluxed conservatively — conservation is structural (mass and energy defects
-stay at machine precision regardless of the fine-side treatment). *What fails:* the capillary
-stress is normalized (∝ 1/|∇c|), so it depends on the interface-normal *direction*, not the
-gradient magnitude. Across a 2:1 coarse/fine boundary the conservative-linearly-prolonged fine
-ghost color cannot reproduce the coarse solver's interface normal, producing a growing spurious
-seam current. Every fine-block fix attempted failed: opening the capillary reflux gate alone
-(~540x baseline seam velocity, exponential), a smoothstep ramp suppressing the fine capillary
-force near the seam (~27x, bounded-linear, width-invariant), and a coarse-spacing gradient blend
-of the prolonged color (~556x, growing) — all leave a force imbalance from the inconsistent
-interface normal rather than a curvature spike that can be damped. *What might fix it:* capturing
-the native coarse-computed capillary force Ω in a per-block band during the coarse RHS, prolonging
-it to the fine boundary layer, and blending the force there — large and uncertain, and the
-diffuse-interface 2:1 normal inconsistency may be fundamental.
-
-**Static vs. dynamic block.**
-Setting `amr_regrid_int = 0` fixes the block at the initial `amr_block_beg`/`amr_block_end`
-position for the entire run (useful for convergence studies or GPU correctness testing).
-Setting `amr_regrid_int > 0` triggers dynamic regrid every that many coarse steps:
-cells whose normalized density gradient exceeds `amr_tag_eps` are tagged, then clustered
-by a Berger–Rigoutsos recursive bisection into a list of separated block boxes (each grown
-by `amr_buf` coarse cells of buffer padding). Boxes whose padded extents would come within a
-ghost-cell buffer width of each other are merged, so separated features get their own refined
-box while nearby ones stay a single box (guaranteeing no fine–fine adjacency). Splitting stops once a
-box's tag efficiency (tagged/total cells) reaches `amr_cluster_eff`; the number of blocks
-is capped at `amr_max_blocks`.
-A positive `amr_tag_eps` and `amr_buf >= 1` are required whenever regridding is active.
-
-**Block slots.**
-`amr_max_blocks` (default 4) sets the number of fixed refined-block slots preallocated
-for the run. Each slot is sized to the maximum block extent, so `N` slots require roughly
-`N` times the device memory of a single block; the goal is the compute win of refining
-separated features independently, and memory efficiency (compact per-block pools) is a
-follow-up. Dynamic regrid clusters the tagged cells into up to `amr_max_blocks` separated
-boxes (`amr_cluster_eff` sets the min tag efficiency each box reaches before splitting stops).
-
-**Multi-level nesting.**
-`amr_max_level` (default 1) sets the maximum refinement depth. With `amr_max_level > 1`,
-blocks nest recursively: a level-`l` block refines a region of its parent level-(`l-1`)
-block by a further `amr_ref_ratio`, so refinement tracks a moving feature to arbitrary depth.
-Multi-level nesting requires `amr_ref_ratio = 2` (the default) and `amr_max_blocks >= 2`; static
-AMR (`amr_regrid_int = 0`) nests up to level 2, dynamic regrid (`amr_regrid_int > 0`) nests
-deeper. See @ref amr-regrid "dynamic regrid" and @ref amr-reflux "reflux" on the AMR page.
-
-**Restart.**
-Each save step writes a fine-level AMR restart file alongside the level-0 restart data
-(whose format is unchanged): the current — possibly regridded — block box and the fine
-solution, per rank (an `amr_fine.dat` in each rank's step directory, or a single shared
-`amr_*.dat` next to the level-0 MPI-IO restart file when `parallel_io` is on).
-Restarting (`t_step_start > 0`) restores the saved box and fine state seamlessly; with
-`parallel_io` the fine blocks are repartitioned across any rank count, while the serial
-(per-rank-file) path requires the same rank count as the run that wrote the file. Both
-paths require the same physics configuration — the number of conserved variables, which
-depends on `num_fluids`, `model_eqns`, and the enabled bubble/chemistry models — and
-abort with a clear message otherwise.
-On restart the AMR block geometry (block count and boxes) is read from the AMR restart
-file, not from the `amr_block_beg`/`amr_block_end` case parameters — so editing those
-parameters for a restart run has no effect. To re-derive the blocks from parameters,
-start fresh (`t_step_start = 0`).
-If the AMR file is absent (e.g., data from an older run), the run proceeds with a
-warning and re-initializes the fine level by prolongation from the coarse restart data,
-losing the accumulated fine-level accuracy.
-Note that level-0 output already contains the restricted (coarse-resolution) fine
-solution over the block, so existing visualization works unchanged; fine-resolution
-visualization output is future work.
-
-| Parameter               | Type    | Description                                    |
-| ---:                    | :----:  |          :---                                  |
-| `amr`                   | Logical | Enable AMR (see prose above for requirements and restrictions) |
-| `amr_block_beg(i)`      | Integer | Initial refined-block start cell index in direction $i$ (level-0 index space) |
-| `amr_block_end(i)`      | Integer | Initial refined-block end cell index in direction \f$i\f$ (level-0 index space); must satisfy \f$2\,(e_i - b_i + 1) - 1 \le N_i\f$ |
-| `amr_regrid_int`        | Integer | Coarse steps between regrid events (0 = static block) |
-| `amr_tag_eps`           | Real    | Normalized density-gradient threshold for refinement tagging; must be > 0 when `amr_regrid_int > 0` (default 0.1) |
-| `amr_buf`               | Integer | Coarse-cell padding around tagged cells; must be >= 1 when `amr_regrid_int > 0` (default 3) |
-| `amr_snap`              | Integer | Regrid hysteresis in coarse cells per face (0 = off, default); requires `amr_snap <= amr_buf - 2` |
-| `amr_max_blocks`       | Integer | Number of fixed refined-block slots preallocated (each max-block sized; ~N x device memory); must be >= 1 (default 4) |
-| `amr_max_grid_size`    | Integer | Absolute cap on a refined block's coarse-cell extent per dimension, the AMReX max_grid_size concept; must be >= 2 when set (default 0). With 0 the cap is derived from the decomposition and so shrinks as ranks are added, which tiles a fixed feature into more blocks the further you scale and makes the box set depend on the rank count. Setting it pins the cap, so the box set is identical at every rank count. The value may exceed half a rank subdomain: the solver scratch is then sized to the cap rather than to the subdomain, so per-rank memory grows as the cap raised to the number of dimensions |
-| `amr_max_level`        | Integer | Maximum AMR refinement depth (number of refined levels above L0); must be >= 1 (default 1). Multi-level nesting (>= 2) is supported: static AMR (`amr_regrid_int = 0`) nests up to level 2, dynamic regrid (`amr_regrid_int > 0`) nests deeper |
-| `amr_cluster_eff`       | Real    | Berger-Rigoutsos min tag efficiency a clustered block box reaches before splitting stops; must satisfy 0 < eff <= 1 (default 0.7) |
-| `amr_blocking_factor`  | Integer | Minimum block-box extent in coarse cells the Berger-Rigoutsos bisection may produce; raises the floor of 2 so clustering stops over-generating boxes that the min-separation merge then discards; must be >= 1 (default 4; 1 disables the minimum, which lets the bisection run to the block cap) |
+Each save writes the block hierarchy and fine solution next to the level-0 restart data; a restart reads the block
+geometry from it, not from `amr_block_beg`/`amr_block_end`.
 
 ### 8. Acoustic Source {#sec-acoustic-source}
 
