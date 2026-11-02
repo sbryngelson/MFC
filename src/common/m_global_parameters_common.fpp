@@ -37,6 +37,13 @@ module m_global_parameters_common
     !> @name Chemistry modeling (Fypp compile-time constant; same value in all targets)
     !> @{
     logical, parameter :: chemistry = .${chemistry}$.
+    !> Some fluid's EOS coefficients vary with density (Mie-Gruneisen, JWL, Vinet): a Fypp compile-time constant, so the
+    !! state-dependent chain is dead code in a stiffened-gas build (see toolchain case.py).
+    logical, parameter :: any_state_dependent_eos = .${eos_state_dependent}$.
+    !> Runtime copy for the CFL kernel in s_write_run_time_information only (NVHPC OpenMP offload reads an invalid q_prim_vf address
+    !! there with the branch compiled out).
+    logical :: any_state_dependent_eos_rt
+    $:GPU_DECLARE(create='[any_state_dependent_eos_rt]')
     !> @}
 
     !> @name Hypoelastic shear stress state (identical across all three executables)
@@ -57,16 +64,11 @@ module m_global_parameters_common
     integer, allocatable, dimension(:) :: eoss
     !> Per-fluid EOS coefficients, whatever the family; see type eos_coefficients.
     type(eos_coefficients), dimension(num_fluids_max) :: eos_coeffs
-    !> any_state_dependent_eos is declared with the case-optimization block above: a parameter when the case is baked in, so the
-    !! compiler drops the whole state-dependent chain from kernels that never need it.
     $:GPU_DECLARE(create='[eoss, eos_coeffs]')
     !> Fourier heat conduction: true when any fluid sets k_therm > 0. Derived, never read from the namelist.
     logical                             :: heat_conduction
     real(wp), allocatable, dimension(:) :: fluid_k_therm
     $:GPU_DECLARE(create='[heat_conduction, fluid_k_therm]')
-    #:if not MFC_CASE_OPTIMIZATION
-        $:GPU_DECLARE(create='[any_state_dependent_eos]')
-    #:endif
     !> @}
 
     !> @name Fluids participating in shear and bulk viscosity

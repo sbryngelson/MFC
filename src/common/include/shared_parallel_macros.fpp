@@ -15,6 +15,9 @@
 #! Chemistry pins num_fluids to 1, leaving at most 10 flow variables beside the species.
 #:set AMD_SYS_SIZE_MAX = 10 + NUM_SPECIES if CHEMISTRY else 70
 
+#! Joins two '[a, b]' clause lists; either may be None.
+#:set JOIN_LISTS = lambda a, b: a if b is None else (b if a is None else a[:-1] + ', ' + b[1:])
+
 #:def ASSERT_LIST(data, datatype)
     #:assert data is not None
     #:assert isinstance(data, list)

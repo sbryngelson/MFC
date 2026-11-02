@@ -14,6 +14,8 @@ module m_constants
     real(wp), parameter  :: small_alf = 1.e-11_wp       !< Small alf tolerance
     real(wp), parameter  :: pi = 3.141592653589793_wp   !< Pi
     real(wp), parameter  :: verysmall = 1.e-12_wp       !< Very small number
+    !> Residual modulus fraction below which a damaged state's elastic energy is dropped (cont_damage)
+    real(wp), parameter :: damage_energy_cutoff = 1.e-3_wp
     !> Temperature window the immersed-boundary reacting-surface state is kept inside. It is the range the NASA polynomials behind
     !! the thermodynamic evaluations are fitted over -- 200 K is the T_low of every species in the mechanisms shipped with the
     !! reacting-surface example -- so it is where those fits mean anything. Shared by the surface Newton solve, which searches
