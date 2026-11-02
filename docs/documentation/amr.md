@@ -292,5 +292,4 @@ For multi-fluid (5-equation), additionally set:
 ## Design notes {#amr-design-notes}
 
 Index spaces, the flat block store, the exchange waves and the batched advance:
-@subpage amr_implementation. How the performance work went, and what turned out to be
-false: `misc/amr_ledger/README.md`, outside the built documentation.
+@subpage amr_implementation.

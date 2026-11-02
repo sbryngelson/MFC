@@ -4479,6 +4479,8 @@ def list_cases() -> typing.List[TestCaseBuilder]:
         # restart_check on the REGRIDDED layout: unlike the static block, a regridded block set
         # cannot be reconstructed from the ICs, so the roundtrip proves the restart file itself
         cases.append(define_case_d(stack, "", {}, restart_check=True))
+        # quartic prolongation (amr_prolong = 2) through regrids of a moving shock
+        cases.append(define_case_d(stack, "quartic prolongation", {"amr_prolong": 2}))
         # The same round-trip with the block cap pinned small, so ONE rank owns more blocks than the flat store's initial 8
         # slots: the store then grows (device-side) in the middle of the serial restart read. The reader must push each block
         # to the device as it reads it, and nothing may push the host mirror back afterwards - the mirror is undefined across a
@@ -4956,6 +4958,8 @@ def list_cases() -> typing.List[TestCaseBuilder]:
         # overlapping expansions merge, and the fine IB state rebuilds from geometry every regrid
         stack.push("dynamic regrid", {"amr_regrid_int": 2, "amr_tag_eps": 1.0e-4, "amr_buf": 2, "t_step_stop": 20, "t_step_save": 20})
         cases.append(define_case_d(stack, "", {}))
+        # quartic prolongation next to a body: the admissibility fallback to limited linear guards the fills
+        cases.append(define_case_d(stack, "quartic prolongation", {"amr_prolong": 2}))
         # The ONLY distributed AMR+IB coverage in the suite. At ppn=1 the level-1 tag path and the
         # per-level (index, parent) gather are both skipped by their num_procs > 1 guard, so the IB
         # tags' trip through a collective is exercised by nothing. Guards specifically that each rank

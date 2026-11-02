@@ -138,7 +138,7 @@ The cost of that uniformity is that every slot is sized for the *largest* block,
 `s_compute_rhs`, `s_ibm_correct_state`, `s_pressure_relaxation_procedure` and
 `s_infinite_relaxation_k` all take `type(scalar_field), dimension(sys_size)` and also serve the
 monolithic (non-AMR) path, so the flat store cannot be passed to them. A pointer view into the
-store is **not attachable on the OpenMP-offload backend** (see `misc/amr_ledger/block_batching.md`).
+store is **not attachable on the OpenMP-offload backend**.
 
 A single block-shaped `scalar_field` array bridges instead:
 
@@ -482,7 +482,6 @@ diagnostic quantity when block counts differ between runs.
 | Document | Content |
 |---|---|
 | `docs/documentation/amr.md` | User-facing overview, parameters, usage |
-| `misc/amr_ledger/README.md` | What the performance campaign learned, with pointers into its design memos and records |
 
 ## AMR levels (silent-index traps)
 

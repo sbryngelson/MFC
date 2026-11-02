@@ -1073,7 +1073,7 @@ contains
     !! full transverse extent, then y-low/high restricted to the core's x-interval, then z-low/high restricted in x and y. Width<=2
     !! cores are empty (shell = whole patch, legal); the width-1 double-cover is resolved by clamping the high slab past the low
     !! one. Both sides of every clipped exchange derive the same list from replicated metadata, so the wire layout needs no
-    !! handshake (see misc/amr_ledger/stepfill_ring_clip.md).
+    !! handshake.
     impure subroutine s_amr_shell_slabs(plo, phi, clo, chi, ns, sb, se, cells)
 
         integer, intent(in)  :: plo(3), phi(3), clo(3), chi(3)

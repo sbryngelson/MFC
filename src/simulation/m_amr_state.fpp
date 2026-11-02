@@ -225,8 +225,8 @@ module m_amr_state
     !! active grid rather than saved. Rule for anyone adding grid-dependent state: any module-level variable derived from
     !! m/n/p/idwint/idwbuff/coords that a kernel reads on the fine grid must be swapped here or refreshed on every fine call at its
     !! use site, and if GPU_DECLARE'd, its device copy too. A stale device copy of coarse bounds reads out of range on the fine grid
-    !! under CCE OpenACC (cv_int is refreshed by a per-call GPU_UPDATE in s_compute_rhs for this reason; see m_rhs.fpp and
-    !! .claude/rules/common-pitfalls.md). amr_swap_depth makes the swap re-entrant and guards against an unpaired restore.
+    !! under CCE OpenACC (cv_int is refreshed by a per-call GPU_UPDATE in s_compute_rhs for this reason; see m_rhs.fpp).
+    !! amr_swap_depth makes the swap re-entrant and guards against an unpaired restore.
     !> Saved coarse-level global state for swap/restore
     integer               :: sw_m, sw_n, sw_p
     type(int_bounds_info) :: sw_idwint(3), sw_idwbuff(3)

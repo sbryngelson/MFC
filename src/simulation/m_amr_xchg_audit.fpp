@@ -21,7 +21,7 @@ module m_amr_xchg_audit
 
     implicit none
 
-    ! Exchange families (see misc/amr_ledger/plan_based_exchange.md for the inventory).
+    ! Exchange families.
     ! XA_FL0 covers the ten s_l0_* tile-routing sites outside the six families (instrumented
     ! read-only); XA_F4 is migration.
     integer, parameter :: XA_F1 = 1, XA_F2 = 2, XA_F4 = 3, XA_F5 = 4, XA_F6 = 5, XA_F7 = 6, XA_FL0 = 7
