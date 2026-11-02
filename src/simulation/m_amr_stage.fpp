@@ -4,8 +4,8 @@
 
 #:include 'macros.fpp'
 
-!> @brief The AMR hooks of the SSP-RK stage loop (m_time_steppers): the stage-top coarse halo, the fine-level stage (fills, batched
-!! advance, reflux into the coarse rhs) and the end-of-step fold of the fine solution into the level-0 covered cells.
+!> @brief The AMR hooks of the SSP-RK stage loop (m_time_steppers): the stage-top coarse halo, the fine-level stage, and the
+!! end-of-step fold of the fine solution into the level-0 covered cells.
 module m_amr_stage
 
     use m_derived_types  ! scalar_field, integer_field
@@ -23,9 +23,9 @@ module m_amr_stage
 
 contains
 
-    !> Stage top: the AMR cons halo and the RHS's prim halo would exchange the same stage-entry state on the same faces, so hoist
-    !! the cons halo here and let the RHS convert over the buffered domain (pointwise, so byte-identical), halving the base-grid
-    !! SENDRECVs per step; only where the cons halo carries everything the prim halo did (no q_T_sf, no igr path).
+    !> Stage top: hoist the cons halo (the AMR fill needs it) so the RHS converts over the buffered domain instead of exchanging a
+    !! prim halo on the same faces (pointwise, so byte-identical). Only where the cons halo carries everything the prim halo did (no
+    !! q_T_sf, no igr).
     impure subroutine s_amr_stage_begin(q_cons)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons
@@ -39,13 +39,10 @@ contains
 
     end subroutine s_amr_stage_begin
 
-    !> The fine-level stage, with q_cons still the coarse stage-entry state. Phase 1 fills every block's ghost shell top-down as
-    !! per-level exchange waves (the level-1 wave, then one parent-gather wave per level ascending, so each level's sources are
-    !! complete before its wave), after one coarse cons halo for every block's prolongation; phase 2 overwrites the fine-fine seam
-    !! ghosts with the neighbours' stage-entry interiors (posted before the fills, drained after); phase 3 advances every owned
-    !! block in batches of equal shape; phase 4 refluxes the level-1 blocks into the coarse rhs as one face wave plus one batched
-    !! apply (both order-free: disjoint register slots; low and high faces in separate launches). A level>=2 block's coarse side is
-    !! its parent, refluxed after the stage loop (s_amr_step_fold)..
+    !> The fine-level stage, with q_cons still the coarse stage-entry state: (1) fill every block's ghosts top-down as per-level
+    !! waves after one coarse cons halo, (2) overwrite fine-fine seam ghosts with neighbours' stage-entry interiors (posted before
+    !! the fills, drained after), (3) advance all owned blocks in batches, (4) reflux level-1 blocks into the coarse rhs (one face
+    !! wave plus one batched apply, order-free). A level>=2 block's coarse side is its parent, refluxed in s_amr_step_fold.
     impure subroutine s_amr_stage_fine(s, t_step, coefs, q_cons, q_T_sf, bc_type, rhs_vf, pb_in, rhs_pb, mv_in, rhs_mv)
 
         integer, intent(in)                                        :: s, t_step
@@ -71,12 +68,11 @@ contains
 
     end subroutine s_amr_stage_fine
 
-    !> Subcycled fine advance (amr_subcycle): after level 0's step (q_old = its step-start state, q_new = its end state, coarse
-    !! registers holding its dt-weighted face-flux integral) level 1 takes two substeps of dt/2. The level-1 patch rings of q_old
-    !! and q_new are gathered once (s_amr_pc_gather); each stage blends them linearly in time to the stage time, fills the fine
-    !! ghosts and advances the level-1 blocks through the batched path with dt/2, accumulating the fine registers over both
-    !! substeps; after each level-1 substep level 2 (if any) takes its two substeps (s_amr_subcycle_l2). Then the registers correct
-    !! the coarse state (Berger-Colella) and the caller's fold restricts.
+    !> Subcycled fine advance (amr_subcycle): after level 0's step (q_old = step-start state, q_new = end state, coarse registers
+    !! holding its dt-weighted flux integral) level 1 takes two substeps of dt/2. The level-1 patch rings of q_old and q_new are
+    !! gathered once (s_amr_pc_gather); each stage blends them in time, fills the fine ghosts and advances level 1 with dt/2,
+    !! accumulating fine registers over both substeps; level 2 (if any) then takes its two substeps (s_amr_subcycle_l2). The
+    !! registers then correct the coarse state (Berger-Colella) and the caller's fold restricts.
     impure subroutine s_amr_subcycle_fine(q_new, q_old, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
 
         type(scalar_field), dimension(sys_size), intent(inout)     :: q_new, q_old
@@ -89,7 +85,7 @@ contains
         real(wp)                                                   :: dt0
         integer                                                    :: k, s
 
-        amr_cons_ghosts_valid = .false.  ! level 0's last stage may have set it; the fine RHS converts and exchanges as lock-step
+        amr_cons_ghosts_valid = .false.  ! level 0's last stage may have set it; the fine RHS exchanges in lock-step
         call s_amr_pc_gather(q_old, 0)
         call s_amr_pc_gather(q_new, 1)
         dt0 = dt
@@ -116,9 +112,9 @@ contains
 
     end subroutine s_amr_subcycle_fine
 
-    !> Level 2's two substeps of dt0/4 after a level-1 substep ending at coarse time fraction th_end. The level-1 ghosts are first
-    !! refilled at th_end (the level-2 parent patches can reach into them); each level-2 stage then fills from its parents blended
-    !! between their substep-start backup and end state (amr_par_theta), and finally level 2 is synced into level 1.
+    !> Level 2's two substeps of dt0/4 after a level-1 substep ending at coarse time fraction th_end: refill level-1 ghosts at
+    !! th_end (level-2 parent patches can reach them), fill each level-2 stage from parents blended between their substep-start
+    !! backup and end state (amr_par_theta), then sync level 2 into level 1.
     impure subroutine s_amr_subcycle_l2(q_new, coefs, q_T_sf, bc_type, pb_in, rhs_pb, mv_in, rhs_mv, t_step, th_end, dt0)
 
         type(scalar_field), dimension(sys_size), intent(inout)     :: q_new
@@ -153,9 +149,9 @@ contains
 
     end subroutine s_amr_subcycle_l2
 
-    !> Ghost fill of levels lev_lo..lev_hi: the level-1 wave from the coarse q_cons (lev_lo = 1), or with theta from the patch cache
-    !! at that coarse time fraction (subcycling), then the parent waves; the fine-fine seam reads stage-entry interiors only, so it
-    !! is posted before the fills and drained after.
+    !> Ghost fill of levels lev_lo..lev_hi: the level-1 wave from the coarse q_cons (or, with theta, the patch cache at that coarse
+    !! time fraction), then the parent waves. The fine-fine seam reads stage-entry interiors only, so it is posted before the fills
+    !! and drained after.
     impure subroutine s_amr_fill_levels(q_cons, lev_lo, lev_hi, theta)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons
@@ -180,8 +176,8 @@ contains
 
     end subroutine s_amr_fill_levels
 
-    !> Gather every owned level-1 block's coarse patch ring from q (the ring-clipped fill wave into the pooled amr_cg) and keep the
-    !! pool as time level t (0: step start, 1: step end), once per coarse step; the stages then blend in time with no wave or halo.
+    !> Gather every owned level-1 block's coarse patch ring from q into the pooled amr_cg and keep it as time level t (0: step
+    !! start, 1: step end), once per coarse step; stages then blend in time with no wave or halo.
     impure subroutine s_amr_pc_gather(q, t)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q
@@ -205,8 +201,8 @@ contains
 
     end subroutine s_amr_pc_fill
 
-    !> The used pool (amr_cg_nuse patches) against the cache amr_pc: t >= 0 stores it as time level t (level 0 sizes the cache,
-    !! growing by doubling); t < 0 writes the pool = (1 - theta) * level 0 + theta * level 1.
+    !> The used pool (amr_cg_nuse patches) against the cache amr_pc: t >= 0 stores it as time level t (t = 0 sizes the cache); t < 0
+    !! writes the pool = (1 - theta) * level 0 + theta * level 1.
     impure subroutine s_amr_pc_copy(t, theta)
 
         integer, intent(in)  :: t
@@ -257,17 +253,16 @@ contains
     end subroutine s_amr_pc_copy
 
     !> End of step: fold the fine solution into the level-0 covered cells (the only deliberate level-0 write) and Berger-Colella
-    !! state-reflux each level>=2 block into its parent. Bottom-up: a child folds into its parent before the parent folds into L0,
-    !! so the covered cells hold the finest data; finer levels live at higher slots, so the per-box loop runs in reverse (disjoint
-    !! same-level blocks make that bit-identical to forward order for one level). np>1 runs the fold as per-level waves, since a
-    !! per-box loop would serialize a P2P chain that scales with the global block count..
+    !! state-reflux each level>=2 block into its parent. Bottom-up, so covered cells hold the finest data; finer levels sit at
+    !! higher slots, hence the reverse loop. np>1 runs per-level waves, since a per-box loop would serialize a P2P chain scaling
+    !! with the global block count.
     impure subroutine s_amr_step_fold(q_cons)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons
         integer                                                :: islot
 
         call s_phase_tic(PH_RESTR)
-        ! the split-ownership level>=2 freg exchange: the registers are final after the advance (subcycling synced level 2 already)
+        ! level>=2 freg exchange: the registers are final after the advance (subcycling synced level 2 already)
         if (.not. amr_subcycle) call s_amr_freg_wave()
         call s_phase_toc(PH_RESTR)
         if (num_procs > 1) then

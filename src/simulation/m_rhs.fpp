@@ -330,12 +330,9 @@ contains
             @:ALLOCATE(dqR_prim_dy_n(1:num_dims))
             @:ALLOCATE(dqR_prim_dz_n(1:num_dims))
 
-            ! qL_prim/qR_prim stage the reconstructed MOMENTUM components for the viscous path only: s_get_viscous fills them
-            ! (called under `viscous .and. .not. igr`), s_compute_viscous_source_flux reads them (under `viscous .and.
-            ! weno_Re_flux`), and the weno_Re_flux branches of s_reconstruct_cell_boundary_values copy them into qL_rsx_vf.
-            ! Every other reconstruction path writes qL_rsx_vf directly and never touches these, so an inviscid run does not
-            ! allocate these 2 x num_dims x num_vels full-domain arrays. The vf containers stay allocated (and ACC_SETUP'd) so
-            ! the dummies remain valid; only the payload is conditional.
+            ! qL_prim/qR_prim stage the reconstructed momentum components for the viscous path only (s_get_viscous fills them,
+            ! s_compute_viscous_source_flux and the weno_Re_flux branches read them), so an inviscid run skips the payload; the vf
+            ! containers stay allocated so the dummies remain valid
             do i = 1, num_dims
                 @:ALLOCATE(qL_prim(i)%vf(1:sys_size))
                 @:ALLOCATE(qR_prim(i)%vf(1:sys_size))
@@ -631,21 +628,18 @@ contains
 
         ! RHS: halo exchange -> reconstruct -> Riemann solve -> flux difference -> source terms
 
-        ! AMR NOTE: when amr_in_fine_advance is true, the grid globals (m/n/p, idwint/idwbuff, x_cb..dz) are SWAPPED to a fine
-        ! block's values (s_amr_swap_to_fine). Code reading a module-level array precomputed against the COARSE grid must guard on
-        ! .not. amr_in_fine_advance or read the swapped/refreshed state - see the cv_int GPU_UPDATE below and the swap contract in
-        ! m_amr.fpp. A physics hook here that indexes coarse-baked state is the cv_int/acoustic-source hazard.
+        ! AMR: during the fine advance (amr_in_fine_advance) the grid globals (m/n/p, idwint/idwbuff, x_cb..dz) are swapped to a
+        ! block's values. Code reading module-level state precomputed on the coarse grid must guard on .not. amr_in_fine_advance or
+        ! read refreshed state (see cv_int below and the swap contract in m_amr_state).
 
         call nvtxStartRange("COMPUTE-RHS")
 
         cv_int = idwint
         if (amr_cons_ghosts_valid) cv_int = idwbuff
 
-        ! cv_int must be refreshed on device EVERY call: the AMR fine advance swaps idwint to the fine-block
-        ! bounds, and CCE OpenACC resolves the convert kernel's loop bounds through the present device copy of
-        ! this module variable - a seed-once guard left stale COARSE bounds on the swapped fine grid, giving
-        ! out-of-range device accesses and a spurious wave at every fine-block edge (CCE-acc only; NVHPC and
-        ! CCE-omp evaluate the bounds host-side and never saw it).
+        ! cv_int must be refreshed on device every call: the fine advance swaps idwint, and CCE OpenACC resolves the convert
+        ! kernel's bounds through this device copy (a seed-once guard left stale coarse bounds: out-of-range accesses and a wave at
+        ! fine-block edges)
         $:GPU_UPDATE(device='[cv_int]')
 
         if (.not. igr) then
@@ -714,9 +708,7 @@ contains
             if (t_step == t_step_stop) return
         end if
 
-        ! Per-rank compute timing starts here: AFTER the halo exchange (s_populate_variables_buffers)
-        ! and the early-return guards, so it captures only the local compute (reconstruct/Riemann/
-        ! flux/source) and excludes the cross-rank halo wait that would otherwise mask compute imbalance.
+        ! Per-rank compute timing starts here, after the halo exchange and early returns, so it excludes the halo wait
 
         if (qbmm) call s_mom_inv(q_cons_qp%vf, q_prim_qp%vf, mom_sp, mom_3d, pb_in, rhs_pb, mv_in, rhs_mv, idwbuff(1), &
             & idwbuff(2), idwbuff(3))
@@ -784,9 +776,8 @@ contains
                         call nvtxEndRange
                     end if
 
-                    ! RHS for chemistry species diffusion: writes species (and, when not viscous, energy) face
-                    ! fluxes into flux_src_rsx_vf. Runs before the AMR capture below so refluxing sees the total
-                    ! advection+diffusion flux, mirroring the viscous flux_src the Riemann solver wrote.
+                    ! RHS for chemistry species diffusion (face fluxes into flux_src_rsx_vf); runs before the AMR capture so
+                    ! refluxing sees the total advection+diffusion flux
                     if (chemistry .and. chem_params%diffusion) then
                         call nvtxStartRange("RHS-CHEM-DIFFUSION")
                         call s_compute_chemistry_diffusion_flux(id, q_prim_qp%vf, flux_src_rsx_vf, irx, iry, irz, q_T_sf)
@@ -800,11 +791,8 @@ contains
                         call nvtxEndRange
                     end if
 
-                    ! AMR refluxing: record the c/f boundary-face fluxes exactly as the assembly above used
-                    ! them (after s_cbc may have modified flux_rsx_vf in the advection source call, and after
-                    ! all flux_src contributions - viscous, species diffusion and heat conduction - are in
-                    ! place); must run before the next direction's sweep overwrites flux_rsx_vf, which all
-                    ! directions share.
+                    ! AMR refluxing: record the c/f boundary-face fluxes as assembled above (after s_cbc and all flux_src
+                    ! contributions), before the next direction's sweep overwrites the shared flux_rsx_vf
                     if (amr) call s_amr_capture_boundary_flux(id, stage)
 
                     ! Viscous stress contribution to RHS
@@ -895,8 +883,7 @@ contains
             call nvtxEndRange
         end if
         if (ib) then
-            ! a fine block (or batched slab) is advanced in its own frame: its markers are ib_markers_fine (m_ibm), not the coarse
-            ! ib_markers
+            ! a fine block (or batched slab) uses its own markers ib_markers_fine (m_ibm), not the coarse ib_markers
             if (amr_in_fine_advance) then
                 call s_zero_rhs_at_body(ib_markers_fine, rhs_vf)
             else
@@ -925,9 +912,8 @@ contains
             call s_compute_ptilde(q_cons_qp%vf(1:sys_size), q_prim_qp%vf(1:sys_size))
         end if
 
-        ! Lagrangian bubbles couple on the coarse grid only (the cloud is excluded from fine blocks):
-        ! the EL hooks are skipped during the fine advance - a bubble's position would map to wrong
-        ! cell indices on the swapped block grid.
+        ! Lagrangian bubbles couple on the coarse grid only: skip the EL hooks during the fine advance (positions would map to wrong
+        ! cells on the swapped block grid)
         if (bubbles_lagrange .and. .not. amr_in_fine_advance) then
             if (.not. adap_dt) then
                 call nvtxStartRange("RHS-EL-BUBBLES-DYN")
@@ -962,9 +948,8 @@ contains
 
         ! END: Additional physics and source terms
 
-        ! q_prim_vf is copied out only for its readers: probes, IB, Lagrangian bubbles and synthetic turbulence (m_time_steppers)
-        ! every stage, run_time_info after the first stage. The hyper_cleaning damping above reads psi from the previous stage's
-        ! copy, so psi is always copied
+        ! q_prim_vf is copied out only for its readers: probes, IB, Lagrangian bubbles, synthetic turbulence (m_time_steppers) every
+        ! stage, run_time_info after the first. hyper_cleaning reads psi from the previous stage's copy, so psi is always copied
         copy_beg = 1
         copy_end = sys_size
         if (.not. (probe_wrt .or. ib .or. bubbles_lagrange .or. synthetic_turbulence .or. (run_time_info .and. stage == 1))) then
@@ -985,8 +970,7 @@ contains
             $:END_GPU_PARALLEL_LOOP()
         end if
 
-        ! Per-rank compute timing ends here (brackets only the local compute above; excludes
-        ! the halo exchange near the top of the routine).
+        ! Per-rank compute timing ends here
 
         call nvtxEndRange
 
@@ -1122,9 +1106,8 @@ contains
         ! Computing Riemann Solver Flux and Source Flux
         call nvtxStartRange("RHS-RIEMANN-SOLVER")
         if (hypo_nc_mode == hypo_nc_mode_dual_pass) then
-            ! Fused dual-pass: one call computes BOTH anchored flux sets (hat_L -> flux_n via the
-            ! solver's own finalize; hat_R into the flux_hatR_rs* buffers, finalized separately via
-            ! s_finalize_riemann_solver_hatR between the two RHS assemblies).
+            ! Fused dual-pass: one call computes both anchored flux sets (hat_L -> flux_n via the solver's finalize; hat_R into
+            ! flux_hatR_rs*, finalized by s_finalize_riemann_solver_hatR between the two RHS assemblies)
             call s_hypo_hlld_riemann_solver(qR_rsx_vf, dqR_prim_dx_n(id)%vf, dqR_prim_dy_n(id)%vf, dqR_prim_dz_n(id)%vf, &
                                             & qR_prim(id)%vf, qL_rsx_vf, dqL_prim_dx_n(id)%vf, dqL_prim_dy_n(id)%vf, &
                                             & dqL_prim_dz_n(id)%vf, qL_prim(id)%vf, q_prim_qp%vf, flux_n(id)%vf, &
@@ -1946,9 +1929,7 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
             end if
 
-            ! the axis-singularity stress treatment belongs to the PHYSICAL axis only: bc_y is not
-            ! swapped by the AMR fine advance, so without the guard a fine block would apply axis
-            ! handling at its own (interior) lower-y edge - the coarse pass owns the real axis
+            ! the axis-singularity stress treatment belongs to the physical axis only; bc_y is not swapped by the AMR fine advance
             if (cyl_coord .and. (.not. amr_in_fine_advance) .and. ((bc_y%beg == -2) .or. (bc_y%beg == -14))) then
                 if (viscous) then
                     call s_compute_viscous_stress_cylindrical_boundary(q_prim_vf, dq_prim_dx_vf(eqn_idx%mom%beg:eqn_idx%mom%end), &
@@ -2161,12 +2142,10 @@ contains
                 end if
 
                 if (amr_in_fine_advance .and. .not. viscous) then
-                    ! A fine block (or batched slab) has ghost shells on every side, and the transverse ghost planes'
-                    ! reconstructions feed nothing: the Riemann faces and the flux differences stay inside the block (irx/iry/irz
-                    ! above), so the reconstruction window is clipped to the interior in the transverse directions. The normal
-                    ! direction keeps its shell: those stencils are the block's boundary faces. Viscous runs keep the full
-                    ! window (their stress gradients read the transverse shells).
-                    ! (0:m/n/p, not idwint: the batched advance widens idwint to the ghost shells for the conversion.)
+                    ! A fine block (or batched slab) has ghost shells on every side whose transverse reconstructions feed nothing
+                    ! (Riemann faces and flux differences stay inside the block), so clip the window to the interior (0:m/n/p, not
+                    ! idwint, which the batched advance widens) in the transverse directions. The normal direction keeps its shell;
+                    ! viscous runs keep the full window (stress gradients read the transverse shells).
                     if (norm_dir == 1) then
                         is2%beg = 0; is2%end = n; is3%beg = 0; is3%end = p
                     else if (norm_dir == 2) then

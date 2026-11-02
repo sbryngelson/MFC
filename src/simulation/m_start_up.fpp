@@ -855,7 +855,7 @@ contains
 
         ! Write IB kinematic state for restart
         if (ib) call s_write_ib_state_file(save_count)
-
+        ! Fine-level AMR restart file alongside the level-0 restart
         ! Fine-level AMR restart file (current box + intersection-local fine state) alongside the level-0 restart
         if (amr) call s_write_amr_restart(save_count)
 
@@ -896,8 +896,7 @@ contains
         if (bubbles_euler .or. bubbles_lagrange) then
             call s_initialize_bubbles_model()
         end if
-        ! AMR needs the temperature ghost as the cons->prim Newton guess when a fine block's conversion
-        ! widens over the ghost shell at a rank seam (else an uninitialized guess -> NaN).
+        ! AMR needs the temperature ghost as the cons->prim Newton guess when a fine block's conversion widens over the ghost shell
         call s_initialize_mpi_common_module(exchange_all_chemistry_temperatures_in=amr, use_rdma_transport_in=rdma_mpi)
         call s_initialize_mpi_proxy_module()
         call s_initialize_eos_module()
@@ -972,15 +971,15 @@ contains
             end if
         end block
         $:GPU_UPDATE(device='[glb_bounds]')
-        ! the grid arrays are allocated to the _alloc extents (a pinned block cap can exceed the rank subdomain)
-        ! and filled only over the rank's buffered range: take the minima over the filled range
+        ! the grid arrays are allocated to the _alloc extents (a pinned block cap can exceed the subdomain) but filled only over
+        ! the buffered range: take the minima there
         dx_min = minval(dx(-buff_size:m + buff_size))
         if (n > 0) dy_min = minval(dy(-buff_size:n + buff_size))
         if (p > 0) dz_min = minval(dz(-buff_size:p + buff_size))
 
         call s_initialize_amr_module()
         call s_initialize_amr_registers(amr_maxc_fit)
-        ! restarts restore the saved (possibly regridded) box and fine state; otherwise prolong from coarse
+        ! restarts restore the saved fine state; otherwise prolong from coarse
         call s_read_amr_restart(amr_restored)
         if (.not. amr_restored) call s_populate_amr_fine(q_cons_ts(1)%vf)
 
@@ -998,7 +997,7 @@ contains
             end if
             call s_build_ib_neighborhood()
             call s_ibm_setup()
-            ! per-block fine-grid IB state (static-body AMR): resolve the body on each fine block from the geometry
+            ! resolve the body on each fine block from the geometry
             if (amr) call s_amr_setup_ib()
             if (t_step_start == 0 .or. (cfl_dt .and. n_start == 0)) then
                 call s_write_ib_data_file(0)

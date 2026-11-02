@@ -37,11 +37,11 @@ module m_global_parameters_common
     !> @name Chemistry modeling (Fypp compile-time constant; same value in all targets)
     !> @{
     logical, parameter :: chemistry = .${chemistry}$.
-    !> Some fluid's EOS coefficients vary with density (Mie-Gruneisen, JWL, Vinet): a Fypp compile-time constant like chemistry, so
-    !! the state-dependent chain is dead code in every kernel of a stiffened-gas build (see toolchain case.py).
+    !> Some fluid's EOS coefficients vary with density (Mie-Gruneisen, JWL, Vinet): a Fypp compile-time constant, so the
+    !! state-dependent chain is dead code in a stiffened-gas build (see toolchain case.py).
     logical, parameter :: any_state_dependent_eos = .${eos_state_dependent}$.
-    !> Runtime copy for the CFL kernel in s_write_run_time_information only: with its state-dependent branch compiled out, NVHPC
-    !! OpenMP offload reads an invalid q_prim_vf address on multi-rank runs. Hot-path kernels keep the parameter.
+    !> Runtime copy for the CFL kernel in s_write_run_time_information only (NVHPC OpenMP offload reads an invalid q_prim_vf address
+    !! there with the branch compiled out).
     logical :: any_state_dependent_eos_rt
     $:GPU_DECLARE(create='[any_state_dependent_eos_rt]')
     !> @}
@@ -85,8 +85,7 @@ module m_global_parameters_common
     $:GPU_DECLARE(create='[sys_size, eqn_idx]')
     $:GPU_DECLARE(create='[shear_num, shear_indices, shear_BC_flip_num, shear_BC_flip_indices]')
 
-    !> Set only by the simulation's AMR fine-level advance; .false. everywhere else. Declared here rather than in the simulation so
-    !! that src/common/m_boundary_common can read it without a stage ifdef.
+    !> Set only by the AMR fine-level advance; declared here so m_boundary_common can read it.
     logical :: amr_in_fine_advance = .false.
 
     !> @name Processor coordinates and parallel-IO addressing (identical declaration across all three targets)
@@ -293,8 +292,7 @@ contains
 
         allocate (proc_coords(1:num_dims))
 
-        ! start_idx is read by decomposition-aware features (amr) in ALL builds;
-        ! the serial/single-rank offset is 0 and the MPI decomposition overwrites it
+        ! start_idx is read by decomposition-aware features (amr) in all builds; the MPI decomposition overwrites its 0 default
         allocate (start_idx(1:num_dims))
         start_idx = 0
 

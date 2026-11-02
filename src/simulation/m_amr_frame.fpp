@@ -2,24 +2,18 @@
 !!@file
 !!@brief Contains module m_amr_frame
 
-#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). A conditionally allocated module
-#! array a kernel names launches only under its allocation's own condition (sw_jac/jac: igr); a kernel naming an unallocated
-#! array aborts. Keep it so.
+#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). A kernel naming an unallocated
+#! module array aborts, so conditionally allocated ones (sw_jac/jac: igr) are named only under their allocation condition.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 
 !> @brief Block-frame swap (fine grid state in/out of the shared solver).
 module m_amr_frame
 
-#ifdef MFC_MPI
-    use mpi  !< MPI-IO for the parallel_io AMR restart file
-#endif
-
     use m_derived_types  ! scalar_field, t_box, int_bounds_info
     use m_global_parameters
     use m_mpi_proxy, only: s_mpi_abort  ! @:ASSERT expands to it
     use m_pressure_relaxation, only: s_pressure_relaxation_procedure
-    use m_phase_timing
     use m_hypoelastic, only: s_hypoelastic_update_fd_coeffs, s_enforce_cont_damage_bounds
     use m_body_forces, only: s_apply_bodyforces
     use m_igr, only: jac, jac_old
@@ -35,8 +29,7 @@ module m_amr_frame
 
 contains
 
-    !> 6-equation model: apply the per-stage pressure relaxation to the fine block's interior (cell-local equilibration, no
-    !! stencil), mirroring the coarse per-stage call. Swaps the grid so the routine's 0:m,0:n,0:p loop covers this block.
+    !> 6-equation model: per-stage pressure relaxation on the fine block's interior (cell-local), mirroring the coarse call.
     impure subroutine s_amr_pressure_relax_fine()
 
         integer :: loc_cur  !< plain scalars for device routines (NVHPC -Minline)
@@ -52,11 +45,8 @@ contains
 
     end subroutine s_amr_pressure_relax_fine
 
-    !> Fine-block twin of the coarse post-RK body-force update: the same cell-local source (rho*g in momentum, rho*u.g in energy)
-    !! applied to the block's own cells, in its own frame. Without it the refined region would evolve with no body force at all
-    !! while the coarse grid around it feels one, and the end-of-step fold would then overwrite the coarse cells under the block
-    !! with the unforced fine average. bf_spatial_support is not reachable here (case_validator rejects it with amr): its source
-    !! arrays are built on the coarse grid.
+    !> Fine-block twin of the coarse post-RK body-force update, applied in the block's own frame; without it the refined region
+    !! would feel no body force. bf_spatial_support is rejected with amr (its source arrays are coarse-grid).
     impure subroutine s_amr_bodyforces_fine(ldt)
 
         real(wp), intent(in) :: ldt      !< the stage's rk_coef(s, 3)*dt/rk_coef(s, 4)
@@ -66,8 +56,7 @@ contains
         call s_amr_swap_to_fine()
         loc_cur = amr_loc_of(amr_cur)
         call s_amr_br_load(loc_cur)
-        ! amr_scr_prim is passed for the interface only: s_compute_body_forces_rhs reads the conserved state and rhoM, never
-        ! the primitives (only the synthetic-turbulence source does, and that is rejected with amr).
+        ! amr_scr_prim is passed for the interface only (the body-force source reads the conserved state and rhoM)
         call s_apply_bodyforces(amr_cons_br, amr_scr_prim, amr_scr_rhs, ldt)
         loc_cur = amr_loc_of(amr_cur)
         call s_amr_br_store(loc_cur)
@@ -75,7 +64,7 @@ contains
 
     end subroutine s_amr_bodyforces_fine
 
-    !> Fine-block twin of the coarse post-RK continuum-damage clamp (cell-local, so the block's own frame is all it needs).
+    !> Fine-block twin of the coarse post-RK continuum-damage clamp (cell-local).
     impure subroutine s_amr_cont_damage_fine()
 
         integer :: loc_cur  !< plain scalars for device routines (NVHPC -Minline)
@@ -97,25 +86,22 @@ contains
         logical, intent(in), optional :: widen  !< also widen idwint to the ghost shells (the RHS conversion range)
         integer                       :: ibm, o, e
 
-        ! Saving on a nested swap would overwrite the sw_* bounce buffers with fine state, and the eventual restore would install
-        ! fine extents as the coarse grid (silent corruption of everything after). Hence every save below is depth-guarded; the
-        ! installs are not, since re-installing the same slot is idempotent.
+        ! Saves are depth-guarded: a nested save would overwrite the sw_* bounce buffers with fine state, and the outermost restore
+        ! would install fine extents as the coarse grid. Installs are idempotent, so unguarded.
 
         amr_swap_depth = amr_swap_depth + 1
         if (amr_swap_depth == 1) then
             sw_m = m; sw_n = n; sw_p = p
             sw_idwint = idwint; sw_idwbuff = idwbuff
         end if
-        ! the acoustic source's precomputed spatials are coarse-grid cell indices: applying them on the fine block would inject at
-        ! wrong cells (or out of bounds). The support is guaranteed not to overlap the block (checked at startup), so the fine RHS
-        ! correctly skips the source.
+        ! the acoustic source's spatials are coarse-grid cell indices; its support never overlaps a block (checked at startup), so
+        ! the fine RHS skips it
         if (amr_swap_depth == 1) sw_acoustic_source = acoustic_source
         acoustic_source = .false.
         m = amr_slots(amr_cur)%m; n = amr_slots(amr_cur)%n; p = amr_slots(amr_cur)%p
         idwint%beg = 0; idwint%end = [m, n, p]
         idwbuff = amr_slots(amr_cur)%idwbuff
-        ! save coarse coords to bounce buffers, then install the fine coords and extend them into the ghost shell
-        ! (s_build_level_coords only fills the interior 0:m)
+        ! save coarse coords, then install the fine coords and extend them into the ghost shell (s_build_level_coords fills 0:m)
         #:for D, X, E in [(1, 'x', 'm'), (2, 'y', 'n'), (3, 'z', 'p')]
             if (amr_dim(${D}$)) then
                 if (amr_swap_depth == 1) then; sw_${X}$_cb = ${X}$_cb; sw_${X}$_cc = ${X}$_cc; sw_d${X}$ = d${X}$; end if
@@ -125,9 +111,9 @@ contains
                 call s_amr_extend_ghost_coords(${D}$, ${X}$_cb, ${X}$_cc, d${X}$, ${E}$, lbound(amr_g${X}$cb, 1), amr_g${X}$cb)
             end if
         #:endfor
-        ! batched advance: the leader's grid is installed above; extend it into the slab of amr_bat_n stacked blocks (stride
-        ! amr_bat_w along amr_bat_sd), since the flux divergence reads dx/dy/dz at every slab cell. Cell boundaries (x_cb etc.)
-        ! are not replicated: nothing on the batched path reads them (WENO coefficients are not recomputed on a uniform grid).
+        ! batched advance: extend the leader's grid into the slab of amr_bat_n stacked blocks (stride amr_bat_w along amr_bat_sd),
+        ! since the flux divergence reads dx/dy/dz at every slab cell. Cell boundaries are not replicated: the batched path does not
+        ! read them.
         if (amr_bat_n > 1) then
             do ibm = 2, amr_bat_n
                 #:for D, X, E in [(1, 'x', 'm'), (2, 'y', 'n'), (3, 'z', 'p')]
@@ -148,26 +134,20 @@ contains
         if (present(widen)) then
             if (widen) idwint = idwbuff
         end if
-        ! sync the swapped extents/bounds/coordinates to the device: RHS kernels read the device copies of these GPU_DECLARE'd
-        ! globals (stale coarse bounds = OOB kernels)
+        ! sync extents/bounds/coordinates to the GPU_DECLARE'd device copies (stale coarse bounds = OOB kernels)
         call s_amr_sync_grid_state_to_device()
-        ! hypoelastic stress sources use grid-spacing-dependent FD coefficients: recompute them from the (now fine) grid, else every
-        ! fine velocity gradient is halved
+        ! hypoelastic FD coefficients depend on grid spacing: recompute them for the fine grid
         if (hypoelasticity) call s_hypoelastic_update_fd_coeffs()
-        ! IGR: save the coarse sigma state and seed the fine solve. jac holds this stage's converged coarse sigma (the coarse RHS
-        ! ran first), so its parent values are both the best initial guess and the frozen Dirichlet ghost data for the block-local
-        ! Jacobi solve (the per-iteration BC/halo populate is skipped under amr_in_fine_advance). Piecewise-constant parent
-        ! injection over the full buffered fine range.
+        ! IGR: save the coarse sigma and seed the fine solve with its parent values (best initial guess, and the frozen Dirichlet
+        ! ghost data for the block-local Jacobi solve)
         if (igr) call s_amr_igr_swap_sigma()
 
     end subroutine s_amr_swap_to_fine
 
-    !> Extend one axis of the installed fine grid into the ghost shell with the exact parent-cell bisection the interior uses:
-    !! boundary jg belongs to parent cell c = isect_lo + floor(jg/rr), sub-position k = modulo(jg, rr) picks the rr-way split (floor
-    !! division for the negative indices). The parent boundaries are the global L0 boundaries gcb for a level-1 block; a level>=2
-    !! block's coarse side is its parent's fine grid, rebuilt from replicated metadata by the same ancestor replay as the interior
-    !! build (the parent's own coordinate arrays exist only on its owner). Blocks stay buff_size inside the domain, so every ghost
-    !! parent is an in-domain cell with exact coords.
+    !> Extend one axis of the installed fine grid into the ghost shell with the same parent-cell bisection the interior uses:
+    !! boundary jg belongs to parent cell cl = isect_lo + floor(jg/rr), and k = modulo(jg, rr) picks the rr-way split. The parent
+    !! boundaries are gcb for a level-1 block; a level>=2 block's parent grid is rebuilt from replicated metadata (the parent's own
+    !! arrays exist only on its owner). Blocks stay buff_size inside the domain, so every ghost parent is an in-domain cell.
     impure subroutine s_amr_extend_ghost_coords(d, cb, cc, dd, ext, glb, gcb)
 
         integer, intent(in)     :: d, ext, glb
@@ -205,23 +185,21 @@ contains
     !> Restore the global grid state saved by s_amr_swap_to_fine.
     impure subroutine s_amr_restore_coarse(sync_device)
 
-        !> .false. only from the batched stage when another batch follows at once: its swap re-pushes the whole grid state before
-        !! any kernel reads it, so the restore-side push is dead work there.
+        !> .false. only from the batched stage when another batch follows at once (its swap re-pushes the grid state)
         logical, intent(in), optional :: sync_device
         logical                       :: sync
 
         @:ASSERT(amr_swap_depth > 0, "s_amr_restore_coarse without a matching s_amr_swap_to_fine")
         amr_swap_depth = amr_swap_depth - 1
-        ! inner restore: the enclosing swap frame still wants its slot installed, and the sw_* buffers still hold the coarse state
+        ! inner restore: the enclosing swap frame still needs its slot installed and the sw_* buffers still hold the coarse state
         if (amr_swap_depth > 0) return
         m = sw_m; n = sw_n; p = sw_p
         idwint = sw_idwint; idwbuff = sw_idwbuff
         acoustic_source = sw_acoustic_source
-        ! restore full coarse coords from bounce buffers
+        ! restore full coarse coords
         #:for D, X, E in [(1, 'x', 'm'), (2, 'y', 'n'), (3, 'z', 'p')]
             if (amr_dim(${D}$)) then; ${X}$_cb = sw_${X}$_cb; ${X}$_cc = sw_${X}$_cc; d${X}$ = sw_d${X}$; end if
         #:endfor
-        ! sync the restored coarse extents/bounds/coordinates back to the device
         sync = .true.; if (present(sync_device)) sync = sync_device
         if (sync) call s_amr_sync_grid_state_to_device()
         if (hypoelasticity) call s_hypoelastic_update_fd_coeffs()
@@ -229,26 +207,22 @@ contains
 
     end subroutine s_amr_restore_coarse
 
-    !> Save the coarse jac/jac_old and seed the (already swapped-in) fine block's sigma state by piecewise-constant parent injection
-    !! from the saved coarse sigma: interior = initial guess, ghost shell = frozen Dirichlet coupling data for the block-local
-    !! solve.
+    !> Save the coarse jac/jac_old and seed the (already swapped-in) fine block's sigma by piecewise-constant parent injection from
+    !! the saved coarse sigma: interior = initial guess, ghost shell = frozen Dirichlet coupling data.
     impure subroutine s_amr_igr_swap_sigma()
 
         integer :: j, k, l, ci, cj, ck, ibm, g, o1, o2, o3, mb1, me1, mb2, me2, mb3, me3, lo1, lo2, lo3, ox, oy, oz
         integer :: cb1, ce1, cb2, ce2, cb3, ce3, lo(3), o(3), mb(3), me(3)
 
-        ! bounds/offsets hoisted to scalars: sw_idwbuff (and friends) are host-only module state; referencing them inside the
-        ! kernels makes OpenACC's present lookup fail (OpenMP's implicit map(to) tolerates it, so only OpenACC builds crash)
+        ! bounds hoisted to scalars: sw_idwbuff etc. are host-only, so naming them in a kernel fails OpenACC's present lookup
 
         cb1 = sw_idwbuff(1)%beg; ce1 = sw_idwbuff(1)%end
         cb2 = sw_idwbuff(2)%beg; ce2 = sw_idwbuff(2)%end
         cb3 = sw_idwbuff(3)%beg; ce3 = sw_idwbuff(3)%end
         ox = amr_sidx(1); oy = amr_sidx(2); oz = amr_sidx(3)
-        ! Save the coarse sigma, outermost swap only. A nested swap must not re-save, or sw_jac would take fine state and both the
-        ! seed below and s_amr_igr_restore_sigma would work from it. The seed that follows is not guarded: it reads sw_jac, which
-        ! still holds the coarse state, so every nested block seeds from the correct parent.
-        ! jac_old exists only for the Jacobi solver (igr_iter_solver == 1; m_igr allocates it there alone), so its traffic runs in
-        ! its own kernel: naming an unallocated array inside a launched kernel aborts under amdflang's present:allocatable.
+        ! Save the coarse sigma, outermost swap only (a nested save would overwrite sw_jac with fine state). The seed below is
+        ! unguarded: sw_jac still holds the coarse state. jac_old exists only for the Jacobi solver (igr_iter_solver == 1), so it
+        ! gets its own kernel: naming an unallocated array in a launched kernel aborts under amdflang.
         if (amr_swap_depth == 1) then
             $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
             do l = cb3, ce3
@@ -271,8 +245,8 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
             end if
         end if
-        ! seed each block's buffered range from its own parent; in a batched slab (amr_bat_n > 1) member ibm sits at offset o
-        ! along amr_bat_sd and the installed bounds are the leader's, so its own extents bound the seed
+        ! seed each block's buffered range from its own parent; in a batched slab member ibm sits at offset o along amr_bat_sd and
+        ! its own extents bound the seed
         do ibm = 1, max(1, amr_bat_n)
             if (amr_bat_n > 1) then
                 g = amr_bat_blk(ibm); lo = amr_isect_lo_all(:,g)

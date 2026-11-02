@@ -2,24 +2,18 @@
 !!@file
 !!@brief Contains module m_amr_advance
 
-#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). A conditionally allocated module
-#! array a kernel names launches only under its allocation's own condition (sw_jac/jac: igr); a kernel naming an unallocated
-#! array aborts. Keep it so.
+#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). A kernel naming an unallocated
+#! module array aborts, so conditionally allocated ones (sw_jac/jac: igr) are named only under their allocation condition.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 
 !> @brief Fine-block stage advance and the immersed-boundary/Lagrange fine services.
 module m_amr_advance
 
-#ifdef MFC_MPI
-    use mpi  !< MPI-IO for the parallel_io AMR restart file
-#endif
-
     use m_derived_types  ! scalar_field, t_box, int_bounds_info
     use m_global_parameters
     use m_constants, only: model_eqns_6eq
     use m_mpi_proxy, only: s_mpi_abort
-    use m_mpi_common, only: s_mpi_allreduce_integer_sum
     use m_rhs, only: s_compute_rhs
     use m_phase_timing
     use m_ibm, only: s_ibm_setup_fine, s_ibm_swap_to_fine, s_ibm_restore_from_fine, s_ibm_correct_state, s_ibm_load_fine_markers, &
@@ -40,9 +34,7 @@ module m_amr_advance
 contains
 
     !> Compute the fine-grid IB state (markers/ghost points/levelset) for every active block from the body geometry (static-body
-    !! AMR). Called once after the coarse IB setup at init (regrid+IB is gated). Per slot with fine cells: swap the grid to the fine
-    !! block, swap the IB globals to the slot store, run the fine IB pipeline (writing into the slot store), restore. No-op unless
-    !! amr .and. ib.
+    !! AMR), once after the coarse IB setup: swap grid and IB globals to each owned block, run the fine IB pipeline, restore.
     impure subroutine s_amr_setup_ib()
 
         integer                      :: islot, save_cur
@@ -64,16 +56,14 @@ contains
         end do
         call s_amr_select_slot(save_cur)
 
-        ! The fine-IB image-point stencil is not decomposition-exact across a rank seam. If one body's fine ghost points appear on
-        ! more than one rank (the body straddles a coarse/fine rank boundary), abort rather than return a wrong body-surface state.
-        ! A body wholly within one rank is decomposition-exact, whatever the other bodies do.
+        ! The fine-IB image-point stencil is not decomposition-exact across a rank seam: abort if one body's fine ghost points
+        ! appear on more than one rank.
         call s_ibm_check_bodies_on_one_rank(body_gps)
 
     end subroutine s_amr_setup_ib
 
-    !> Apply the IB state correction on the current fine block after its RK update (static-body AMR). Mirrors the coarse per-stage
-    !! s_ibm_correct_state: swap the grid + IB globals to the fine block, correct q_cons/q_prim at the fine body/ghost cells,
-    !! restore. amr_cur is set by the caller. No-op unless ib.
+    !> Apply the IB state correction on the current fine block after its RK update, mirroring the coarse s_ibm_correct_state.
+    !! amr_cur is set by the caller.
     impure subroutine s_amr_ib_correct_fine(q_prim_b, pb_in, mv_in)
 
         !> the q_prim the block's RHS pass filled (pooled scratch)
@@ -83,8 +73,7 @@ contains
 
         if (.not. ib) return
         if (.not. amr_rank_owns_block) return
-        ! the swap moves the whole marker field through the host four times per block per stage, and the correction of a block
-        ! with no ghost point (no body in it) is a no-op
+        ! the swap moves the whole marker field through the host, and a block with no ghost point needs no correction
         if (f_ibm_fine_gps(amr_cur) == 0) return
         call s_amr_swap_to_fine()
         call s_ibm_swap_to_fine(amr_cur, gps_on_device=.true.)
@@ -98,10 +87,8 @@ contains
 
     end subroutine s_amr_ib_correct_fine
 
-    !> Rebuild the current fine block's IB state (markers/ghost points/image points) from the moving body's position (prescribed
-    !! motion, moving_ibm==1). Reuses the coarse s_update_mib recompute on the swapped-in fine slot (grid + IB globals swapped to
-    !! the fine block, recompute writes into the slot store, restore) at the body's current position. No-op unless ib. Must precede
-    !! s_amr_ib_correct_fine.
+    !> Rebuild the current fine block's IB state from the moving body's position (prescribed motion, moving_ibm==1) by reusing the
+    !! coarse s_update_mib on the swapped-in slot. Must precede s_amr_ib_correct_fine.
     impure subroutine s_amr_update_mib_fine()
 
         integer :: i, blo(3), bhi(3)
@@ -110,12 +97,10 @@ contains
         if (.not. ib) return
         if (.not. amr_rank_owns_block) return
         moving_here = .false.
-        ! A moving body must stay inside its block (a body overlapping the block edge gets silently clipped forcing, so abort
-        ! instead). Under dynamic regrid the expansion contained it with margin max(amr_buf,4) and body + image-point stencil reach
-        ! (2 coarse cells) must remain contained between regrids; on a static block the user's placement is authoritative
-        ! (validated configs sit tighter than the regrid margin), so only the body bbox itself must stay inside. Consecutive
-        ! contained positions keep every sub-time interpolate contained (axis-aligned boxes are convex in the linearly-moving
-        ! corners).
+        ! A moving body must stay inside its block (an edge overlap would silently clip the forcing). Under dynamic regrid the
+        ! expansion left margin max(amr_buf,4) and body + image-point stencil reach (2 coarse cells) must stay contained between
+        ! regrids; on a static block only the body bbox must stay inside. Consecutive contained positions keep every sub-time
+        ! interpolate contained (boxes are convex in the linearly-moving corners).
         if (any(patch_ib(1:num_ibs)%moving_ibm /= 0)) then
             do i = 1, num_ibs
                 if (patch_ib(i)%moving_ibm == 0) cycle
@@ -133,9 +118,7 @@ contains
                 moving_here = .true.
             end do
         end if
-        ! the recompute clears and refills the whole slot for every body, so a block with no moving body over it (a block of the
-        ! refined front, or a block holding only static bodies) would pay for the full rebuild three times a step to reproduce
-        ! the state it already has
+        ! the recompute rebuilds the whole slot for every body, so skip blocks with no moving body over them
         if (.not. moving_here) return
         call s_amr_swap_to_fine()
         call s_ibm_swap_to_fine(amr_cur, gps_on_device=.true.)
@@ -145,11 +128,10 @@ contains
 
     end subroutine s_amr_update_mib_fine
 
-    !> Batched fine advance: the owned fine blocks are advanced in batches of up to amr_bat_lim blocks of the same (level, extent),
-    !! stacked two ghost shells apart along the last active dimension in the bridge, so one s_compute_rhs call and one RK kernel
-    !! cover the batch. The per-cell arithmetic is the per-block path's; blocks are independent (each advance writes only its own
-    !! store column and register slots), so the grouping order is free. The stacked members read the batch leader's coordinate
-    !! arrays in the non-stacked dimensions (see the init-time note in s_initialize_amr_module).
+    !> Batched fine advance: owned fine blocks are advanced in batches of up to amr_bat_lim blocks of the same level and (padded)
+    !! extent, stacked two ghost shells apart along the last active dimension, so one s_compute_rhs call and one RK kernel cover a
+    !! batch. Blocks are independent, so grouping order is free. Members read the leader's coordinate arrays in the non-stacked
+    !! dimensions (see s_amr_init_report).
     impure subroutine s_amr_fine_stage_advance_batched(s, coefs, bc_type, q_T_sf, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
 
         integer, intent(in) :: s, t_step
@@ -178,16 +160,16 @@ contains
                 if (amr_bat_n == amr_bat_lim) exit
                 h = my(j)
                 if (done(j) .or. amr_block_level(h) /= amr_block_level(g)) cycle
-                ! padded membership: no larger than the leader in any dim, and the padding wastes <= amr_bat_pad of its cells
+                ! padded membership: no larger than the leader in any dim, wasting <= amr_bat_pad of the member's cells
                 if (amr_slots(h)%m > amr_slots(g)%m .or. amr_slots(h)%n > amr_slots(g)%n .or. amr_slots(h)%p > amr_slots(g)%p) cycle
                 if (real((amr_slots(g)%m + 1)*(amr_slots(g)%n + 1)*(amr_slots(g)%p + 1) - (amr_slots(h)%m + 1)*(amr_slots(h)%n &
                     & + 1)*(amr_slots(h)%p + 1), &
                     & wp) > amr_bat_pad*real((amr_slots(h)%m + 1)*(amr_slots(h)%n + 1)*(amr_slots(h)%p + 1), wp)) cycle
                 amr_bat_n = amr_bat_n + 1; amr_bat_blk(amr_bat_n) = h; done(j) = .true.
             end do
-            ! no fine block left undone -> this batch's restore must push the coarse grid state (the coarse stage reads it)
+            ! no fine block left undone: this batch's restore must push the coarse grid state (the coarse stage reads it)
             last_batch = .not. any(.not. done .and. (amr_adv_level == 0 .or. amr_block_level(my) == amr_adv_level))
-            ! the batch frame: leader selected (swap, capture and RK read amr_cur / the slot's extents), members' store columns
+            ! leader selected (swap, capture and RK read amr_cur / its extents); members' store columns
             call s_amr_select_slot(g)
             amr_bat_ext = [amr_slots(g)%m, amr_slots(g)%n, amr_slots(g)%p]
             call s_amr_bat_layout()
@@ -196,7 +178,7 @@ contains
                 amr_bat_mext(:,ibm) = [amr_slots(amr_bat_blk(ibm))%m, amr_slots(amr_bat_blk(ibm))%n, amr_slots(amr_bat_blk(ibm))%p]
             end do
             $:GPU_UPDATE(device='[amr_bat_loc, amr_bat_mext, amr_bat_off]')
-            ! step-entry backup for the SSP-RK combination, per member (device copy over the member's buffered extents)
+            ! step-entry backup for the SSP-RK combination, per member
             if (s == 1) then
                 do ibm = 1, amr_bat_n
                     h_bat_blk_ibm = amr_bat_blk(ibm)
@@ -209,7 +191,7 @@ contains
             call s_phase_toc(PH_SWAP)
             call s_phase_tic(PH_RHS)
             call s_amr_br_load_batch(amr_bat_n)
-            ! each member's own fine markers at its slab offset, for the RHS body-cell zeroing
+            ! each member's fine markers at its slab offset, for the RHS body-cell zeroing
             if (ib) call s_ibm_load_fine_markers(amr_bat_n, amr_bat_blk(1:amr_bat_n), amr_bat_mext(:,1:amr_bat_n), amr_bat_sd, &
                 & amr_bat_w)
             call s_compute_rhs(amr_cons_br, q_T_sf, amr_scr_prim, bc_type, amr_scr_rhs, pb_in, rhs_pb, mv_in, rhs_mv, t_step, s)
@@ -227,14 +209,11 @@ contains
             h_merge_1_wp_dt_igr = merge(1._wp, dt, igr)
             call s_amr_fine_rk_update_batch(amr_bat_n, amr_scr_rhs, h_coefs_1, h_coefs_2, h_coefs_3, h_coefs_4, h_merge_1_wp_dt_igr)
             if (ib .or. bodyForces .or. cont_damage .or. (model_eqns == model_eqns_6eq .and. (.not. relax))) then
-                ! the coarse stage applies its post-RK hooks to q_cons_ts(1) (m_time_steppers); the same ones run here per member
-                ! after the batch's update, in the member's own frame and in the coarse order, so the refined region sees the same
-                ! sources: the 6-equation pressure relaxation, the body-force update, the moving-body rebuild, the body/ghost-cell
-                ! correction and the continuum-damage clamp. Each reads only the member's own cells, so the order across members
-                ! does not matter. A hook the fine path cannot run is rejected with amr in case_validator (synthetic turbulence,
-                ! the spatial-support body force, the operator-split reaction and burn substeps), never silently skipped.
-                ! amr_bat_n = 1 while the members are visited: s_amr_swap_to_fine extends the installed grid into the slab
-                ! whenever amr_bat_n > 1, and the hooks must see the member's extents (ib_markers is sized to a block).
+                ! the coarse stage's post-RK hooks (q_cons_ts(1), m_time_steppers) run here per member in its own frame and in the
+                ! coarse order: 6-equation pressure relaxation, body force, moving-body rebuild, body/ghost-cell correction,
+                ! continuum-damage clamp. Each reads only the member's cells, so member order is free. Unsupported hooks are
+                ! rejected with amr in case_validator. amr_bat_n = 1 while visiting members: s_amr_swap_to_fine would otherwise
+                ! extend the grid into the slab, and the hooks need the member's extents.
                 nb = amr_bat_n; amr_bat_n = 1
                 do ibm = 1, nb
                     call s_amr_select_slot(amr_bat_blk(ibm))
@@ -257,7 +236,7 @@ contains
 
     end subroutine s_amr_fine_stage_advance_batched
 
-    !> The batch's slab layout (leader extents amr_bat_ext): the members stacked along the last active dim, stride amr_bat_w.
+    !> The batch's slab layout: members stacked along the last active dim, stride amr_bat_w.
     impure subroutine s_amr_bat_layout()
 
         integer :: ibm
@@ -271,9 +250,8 @@ contains
 
     end subroutine s_amr_bat_layout
 
-    !> Device RK stage update over the batch: q = (c1*q + c2*q_stor + c3*dt_in*rhs)/c4 (compute in wp, store stp) for every member,
-    !! reading its rhs at the member's slab offset. Mirrors the coarse non-IGR rk_coef form in s_tvd_rk (m_time_steppers): same
-    !! SSP-RK stage combination; keep the two in lockstep.
+    !> Device RK stage update over the batch: q = (c1*q + c2*q_stor + c3*dt_in*rhs)/c4 (compute in wp, store stp), reading each
+    !! member's rhs at its slab offset. Keep in lockstep with the non-IGR rk_coef form in s_tvd_rk (m_time_steppers).
     impure subroutine s_amr_fine_rk_update_batch(nb, q_rhs, c1, c2, c3, c4, dt_in)
 
         integer, intent(in)                                 :: nb

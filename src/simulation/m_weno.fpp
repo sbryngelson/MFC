@@ -81,11 +81,9 @@ module m_weno
     !> @{
     type(int_bounds_info) :: is1_weno, is2_weno, is3_weno
 
-    !> Allocation-only counterparts of is1/is2/is3_weno, derived from m/n/p_alloc so the coefficient and reconstruction arrays can
-    !! hold the largest refined block rather than just the coarse subdomain (the batched fine advance reads them over a slab's
-    !! bounds). s_compute_weno_coefficients is still called with the true is*_weno, so the inflated tail is never computed from
-    !! cell-boundary coordinates that do not exist yet - it is filled by replicating the last computed cell (see there). Identical
-    !! to is*_weno unless amr_max_grid_size pins a cap larger than the subdomain.
+    !> Allocation-only counterparts of is1/is2/is3_weno, derived from m/n/p_alloc so the arrays can hold the largest refined block;
+    !! s_compute_weno_coefficients still uses the true is*_weno and replicates the last computed cell into the tail. Identical to
+    !! is*_weno unless amr_max_grid_size pins a cap larger than the subdomain.
     type(int_bounds_info) :: is1_weno_a, is2_weno_a, is3_weno_a
 #ifndef __NVCOMPILER_GPU_UNIFIED_MEM
     $:GPU_DECLARE(create='[is1_weno, is2_weno, is3_weno]')
@@ -860,10 +858,9 @@ contains
                         d_cbR_${XYZ}$ (4,:) = 1._wp/35._wp
                     end if
                 end if
-                ! The arrays extend to is${WENO_DIR}$_weno_a (m/n/p_alloc): the tail past `is` is read by a refined block wider
-                ! than this subdomain (amr_max_grid_size above the cap) and has no coarse boundaries to compute from. On a uniform
-                ! grid the coefficients are spacing ratios, identical in every cell, so the last computed cell is replicated
-                ! (amr requires a uniform grid).
+                ! the arrays extend to is${WENO_DIR}$_weno_a: a refined block wider than the subdomain reads the tail past `is`,
+                ! which has no coarse boundaries to compute from. On a uniform grid (required by amr) the coefficients are identical
+                ! in every cell, so replicate the last computed one.
                 do i = is%end - weno_polyn + 1, is${WENO_DIR}$_weno_a%end - weno_polyn
                     poly_coef_cbL_${XYZ}$ (i,:,:) = poly_coef_cbL_${XYZ}$ (is%end - weno_polyn,:,:)
                     poly_coef_cbR_${XYZ}$ (i,:,:) = poly_coef_cbR_${XYZ}$ (is%end - weno_polyn,:,:)
@@ -930,10 +927,8 @@ contains
         type(int_bounds_info), intent(in)                                                      :: is1_weno_d, is2_weno_d, is3_weno_d
         logical, optional, intent(in)                                                          :: packed  !< v_rs_weno holds v_vf
 
-        ! Non-case-optimized amdflang path: weno_num_stencils is not a compile constant, so these are sized
-        ! to the max (0:4). Only 0:weno_num_stencils is meaningful - whole-array assignments (e.g. from the
-        ! 0:weno_num_stencils d_cbL/R) MUST slice the target to 0:weno_num_stencils, or amdflang's runtime
-        ! array-shape check aborts (Assign: mismatching element counts, to 5 from 3).
+        ! Non-case-optimized amdflang: weno_num_stencils is not a compile constant, so these are sized to 0:4; whole-array
+        ! assignments must slice the target to 0:weno_num_stencils or amdflang's runtime shape check aborts
 
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(-3:2) :: dvd
@@ -1102,7 +1097,7 @@ contains
             #:endfor
         end if
         if (weno_order == 5) then
-            ! WENO5 (and TENO5) has stencils 0:2; the literal bound keeps the stencil arrays in registers
+            ! WENO5/TENO5 have stencils 0:2; the literal bound keeps the stencil arrays in registers
             #:if not MFC_CASE_OPTIMIZATION or weno_num_stencils > 1
                 #:for WENO_DIR, XYZ, STENCIL_VAR, COORDS, X_BND, Y_BND, Z_BND in &
                     [(1, 'x', 'j', '{STENCIL_IDX}, k, l', 'is1_weno', 'is2_weno', 'is3_weno'), &

@@ -2,18 +2,13 @@
 !!@file
 !!@brief Contains module m_amr_store
 
-#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). A conditionally allocated module
-#! array a kernel names launches only under its allocation's own condition (sw_jac/jac: igr); a kernel naming an unallocated
-#! array aborts. Keep it so.
+#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). A kernel naming an unallocated
+#! module array aborts, so conditionally allocated ones (sw_jac/jac: igr) are named only under their allocation condition.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 
-#! Copy the buffered-box extents into scalars for use as kernel loop bounds. mbuf_lo/mbuf_hi are
-#! module-scope integer arrays (m_amr_state) that are never mapped to the device, so a loop bound
-#! reading them inside a region carrying default(present) makes CCE's OpenACC runtime abort with
-#! "find_in_present_table failed for 'mbuf_hi(:)'". OpenMP offload maps them implicitly and never
-#! noticed; every AMR test failed the moment the OpenACC lane could build. Scalars are firstprivate
-#! in both models, so hoisting the bounds needs no mapping and no update on resize. Declare
+#! Copy the buffered-box extents into scalars for kernel loop bounds: mbuf_lo/mbuf_hi are host module arrays never mapped to the
+#! device, so naming them in a default(present) region aborts CCE OpenACC (find_in_present_table failed). Declare
 #! blo1/bhi1/blo2/bhi2/blo3/bhi3 in the caller.
 #:def AMR_MBUF_BOUNDS()
     blo1 = mbuf_lo(1); bhi1 = mbuf_hi(1)
@@ -26,15 +21,8 @@
 !> @brief Flat per-block field store: dense slot indexing, reservation, alloc/free and the prim/bridge loaders.
 module m_amr_store
 
-#ifdef MFC_MPI
-    use mpi  !< MPI-IO for the parallel_io AMR restart file
-#endif
-
     use m_derived_types  ! scalar_field, t_box, int_bounds_info
     use m_global_parameters
-    use m_mpi_proxy, only: s_mpi_abort  ! @:ASSERT expands to it
-    use m_variables_conversion, only: s_convert_species_to_mixture_variables_kernel, s_compute_pressure, enforce_density_floor_vc
-    use m_phase_timing
     use m_amr_state
     use m_amr_distribution
 
@@ -51,9 +39,9 @@ module m_amr_store
 
 contains
 
-    !> Push the (host-side) global grid state to its device copies after a swap/restore. m/n/p, idwint/idwbuff, and the coordinate
-    !! arrays are GPU_DECLARE'd; kernels read the device copies. The coordinates go through amr_gs_buf as one update and a device
-    !! unpack, since every update of an allocatable costs several synchronous copies. No-op on CPU.
+    !> Push the host global grid state (m/n/p, idwint/idwbuff, coordinate arrays) to its GPU_DECLARE'd device copies after a
+    !! swap/restore. Coordinates go through amr_gs_buf as one update since each allocatable update costs several synchronous copies.
+    !! No-op on CPU.
     impure subroutine s_amr_sync_grid_state_to_device()
 
         integer :: o, j, lb, ub
@@ -88,10 +76,10 @@ contains
 
     end subroutine s_amr_sync_grid_state_to_device
 
-    !> Device copy amr_cons_st -> amr_stor_st over [b1:e1, b2:e2, b3:e3] for all sys_size fields (RK step-entry backup).
+    !> Device copy amr_cons_st -> amr_stor_st over block k's buffered box, all sys_size fields (RK step-entry backup).
     impure subroutine s_amr_copy_fine_fields(k)
 
-        integer, intent(in) :: k  !< block slot: source (amr_cons_st) and destination (amr_stor_st) are its flat-store column
+        integer, intent(in) :: k  !< block slot (its flat-store column)
         integer             :: i, fi, fj, fk, loc, b1, e1, b2, e2, b3, e3
 
         loc = amr_loc_of(k)
@@ -112,11 +100,8 @@ contains
 
     end subroutine s_amr_copy_fine_fields
 
-    !> Allocate slot islot's per-block field arrays (coords + the device-resident field vectors), sized to the max buffered block.
-    !! Idempotent (no-op if already live). The global amr_cg is not per-slot and stays in init/finalize.
-    !> Allocate/reset the dense local-index maps. Idempotent.
-    !> The block-metadata pool for amr_max_blocks slots: per-slot geometry, ownership and level tables, the SFC cuts and the
-    !! per-block overlap-list counts (the 2D rank lists are sized to the computed max overlap in s_amr_build_seam_pairs).
+    !> Block-metadata pool for amr_max_blocks slots (geometry, ownership, level, SFC cuts, overlap-list counts; the 2D rank lists
+    !! are sized in s_amr_build_seam_pairs) and the dense-index maps.
     impure subroutine s_amr_alloc_pool()
 
         allocate (amr_slots(1:amr_max_blocks))
@@ -132,8 +117,8 @@ contains
 
     end subroutine s_amr_alloc_pool
 
-    !> Bounce buffers for the copy-based coordinate swap (GPU-safe; same bounds as the base-level global arrays, which are sized on
-    !! *_alloc - these are whole-array assigned to/from x_cb etc., so the shapes must agree).
+    !> Bounce buffers for the copy-based coordinate swap; shaped like the base-level *_alloc arrays, since they are assigned whole
+    !! to/from x_cb etc.
     impure subroutine s_amr_init_swap_buffers()
 
         #:for D, X, E in [(1, 'x', 'm'), (2, 'y', 'n'), (3, 'z', 'p')]
@@ -182,6 +167,7 @@ contains
 
     end subroutine s_amr_free_swap_buffers
 
+    !> Allocate/reset the dense local-index maps (idempotent).
     impure subroutine s_amr_loc_index_init()
 
         if (.not. allocated(amr_loc_of)) allocate (amr_loc_of(1:amr_max_blocks))
@@ -190,10 +176,9 @@ contains
 
     end subroutine s_amr_loc_index_init
 
-    !> Move one local slot's store data src -> dst on the device, in place within each live store array (no staging copy: a second
-    !! store-sized array on the device is a transient that can exhaust device memory). s_amr_compact_store's ascending-source
-    !! ordering guarantees dst's previous contents are already consumed. The host copy goes stale, which is the store's normal state
-    !! between rebuilds (device-authoritative; host readers pull per slot).
+    !> Move one local slot's store data src -> dst on the device, in place (a staging copy would transiently double the store).
+    !! Ascending-source order (s_amr_compact_store) guarantees dst's old contents are consumed. The host copy goes stale, the
+    !! store's normal state between rebuilds.
     impure subroutine s_amr_st_move_slot(src, dst)
 
         integer, intent(in) :: src, dst
@@ -218,16 +203,10 @@ contains
 
     end subroutine s_amr_st_move_slot
 
-    !> Re-densify the flat store's local index space after every reconcile. Slot indices are global, so at np>=2 a rank's owned set
-    !! is a shifting SFC window plus received migration slots; without re-densification `amr_loc_n` would ratchet upward over the
-    !! run until the device ran out of memory at fixed per-rank work. Renumbering every reconcile pins loc_n to the live count, so
-    !! the capacity high-water plateaus at the rebuild transient (old + new block generations coexist mid-rebuild, ~2x live) instead
-    !! of growing without bound. The allocation itself is not shrunk. The moves are device-side and in place, processed in ascending
-    !! old-index order, which makes in-place safe: each destination (the rank of its source among the live indices) is <= its
-    !! source, and every pending source lies above the current destination.
-    !!
-    !! Called at the end of s_amr_reconcile_slots, where every reader is finished: the rebuild's overlap carry-forward
-    !! (which reads amr_stor_st at the old blocks' local indices) has completed, and the next rebuild has not started.
+    !> Re-densify the local index space after every reconcile so amr_loc_n tracks the live count instead of ratcheting up with SFC
+    !! window shifts and migration slots (capacity then plateaus at the rebuild transient). Moves are device-side and in place in
+    !! ascending old-index order: each destination is <= its source and below every pending source. Called at the end of
+    !! s_amr_reconcile_slots, after the rebuild's overlap carry-forward (which reads amr_stor_st at old indices) has finished.
     impure subroutine s_amr_compact_store()
 
         integer              :: k, v, newloc
@@ -247,10 +226,6 @@ contains
             if (newloc /= v) call s_amr_st_move_slot(v, newloc)
         end do
         deallocate (inv)
-#ifdef MFC_DEBUG
-        if (newloc < amr_loc_n) write (0, '(A,I0,A,I0,A,I0,A,I0)') '[amr-compact] rank ', proc_rank, ' loc_n ', amr_loc_n, &
-            & ' -> ', newloc, '  cap ', amr_st_cap
-#endif
         amr_loc_n = newloc
         amr_loc_nfree = 0  ! every recycled index is invalid after renumbering
 
@@ -287,11 +262,8 @@ contains
 
     end subroutine s_amr_dev_mem
 
-    !> Size the flat store for at least nloc local slots, growing geometrically and never shrinking, so a run pays few reallocations
-    !! no matter how the block count churns (with the index space re-densified every reconcile, growth fires only on a new
-    !! rebuild-transient high-water). Growth must preserve the live blocks' fields, and those live on the device, so each array
-    !! stages through a device-side temporary (two on-device copies, no PCIe round trip). No reader depends on the host mirror
-    !! through a grow.
+    !> Size the flat store for at least nloc local slots, growing geometrically and never shrinking. Growth preserves the live
+    !! columns on the device (no PCIe round trip); the host mirror comes out undefined.
     impure subroutine s_amr_st_reserve(nloc)
 
         integer, intent(in) :: nloc
@@ -305,18 +277,15 @@ contains
         real(stp), allocatable          :: tmp(:,:,:,:,:), hstage(:,:,:,:,:)
         type(scalar_field), allocatable :: tmp_br(:)  !< CCE descriptor workaround, see below
 
-        ! Contract: the store is device-authoritative at every call; growth preserves the device contents only, and the host
-        ! mirror comes out of a growth undefined (host readers pull per slot before reading, the store's normal state between
-        ! rebuilds anyway, cf. s_amr_compact_store). A caller that has just written the store on the host (restart read) must
-        ! still push its slot to the device before the next s_amr_alloc_slot, or that host data is lost.
+        ! Contract: the store is device-authoritative at every call and the host mirror is undefined after a growth. A caller that
+        ! just wrote the store on the host (restart read) must push its slot to the device before the next s_amr_alloc_slot.
 
         if (nloc <= amr_st_cap) return
         oldcap = amr_st_cap
         st_col_bytes = int(mbuf_hi(1) - mbuf_lo(1) + 1, 8)*int(mbuf_hi(2) - mbuf_lo(2) + 1, 8)*int(mbuf_hi(3) - mbuf_lo(3) + 1, &
                            & 8)*int(sys_size, 8)*int(storage_size(0._stp)/8, 8)
-        ! Staging one array on the device peaks at 2*newcap - oldcap extra columns over both arrays. Double when that fits in the
-        ! free device memory, so a growing refined region regrows the store a few times per run instead of every regrid; else grow
-        ! 1.25x capped at 16 slots (+8 floor) and stage through the host when the device copy does not fit either.
+        ! Staging one array on the device peaks at 2*newcap - oldcap extra columns: double when that fits in free device memory,
+        ! else grow 1.25x (16-slot cap, +8 floor) and stage through the host if the device copy does not fit either.
         call s_amr_dev_mem(free_b, total_b)
         newcap = max(2*oldcap, nloc, 8)
         if (.not. f_fits(newcap)) newcap = max(oldcap + max(min(oldcap/4, 16), 8), nloc)
@@ -357,9 +326,8 @@ contains
                     @:DEALLOCATE(${ST}$)
                 end if
                 @:ALLOCATE(${ST}$(mbuf_lo(1):mbuf_hi(1), mbuf_lo(2):mbuf_hi(2), mbuf_lo(3):mbuf_hi(3), 1:sys_size, 1:newcap))
-                ! restore the preserved columns and zero the rest, both on the device; the host mirror stays undefined
-                ! (see the contract above - every host reader pulls its slot first). Two kernels so the zero-only path
-                ! (oldcap == 0) never references the unallocated tmp.
+                ! restore the preserved columns and zero the rest on the device; two kernels so the oldcap == 0 path never
+                ! references the unallocated tmp
                 if (oldcap > 0) then
                     $:GPU_PARALLEL_LOOP(collapse=4)
                     do c5 = 1, oldcap
@@ -396,13 +364,11 @@ contains
         if (rank_time_wrt) write (0, '(A,I0,A,I0,A,I0,A,L1,A,F8.2)') ' [amr-stgrow] rank ', proc_rank, ' cap ', oldcap, ' -> ', &
             & newcap, ' device-staged ', dev_stage, ' free GiB before ', real(free_b, wp)/2._wp**30
 
-        ! the bridge spans a bounded batch of blocks along the last active dimension (amr_br_batch), so one s_compute_rhs call
-        ! can advance a whole batch instead of one block; it rides the same pool lifetime
+        ! the bridge spans a bounded batch of blocks along the last active dimension (amr_br_batch)
         if (.not. allocated(amr_cons_br)) then
             brlo = [mbuf_lo(1), mbuf_lo(2), mbuf_lo(3)]; brhi = [mbuf_hi(1), mbuf_hi(2), mbuf_hi(3)]
             brhi(num_dims) = brlo(num_dims) + amr_br_batch*(brhi(num_dims) - brlo(num_dims) + 1) - 1
-            ! Same CCE descriptor defect as amr_cg / amr_scr_prim: a bare module-scope derived-type allocatable must be given a
-            ! valid descriptor by allocating a local and handing it over with move_alloc, then mapped.
+            ! CCE descriptor defect, as amr_cg: allocate a local, move_alloc, then map
             allocate (tmp_br(1:sys_size)); call move_alloc(tmp_br, amr_cons_br)
             $:GPU_ENTER_DATA(create='[amr_cons_br]')
             do i = 1, sys_size
@@ -424,8 +390,8 @@ contains
 
     end subroutine s_amr_st_reserve
 
-    !> Move block loc's conserved state between the flat store and the bridge. One kernel each way over the whole buffered box:
-    !! every slot's arrays carry the same mbuf extents.
+    !> Move block loc's conserved state between the flat store and the bridge over the whole buffered box (all slots share the mbuf
+    !! extents).
     #:set BR = 'amr_cons_br(i)%sf(j, k, l)'
     #:set ST = 'amr_cons_st(j, k, l, i, loc)'
     #:for DIR in ['load', 'store']
@@ -454,11 +420,9 @@ contains
         end subroutine s_amr_br_${DIR}$
     #:endfor
 
-    !> Face-bounded bridge move, for the level>=2 reflux apply only. s_amr_br_load/_store above move the whole buffered box, but
-    !! s_amr_reflux_apply_faces only read-modify-writes six one-cell-thick planes: the outside cell olo(d)/ohi(d) of each active
-    !! dim, over the transverse window the caller passes. These twins move the same cells the apply touches and nothing else, so the
-    !! result is bit-identical to a whole-box move: the copies are stp->stp with no conversion, the apply's arithmetic is untouched,
-    !! and a plane whose weight is zero is skipped by the apply too, so it is neither read nor written either way.
+    !> Face-bounded bridge move for the level>=2 reflux apply: moves only the six one-cell planes (outside cell olo(d)/ohi(d) of
+    !! each active dim, over the caller's transverse window) that s_amr_reflux_apply_faces read-modify-writes, skipping zero-weight
+    !! planes as the apply does. Bit-identical to a whole-box move.
     #:for DIR in ['load', 'store']
         #:set BF = 'amr_cons_br(i)%sf'
         #:set SF = 'amr_cons_st'
@@ -469,10 +433,8 @@ contains
             integer              :: i, g1, g2, ol, oh, wa, wb, gla, gha, glb, ghb
             real(wp)             :: wgt_lo, wgt_hi
 
-            ! per face direction d the transverse dims are (ta, tb); bounds hoisted to scalars for the device region.
-            ! The plane weights go with them: w_lo/w_hi are dummy arrays the caller holds on the host, so reading
-            ! w_hi(d) inside a region carrying default(present) aborts CCE's OpenACC runtime with
-            ! "find_in_present_table failed for 'w_hi(:)'". Scalars are firstprivate in both offload models.
+            ! per face direction d the transverse dims are (ta, tb); bounds and plane weights are hoisted to scalars since host
+            ! dummies in a default(present) region abort CCE OpenACC
 
             #:for D, TA, TB, IDX in [(1, 2, 3, 'oc, wa + g1, wb + g2'), (2, 1, 3, 'wa + g1, oc, wb + g2'), (3, 1, 2, &
                                       & 'wa + g1, wb + g2, oc')]
@@ -503,11 +465,9 @@ contains
         end subroutine s_amr_br_${DIR}$_faces
     #:endfor
 
-    !> Batched bridge load: every member of the current batch (amr_bat_blk/amr_bat_loc, extents amr_bat_ext) lands in the bridge at
-    !! offset (ibm-1)*amr_bat_w along amr_bat_sd with its ghost shell, in one kernel. Only the member's own buffered box is moved
-    !! (the solver never reads outside it), and nothing is stored back: s_compute_rhs does not write its cons dummy on the fine path
-    !! (the buffer fill it would come through is a no-op inside the fine advance, and every feature that writes it is excluded by
-    !! the validator).
+    !> Batched bridge load: every batch member (amr_bat_blk/amr_bat_loc, extents amr_bat_ext) lands at offset (ibm-1)*amr_bat_w
+    !! along amr_bat_sd with its ghost shell, in one kernel. Nothing is stored back: s_compute_rhs does not write its cons dummy on
+    !! the fine path.
     impure subroutine s_amr_br_load_batch(nb)
 
         integer, intent(in) :: nb
@@ -525,8 +485,8 @@ contains
                         do j = b1l, b1h
                             mb = min(ibm, nb)  ! the slots past the last member repeat it (finite filler for the stencils)
                             loc = amr_bat_loc(mb)
-                            ! a padded member (amr_bat_pad): clamp to its own buffered region, so the padding holds its
-                            ! outermost ghost values (finite and physical, never read by a real cell's stencil)
+                            ! padded member (amr_bat_pad): clamp to its own buffered region (finite filler, never read by a real
+                            ! stencil)
                             jj = min(j, amr_bat_mext(1, mb) + bs); kk = min(k, amr_bat_mext(2, mb) + bs); ll = min(l, &
                                      & amr_bat_mext(3, mb) + bs)
                             amr_cons_br(i)%sf(j + amr_bat_off(1, ibm), k + amr_bat_off(2, ibm), l + amr_bat_off(3, &
@@ -540,8 +500,8 @@ contains
 
     end subroutine s_amr_br_load_batch
 
-    !> Copy batch member ibm's primitive state out of the slab scratch (members stacked amr_bat_w apart along amr_bat_sd) into the
-    !! block-frame scratch over the member's own buffered extent, for the per-member IB correction after the batch RK update.
+    !> Copy batch member ibm's primitive state from the slab scratch into the block-frame scratch over its buffered extent, for the
+    !! per-member IB correction.
     impure subroutine s_amr_bat_member_prim(ibm, src, dst)
 
         integer, intent(in)                                    :: ibm
@@ -568,8 +528,7 @@ contains
 
     end subroutine s_amr_bat_member_prim
 
-    !> Free the flat store and the dense-index maps. Mirrors s_amr_loc_index_init: called from both finalize paths, because either
-    !! pool-allocation site can have created them. Idempotent.
+    !> Free the flat store and dense-index maps (idempotent; called from both finalize paths).
     impure subroutine s_amr_st_finalize()
 
         integer :: i
@@ -611,24 +570,19 @@ contains
 
     end subroutine s_amr_st_finalize
 
+    !> Allocate slot islot's coords and its dense store index (idempotent).
     impure subroutine s_amr_alloc_slot(islot)
 
         integer, intent(in) :: islot
 
-        ! full-vs-stash discriminator is the grid arrays: every full slot has x_cb; a stash-only slot has none
-        ! (fine slots do not carry q_prim; see the pooled scratch amr_scr_prim/amr_scr_rhs)
-
-        if (amr_slot_live(islot) .and. allocated(amr_slots(islot)%x_cb)) return
-        ! recycle a freed local index if one is available, else extend the dense range; a live stash-only slot upgrading to a
-        ! full one keeps the index (and so the stor data) it already holds
-        if (.not. amr_slot_live(islot)) then
-            if (amr_loc_nfree > 0) then
-                amr_loc_of(islot) = amr_loc_free(amr_loc_nfree)
-                amr_loc_nfree = amr_loc_nfree - 1
-            else
-                amr_loc_n = amr_loc_n + 1
-                amr_loc_of(islot) = amr_loc_n
-            end if
+        if (amr_slot_live(islot)) return
+        ! recycle a freed local index if one is available, else extend the dense range
+        if (amr_loc_nfree > 0) then
+            amr_loc_of(islot) = amr_loc_free(amr_loc_nfree)
+            amr_loc_nfree = amr_loc_nfree - 1
+        else
+            amr_loc_n = amr_loc_n + 1
+            amr_loc_of(islot) = amr_loc_n
         end if
         amr_slots(islot)%amr_ref_ratio = amr_ref_ratio
         amr_slots(islot)%buff_size = buff_size
@@ -660,47 +614,25 @@ contains
 
     end subroutine s_amr_free_slot
 
-    !> Reconcile the allocated per-slot field arrays to the current ownership: allocate every active block this rank owns, free
-    !! everything else. Call after ownership is set (init/regrid/restart). A rank ends holding only its owned blocks' fine arrays
-    !! (~amr_num_blocks/num_procs of the pool), not all amr_max_blocks. Regrid must alloc its transient (received/old) slots before
-    !! this call, since it frees anything not currently owned.
+    !> Reconcile allocated slots to current ownership: allocate every active block this rank owns, free the rest. Call after
+    !! ownership is set; regrid must allocate its transient slots before this call.
     impure subroutine s_amr_reconcile_slots()
 
-        integer :: k, nliv, nfr, nal, nfree_in
+        integer :: k
         logical :: needed
 
-        nliv = 0; nfr = 0; nal = 0; nfree_in = amr_loc_nfree
         do k = 1, amr_max_blocks
             needed = k <= amr_num_blocks
             if (needed) needed = amr_block_owner(k) == proc_rank
             if (needed) then
-                if (.not. amr_slot_live(k)) nal = nal + 1
                 call s_amr_alloc_slot(k)
-                nliv = nliv + 1
             else
-                if (amr_slot_live(k)) nfr = nfr + 1
                 call s_amr_free_slot(k)
             end if
         end do
-        ! stderr (survives an abort). live = what the run actually needs; loc_n = indices ever handed out;
-        ! the gap between them is the leak. stack_in/out shows whether frees accumulate for the next
-        ! rebuild to recycle, and 'new' counts allocs that had to extend rather than recycle.
-#ifdef MFC_DEBUG
-        write (0, '(A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0)') '[amr-recon] rank ', proc_rank, ' live ', nliv, ' loc_n ', amr_loc_n, &
-               & ' freed ', nfr, ' newalloc ', nal, ' stack_in ', nfree_in, ' stack_out ', amr_loc_nfree
-#endif
-        ! invariant: no stash-only slot survives a reconcile; every migration replica was freed (early-free or the walk above)
-        ! or upgraded to a full slot by the owned-path alloc. A survivor would reach the solver with no geometry arrays.
-        do k = 1, amr_max_blocks
-            if (amr_slot_live(k)) then
-                @:ASSERT(allocated(amr_slots(k)%x_cb), "a stash-only replica slot survived reconcile")
-            end if
-        end do
-        ! every reader of a stale slot has finished by here (the rebuild's overlap carry-forward is done and the next rebuild
-        ! has not started), which is what makes the renumbering safe; see s_amr_compact_store.
+        ! every reader of a stale slot has finished by here, which is what makes the renumbering safe
         call s_amr_compact_store()
-        ! per-rank store capacity is the weak-scaling invariant (device memory = f(live local boxes)); wall time cannot see it,
-        ! so report it. live == loc_n after the compaction above; cap - live is the rebuild-transient envelope.
+        ! per-rank store capacity is the weak-scaling invariant (device memory); report it. cap - live is the rebuild envelope.
         if (rank_time_wrt) write (0, '(A,I0,A,I0,A,I0)') '[amr-cap] rank ', proc_rank, ' live ', amr_loc_n, ' cap ', amr_st_cap
         amr_mesh_epoch = amr_mesh_epoch + 1  ! local slot indices may have been renumbered: plans that baked them are stale
 

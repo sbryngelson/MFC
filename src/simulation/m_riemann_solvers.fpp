@@ -43,8 +43,7 @@ contains
         ! Hypoelasticity enters the Riemann layer in THREE distinct code shapes:
         !   1. HLLC - inline "if (hypoelasticity)" branches inside s_hllc_riemann_solver
         !   2. HLL  - inline "if (hypoelasticity)" branches inside s_hll_riemann_solver
-        !   3. HLLD - a separate module (m_riemann_solver_hypo_hlld), called directly from m_rhs (s_compute_directional_rhs)
-        !      under hypo_nc_mode_dual_pass
+        !   3. HLLD - m_riemann_solver_hypo_hlld, called from m_rhs (s_compute_directional_rhs) under hypo_nc_mode_dual_pass
         ! HLLD needs its own path because its anchored dual pass produces BOTH the hat_L and hat_R anchored flux
         ! sets in one fused solve, whose partial RHS are then summed in m_rhs; HLLC/HLL instead add their
         ! non-conservative contribution within a single-pass solve. See
@@ -70,9 +69,8 @@ contains
         integer :: i, j, k, l, src_lo
 
         #:if MFC_CASE_OPTIMIZATION and riemann_solver != -1
-            ! Case-optimized build: only the baked solver's branch exists in s_riemann_solver, but riemann_solver is not a
-            ! case-optimization parameter, so the namelist value still reaches the solver. A mismatch would leave every flux
-            ! buffer holding its previous contents with no branch taken and no abort - fail closed instead.
+            ! Case-optimized: only the baked solver's branch exists but riemann_solver is not a case-optimization parameter, so fail
+            ! closed on a mismatch instead of leaving the flux buffers stale
             @:PROHIBIT(riemann_solver /= ${riemann_solver}$, &
                        & "this case-optimized binary was built for riemann_solver = ${riemann_solver}$; rebuild for the value in the case file, or build without --case-optimization")
         #:endif
@@ -84,8 +82,7 @@ contains
         end do
         $:GPU_UPDATE(device='[Gs_rs]')
 
-        ! Always allocated (size max(1, ..)): the HLLC kernels name it under `if (viscous)` and run under
-        ! amdflang's present:allocatable, where an unallocated array named by a launched kernel aborts.
+        ! Always allocated: the HLLC kernels name it under `if (viscous)` and amdflang's present:allocatable aborts on unallocated
         @:ALLOCATE(Res_gs(1:2, 1:max(1, Re_size_max)))
 
         if (viscous) then
@@ -105,16 +102,9 @@ contains
         @:ALLOCATE(flux_rsx_vf(-1:m_alloc, -1:n_alloc, -1:p_alloc, 1:sys_size))
         @:ALLOCATE(vel_src_rsx_vf(-1:m_alloc+1, -1:n_alloc+1, -1:p_alloc+1, 1:num_vels))
 
-        ! Size the source-flux buffer to the band that is actually written. These are FULL-DOMAIN arrays, so each unused component
-        ! costs (m_alloc+2)(n_alloc+2)(p_alloc+2) reals per rank - 0.37 GB/rank of waste at 400^3 for the five components an
-        ! inviscid Cartesian run never touches.
-        !   chemistry diffusion : from 1, because m_chemistry lives in src/common, cannot use m_riemann_state, and so takes a flat
-        !                         dummy declared `dimension(-1:, -1:, -1:, 1:)` - the lower bounds must agree or every species
-        !                         index silently shifts. It is only ever passed this array when diffusion is on.
-        !   viscous / surf.tens.: from mom%beg (the viscous stress and work fluxes occupy mom..E)
-        !   heat conduction     : also from mom%beg. It writes E alone, but E sits below adv%beg, so the
-        !                         adv-only band would put its accumulation out of range.
-        !   otherwise           : from adv%beg (the advection source band alone)
+        ! Size the source-flux buffer to the band that is written (full-domain arrays). Chemistry diffusion: from 1, since
+        ! m_chemistry takes a flat dummy dimension(-1:, -1:, -1:, 1:) whose lower bounds must agree. Viscous/surface tension/heat
+        ! conduction: from mom%beg (heat conduction writes E, below adv%beg). Otherwise from adv%beg.
         if (chemistry .and. chem_params%diffusion) then
             src_lo = 1
         else if (viscous .or. surface_tension .or. heat_conduction) then
@@ -124,10 +114,8 @@ contains
         end if
         @:ALLOCATE(flux_src_rsx_vf(-1:m_alloc+1, -1:n_alloc+1, -1:p_alloc+1, src_lo:sys_size))
 
-        ! The geometric source flux exists only on the cylindrical/axisymmetric paths - every write in the four solvers and both
-        ! reads in m_rhs sit under `cyl_coord` or `grid_geometry == 3`, and grid_geometry == 3 implies cyl_coord
-        ! (m_global_parameters). A Cartesian run therefore never touches it, so do not pay 6 full-domain arrays for it. It is
-        ! zeroed on allocation because the solvers write only the components they touch while m_rhs reads the whole band.
+        ! The geometric source flux exists only on cyl_coord paths (grid_geometry == 3 implies cyl_coord); zeroed on allocation
+        ! since the solvers write only the components they touch while m_rhs reads the whole band.
         if (cyl_coord) then
             @:ALLOCATE(flux_gsrc_rsx_vf(-1:m_alloc, -1:n_alloc, -1:p_alloc, 1:sys_size))
             $:GPU_PARALLEL_LOOP(collapse=4)
@@ -142,8 +130,8 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
         else
-            ! degenerate placeholders (here and below): the HLLC kernels name these arrays inside branches the
-            ! run never takes, and amdflang's present:allocatable aborts on an UNALLOCATED named array
+            ! degenerate placeholders (here and below): HLLC kernels name these in branches never taken, and amdflang aborts on an
+            ! unallocated named array
             @:ALLOCATE(flux_gsrc_rsx_vf(-1:-1, -1:-1, -1:-1, 1:1))
         end if
 
@@ -159,8 +147,7 @@ contains
             @:ALLOCATE(Re_avg_rsx_vf(-1:-1, -1:-1, -1:-1, 1:1))
         end if
 
-        ! _alloc bounds like every rs sibling above: the AMR fine advance swaps m/n/p to fine-block
-        ! extents that can exceed the coarse subdomain when amr_max_grid_size pins a larger block
+        ! _alloc bounds: the AMR fine advance swaps m/n/p to fine-block extents that can exceed the coarse subdomain
         if (use_nc_iface_vel) then
             @:ALLOCATE(nc_iface_vel_rsx_vf(-1:m_alloc, -1:n_alloc, -1:p_alloc, 1:num_dims))
         end if
@@ -172,9 +159,8 @@ contains
             end if
             if (cyl_coord) then
                 @:ALLOCATE(flux_gsrc_hatR_rsx_vf(-1:m_alloc, -1:n_alloc, -1:p_alloc, 1:sys_size))
-                ! zeroed for the same reason as flux_gsrc_rsx_vf above: nothing in the tree WRITES this array, but
-                ! s_finalize_riemann_solver_hatR copies all of 1:sys_size out of it into flux_gsrc_n(id), which m_rhs
-                ! folds into the RHS. Without this it fed uninitialized memory into the solution under cyl_coord.
+                ! zeroed as flux_gsrc_rsx_vf: nothing writes it, but s_finalize_riemann_solver_hatR copies it into flux_gsrc_n(id),
+                ! which m_rhs folds into the RHS
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, sys_size
                     do l = -1, p_alloc

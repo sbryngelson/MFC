@@ -2,9 +2,8 @@
 !!@file
 !!@brief Contains module m_amr_distribution
 
-#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). A conditionally allocated module
-#! array a kernel names launches only under its allocation's own condition (sw_jac/jac: igr); a kernel naming an unallocated
-#! array aborts. Keep it so.
+#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). A kernel naming an unallocated
+#! module array aborts, so conditionally allocated ones (sw_jac/jac: igr) are named only under their allocation condition.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 
@@ -20,7 +19,6 @@ module m_amr_distribution
     use m_global_parameters
     use m_constants, only: K_ib
     use m_mpi_proxy, only: s_mpi_abort
-    use m_phase_timing
     use m_ibm, only: ib_markers
     use m_amr_state
 
@@ -35,11 +33,9 @@ module m_amr_distribution
 
 contains
 
-    !> Rank r's coarse-grid decomposition (start_idx + local extent m/n/p), computed O(1) from its cartesian coords instead of the
-    !! replicated amr_decomp table. The domain cart is MPI_CART_CREATE(reorder=.false., dims=[num_procs_x,num_procs_y,num_procs_z]),
-    !! so ranks keep MPI_COMM_WORLD order and r's coords are row-major in r. The per-dim split is the integer split-with-remainder
-    !! on cell indices, identical to s_mpi_decompose_computational_domain (independent of grid stretching, which changes coords not
-    !! indices).
+    !> Rank r's coarse-grid decomposition (start_idx + local extent m/n/p), computed O(1) from its cartesian coords. The domain cart
+    !! is MPI_CART_CREATE(reorder=.false.), so ranks keep MPI_COMM_WORLD order and coords are row-major in r. The per-dim split is
+    !! the integer split-with-remainder of s_mpi_decompose_computational_domain.
     pure subroutine s_amr_rank_decomp(r, sidx, ext)
 
         integer, intent(in)  :: r
@@ -62,9 +58,7 @@ contains
 
     end subroutine s_amr_rank_decomp
 
-    !> Guard: the computed accessor must reproduce this rank's actual decomposition. Every rank checks its own entry, so
-    !! collectively the formula is checked for all r; fires immediately if it ever drifts from s_mpi_decompose_computational_domain.
-    !! O(1), always on.
+    !> Guard: the computed decomposition must reproduce this rank's actual one (each rank checks itself, so all r are covered).
     impure subroutine s_amr_validate_decomp()
 
         integer :: sidx(3), ext(3)
@@ -77,9 +71,8 @@ contains
 
     end subroutine s_amr_validate_decomp
 
-    !> Closed-form inverse of the per-dim split-with-remainder used by s_amr_rank_decomp: the cart coord owning global coarse cell
-    !! g. base=(gd+1)/pd, rem=mod(gd+1,pd). Exact for g in [0,gd]; callers clamp to [0,pd-1] for out-of-range g (ghost reach).
-    !! base==0 (more ranks than cells) => the g<rem*(base+1) branch always holds and c=g.
+    !> Closed-form inverse of the per-dim split in s_amr_rank_decomp: the cart coord owning global coarse cell g, with
+    !! base=(gd+1)/pd, rem=mod(gd+1,pd). Exact for g in [0,gd]; callers clamp for out-of-range g (ghost reach).
     pure integer function f_amr_cell_coord(g, base, rem) result(c)
 
         integer, intent(in) :: g, base, rem
@@ -92,11 +85,9 @@ contains
 
     end function f_amr_cell_coord
 
-    !> Per-dim contiguous rank-coord range [clo:chi] whose owned coarse slab intersects box [blo:bhi], clamped to [0,pd-1]. The
-    !! boundary coords' coarse_range is extended by buff_size exactly at the domain edge (s_amr_rank_coarse_range), so this clamped
-    !! interior-frame range reproduces both the interior (scatter) and the coarse_range (gather) intersection sets: a box reaching
-    !! the ghost zone clamps to the boundary coord whose extended slab contains it, and there is no rank beyond that coord.
-    !! Collapsed dims contribute coord 0.
+    !> Per-dim contiguous rank-coord range [clo:chi] whose owned coarse slab meets box [blo:bhi], clamped to [0,pd-1]. The boundary
+    !! coords' coarse_range is extended by buff_size at the domain edge (s_amr_rank_coarse_range), and clamping reproduces both the
+    !! interior (scatter) and coarse_range (gather) sets. Collapsed dims contribute coord 0.
     pure subroutine s_amr_coord_range(blo, bhi, clo, chi)
 
         integer, intent(in)  :: blo(3), bhi(3)
@@ -115,9 +106,8 @@ contains
 
     end subroutine s_amr_coord_range
 
-    !> Ascending rank list overlapping coarse box [blo:bhi]. Enumerates the coord brick cx->cy->cz so r = cx*(Py*Pz)+cy*Pz+cz is
-    !! monotonic => ascending, reproducing the r=0..num_procs-1 scan order. Owner not excluded (consumers keep their own owner
-    !! skip). Caller sizes ranks(:) >= f_amr_overlap_count(blo,bhi).
+    !> Ascending rank list overlapping coarse box [blo:bhi]: the coord brick is enumerated cx->cy->cz so r = cx*(Py*Pz)+cy*Pz+cz
+    !! ascends, reproducing the 0..num_procs-1 scan order. Owner not excluded. Caller sizes ranks(:) >= f_amr_overlap_count.
     pure subroutine s_amr_ranks_overlapping(blo, bhi, ranks, nr)
 
         integer, intent(in)  :: blo(3), bhi(3)
@@ -139,16 +129,15 @@ contains
 
     end subroutine s_amr_ranks_overlapping
 
-    !> Does rank r's subdomain overlap coarse box [blo:bhi]? Answers membership without enumerating the overlap set (which
-    !! s_amr_ranks_overlapping must do, at O(num_procs) writes on a box spanning the machine); the clusterer asks this of every node
-    !! it walks, the root included.
+    !> Does rank r's subdomain overlap coarse box [blo:bhi]? Answers membership without enumerating the overlap set, which is
+    !! O(num_procs) for a box spanning the machine.
     pure logical function f_amr_rank_overlaps(blo, bhi, r) result(hit)
 
         integer, intent(in) :: blo(3), bhi(3), r
         integer             :: clo(3), chi(3), c(3)
 
         call s_amr_coord_range(blo, bhi, clo, chi)
-        c(1) = r/(num_procs_y*num_procs_z)  ! same coord -> rank map the enumeration uses: r = cx*(Py*Pz) + cy*Pz + cz
+        c(1) = r/(num_procs_y*num_procs_z)  ! same coord -> rank map as the enumeration
         c(2) = mod(r/num_procs_z, num_procs_y)
         c(3) = mod(r, num_procs_z)
         hit = all(c >= clo) .and. all(c <= chi)
@@ -166,9 +155,8 @@ contains
 
     end function f_amr_overlap_count
 
-    !> Rank r's contiguous owned coarse-cell range per dim from the computed decomposition (s_amr_rank_decomp): interior
-    !! [start:start+ext] plus its physical-boundary ghosts (buff_size cells only where the subdomain touches the domain edge). One
-    !! contiguous span so box intersections identify contributors without a per-cell scan.
+    !> Rank r's contiguous owned coarse-cell range per dim: the interior plus buff_size ghosts where the subdomain touches the
+    !! domain edge. One span, so box intersections identify contributors without a per-cell scan.
     pure subroutine s_amr_rank_coarse_range(r, crlo, crhi)
 
         integer, intent(in)  :: r
@@ -229,10 +217,10 @@ contains
 
     end subroutine s_amr_block_cost
 
-    !> Cost-weighted SFC partition of n items into num_procs contiguous Morton-key ranges. Sorts item indices by ascending Morton
-    !! key (stable merge sort), walks them accumulating wt, and advances the owner rank when the running weight crosses the next
-    !! even share of the total. Writes owner(1:n) (rank per item) and cut(0:num_procs-1) (running Morton upper bound per rank; ranks
-    !! that receive no item inherit the predecessor's bound so cut is non-decreasing, its top the global max key).
+    !> Cost-weighted SFC partition of n items into num_procs contiguous Morton-key ranges: walk the key-sorted items (stable merge
+    !! sort) and advance the owner rank when the running weight crosses the next even share. Writes owner(1:n) and
+    !! cut(0:num_procs-1) (running Morton upper bound per rank; ranks with no item inherit the predecessor's bound, so cut is
+    !! non-decreasing).
     subroutine s_amr_sfc_cut(keys, wt, n, cut, owner)
 
         integer, intent(in)          :: n
@@ -253,33 +241,27 @@ contains
             total = total + wt(k)
         end do
 
-        ! chains-on-chains over the items in SFC order; advance the owner rank when the cumulative weight crosses the next even
-        ! share. All-real arithmetic on replicated weights in a fixed order, so every rank computes the identical assignment.
+        ! chains-on-chains in SFC order; replicated weights in a fixed order, so every rank computes the identical assignment
         r = 0; cum = 0._wp
         do k = 1, n
             tgt = real(r + 1, wp)*total/real(num_procs, wp)
-            ! cum is an n-term accumulation while tgt is closed form over another n-term sum, so at an exact share boundary the
-            ! two differ by rounding rather than by intent, and the comparison turns on 1 ULP. With integer-valued cost terms
-            ! (footprint cells, K_ib) the arithmetic is exact, but a fractional cost term can split
-            ! identical weights unevenly (e.g. 5/3 instead of 4/4). Tolerance is the accumulated rounding bound, O(n) ULP of
-            ! the target; far from a boundary it is negligible and the greedy is unchanged.
+            ! tolerance = accumulated rounding bound: at an exact share boundary cum and tgt differ by rounding, and a fractional
+            ! cost term could otherwise split identical weights unevenly (e.g. 5/3 instead of 4/4)
             tol = spacing(tgt)*real(n, wp)
             if (cum >= tgt - tol .and. r < num_procs - 1) r = r + 1
             owner(ord(k)) = r
             cut(r) = keys(ord(k))  ! items visited in ascending Morton key => running upper bound for rank r
             cum = cum + wt(ord(k))
         end do
-        ! ranks that received no item (or trail the last-assigned rank) inherit the predecessor's bound so the search never lands on
-        ! them: cut is non-decreasing and its top equals the global max key.
+        ! ranks with no item inherit the predecessor's bound so the search never lands on them
         do r = 1, num_procs - 1
             if (cut(r) < cut(r - 1)) cut(r) = cut(r - 1)
         end do
 
     end subroutine s_amr_sfc_cut
 
-    !> ord(1:n) = item indices in ascending key order. Bottom-up merge sort: O(n log n), stable (ties keep their original order),
-    !! iterative, and a pure function of the input, so every rank derives byte-identical orders from replicated keys (an assignment
-    !! or seam list that differed across ranks would deadlock or abort).
+    !> ord(1:n) = item indices in ascending key order. Stable iterative bottom-up merge sort, a pure function of the input so every
+    !! rank derives identical orders from replicated keys (differing assignments would deadlock or abort).
     pure subroutine s_amr_sort_by_key(keys, n, ord)
 
         integer, intent(in)         :: n
@@ -316,14 +298,8 @@ contains
 
     end subroutine s_amr_sort_by_key
 
-    !> Fine-level distribution map: assigns each active block a single owner rank by chains-on-chains balancing of fine-work weight
-    !! in Morton order of the block's low corner (a space-filling-curve cut at block granularity). Fine work = measured
-    !! coarse-footprint cost (s_amr_block_cost) x the level's refinement factor per active dim, so blocks concentrating IB or
-    !! phase-change work weigh more than equal-size quiescent ones. The cost vector is allreduced (one collective; every rank must
-    !! call this), after which the assignment is deterministic and identical on every rank. s_set_amr_fine_geometry applies it as
-    !! amr_rank_owns_block = (amr_block_owner(amr_cur) == proc_rank).
-    !> Refresh the owned-block list if any owner write has happened since the last refresh. Rebuilt lazily rather than in
-    !! s_amr_assign_block_owners because that routine is not the only writer of amr_block_owner.
+    !> Refresh the owned-block list if any owner write has happened since the last refresh. Lazy, since s_amr_assign_block_owners is
+    !! not the only writer of amr_block_owner.
     impure subroutine s_amr_refresh_my_blocks()
 
         integer :: b
@@ -343,10 +319,9 @@ contains
 
     end subroutine s_amr_refresh_my_blocks
 
-    !> Rebuild the epoch-keyed block lists when the mesh epoch has moved: one O(global blocks) walk per regrid rather than one per
-    !! RK stage. Also caches the parent index (f_amr_parent_block is itself an O(global blocks) scan, so calling it per block per
-    !! stage would be quadratic in the global block count) and the children adjacency used by s_amr_sibling_face_weights. The cache
-    !! build is that quadratic walk, paid once per regrid.
+    !> Rebuild the epoch-keyed block lists when the mesh epoch has moved (one O(global blocks) walk per regrid, not per RK stage).
+    !! Also caches the parent index (f_amr_parent_block is an O(global blocks) scan) and the children adjacency used by
+    !! s_amr_sibling_face_weights.
     impure subroutine s_amr_refresh_lists()
 
         integer :: b, rlo(3), rhi(3), milo(3), mihi(3), bl(3), bh(3)
@@ -380,8 +355,7 @@ contains
             if (amr_block_level(b) >= 2) then
                 pblk = f_amr_parent_block(b)
                 amr_parent_blk(b) = pblk
-                ! pblk == 0 (no parent found) is structurally impossible on a nested mesh, but an unguarded count would land in
-                ! amr_child_ptr(0) (the base offset parent 1's query reads), turning a broken mesh into silent corruption
+                ! pblk == 0 is impossible on a nested mesh, but counting it would land in amr_child_ptr(0) and corrupt the lists
                 if (pblk > 0) then
                     amr_child_ptr(pblk) = amr_child_ptr(pblk) + 1
                     if (amr_block_owner(pblk) == proc_rank .and. amr_block_owner(b) /= proc_rank) then
@@ -406,8 +380,7 @@ contains
                 amr_l1p_blk(amr_n_l1p) = b
             end if
         end do
-        ! counts -> exclusive prefix, then the ascending fill bumps each amr_child_ptr(p) back up to p's inclusive end, restoring
-        ! the query invariant: children of p = amr_child_idx(amr_child_ptr(p-1)+1 : amr_child_ptr(p))
+        ! counts -> exclusive prefix, then the ascending fill bumps each amr_child_ptr(p) back to p's inclusive end
         acc = 0
         do b = 1, amr_num_blocks
             nxt = amr_child_ptr(b); amr_child_ptr(b) = acc; acc = acc + nxt
@@ -424,8 +397,8 @@ contains
 
     end subroutine s_amr_refresh_lists
 
-    !> Open a keyed-tag wave: clear the in-wave per-peer seq counters (touched entries only) and bump the band's generation. Must be
-    !! called at wave entry on every rank (the wave call sites are rank-unconditional).
+    !> Open a keyed-tag wave: clear the touched per-peer seq counters and bump the band's generation. Call at wave entry on every
+    !! rank.
     impure subroutine s_amr_m1_wave_open(band)
 
         integer, intent(in) :: band
@@ -445,8 +418,7 @@ contains
 
     end subroutine s_amr_m1_wave_open
 
-    !> Next seq on the (peer, dir) channel of the open wave. dir: 1 = send, 2 = recv; the two directions of the same peer are
-    !! different channels and never share a counter.
+    !> Next seq on the (peer, dir) channel of the open wave. dir: 1 = send, 2 = recv (separate counters).
     impure integer function f_amr_m1_seq(peer, idir) result(sq)
 
         integer, intent(in) :: peer, idir
@@ -470,7 +442,7 @@ contains
     end function f_amr_m1_tag
 
     !> Coarse-side overlap per rank of block k's region grown by g coarse cells: level 1 against the level-0 rank bricks, level >= 2
-    !! against the owners of the level-(l-1) blocks. Adds into vol(0:) and lists the touched ranks in rk(1:nr); the caller zeroes
+    !! against the owners of the level-(l-1) blocks. Adds into vol(0:) and lists touched ranks in rk(1:nr); the caller zeroes
     !! vol(rk(1:nr)) after use.
     impure subroutine s_amr_place_overlap(k, g, vol, rk, nr)
 
@@ -504,10 +476,9 @@ contains
     end subroutine s_amr_place_overlap
 
     !> Owner-aware placement (amr_place_owner) of one level's na blocks (slots aidx, weights wt, Morton keys key): each block goes
-    !! to the rank owning most of the coarse cells under it, so its coarse-fine gather and restriction stay on that rank. A rank
-    !! above (1 + place_tol) x the mean sheds its last blocks in Morton order, first to the least-loaded rank owning coarse cells
-    !! next to the block, then to the least-loaded rank anywhere, never pushing the receiver above the cap. Replicated inputs in a
-    !! fixed order, so every rank computes the same owners.
+    !! to the rank owning most of the coarse cells under it. A rank above (1 + place_tol) x the mean sheds its last blocks in Morton
+    !! order, first to the least-loaded rank next to the block, then to the least-loaded rank anywhere, never pushing the receiver
+    !! above the cap. Replicated inputs in a fixed order, so every rank computes the same owners.
     impure subroutine s_amr_place_owner(key, wt, aidx, na, own)
 
         integer, intent(in)         :: na, aidx(na)
@@ -571,7 +542,7 @@ contains
     impure subroutine s_amr_assign_block_owners()
 
         integer :: k, a, lev, maxlev, na
-        ! heap, not stack: these are O(global boxes), and at large box counts the seven together would overflow a default stack
+        ! heap, not stack: O(global boxes)
         integer, allocatable         :: aidx(:), aown(:)
         integer(kind=8), allocatable :: key(:), akey(:)
         real(wp), allocatable        :: wt(:), cost(:), awt(:)
@@ -583,10 +554,7 @@ contains
 
         call s_amr_block_cost(cost)
 
-        ! per-block own fine-work weight = footprint cost x amr_ref_ratio**(level*active dims). A level-l block is amr_ref_ratio**l
-        ! finer than L0 per dim, so its work is the footprint cost x rr**(l*d). The level factor only scales blocks within a level
-        ! relative to each other (each level is cut separately), but it stays because a level's boxes can differ in footprint.
-        ! With no cost signals this reduces to the fine cell count (geometry only).
+        ! per-block fine-work weight = footprint cost x amr_ref_ratio**(level*active dims)
         do k = 1, amr_num_blocks
             wt(k) = cost(k)*real(amr_ref_ratio, wp)**amr_block_level(k)
             if (n_glb > 0) wt(k) = wt(k)*real(amr_ref_ratio, wp)**amr_block_level(k)
@@ -594,10 +562,9 @@ contains
             key(k) = f_morton(amr_region_lo_all(1, k), amr_region_lo_all(2, k), amr_region_lo_all(3, k))
         end do
 
-        ! Per-level distribution: one cut per level, each block on its own weight, so a deep tower does not pin its subtree to
-        ! one rank (parent<->child paths are P2P, so a split tower costs messages, not correctness). Not one mixed cut: same-level
-        ! boxes are disjoint and so have distinct Morton keys, which f_amr_owner's cut search needs, while a level-2 block sharing
-        ! its parent's region_lo would collide with it. amr_fine_cut(:, lev) holds each level's cut.
+        ! Per-level distribution: one cut per level on each block's own weight, so a deep tower does not pin its subtree to one
+        ! rank. Not one mixed cut: same-level boxes have distinct Morton keys, which f_amr_owner's cut search needs. amr_fine_cut(:,
+        ! lev) holds each level's cut.
         maxlev = maxval(amr_block_level(1:amr_num_blocks))
         do lev = 1, maxlev
             na = 0
@@ -621,10 +588,9 @@ contains
 
     end subroutine s_amr_assign_block_owners
 
-    !> Install a recorded owner table instead of recomputing it (restart at the writer's rank count). The cost weights read live
-    !! state (body markers) that differs between the regrid before the write and the restart, so recomputing can move a cut and
-    !! disagree with the file. The table came from per-level SFC cuts, so each level's cut is the running max Morton key of each
-    !! rank's blocks; s_amr_validate_owner rejects a table that is not contiguous in that order (unless amr_place_owner).
+    !> Install a recorded owner table instead of recomputing it (restart at the writer's rank count): the cost weights read live
+    !! state (body markers) that differs between the regrid before the write and the restart. Each level's cut is the running max
+    !! Morton key of each rank's blocks; s_amr_validate_owner rejects a table not contiguous in that order (unless amr_place_owner).
     impure subroutine s_amr_adopt_block_owners(own)
 
         integer, intent(in) :: own(:)
@@ -648,10 +614,8 @@ contains
 
     end subroutine s_amr_adopt_block_owners
 
-    !> Per-level and total load-balance report: max/mean assigned block weight over ranks (1 = perfect, num_procs = one rank holds
-    !! everything). Replicated inputs, so every rank computes it and rank 0 prints. no_blocks_ranks is the granularity floor (a
-    !! level with fewer boxes than ranks cannot balance), not idleness: those ranks still own level-0 work and possibly other
-    !! levels.
+    !> Per-level and total load-balance report (rank 0, rank_time_wrt): max/mean assigned block weight over ranks (1 = perfect).
+    !! no_blocks_ranks is the granularity floor of a level with fewer boxes than ranks, not idleness.
     impure subroutine s_amr_report_balance(wt, maxlev)
 
         real(wp), intent(in)  :: wt(:)
@@ -663,8 +627,7 @@ contains
         if (.not. rank_time_wrt) return
         if (proc_rank /= 0) return
 
-        ! heap, not automatic: these are num_procs long, and automatic arrays would put O(num_procs) on the stack (the module
-        ! puts amr_fine_cut on the heap for the same reason)
+        ! heap: num_procs long
         allocate (rw(0:num_procs - 1), tw(0:num_procs - 1), rc(0:num_procs - 1))
         tw = 0._wp
         do lev = 1, maxlev
@@ -680,36 +643,28 @@ contains
             tw = tw + rw
             mx = maxval(rw); mean = sum(rw)/real(num_procs, wp)
             empty = count(rw <= 0._wp)
-            ! Box-count imbalance beside weight imbalance. cost(k) is a footprint cell count, but a block's advance cost has a
-            ! large fixed component regardless of its size, so a rank's true load also tracks how many boxes it holds. Equal
-            ! cells with unequal box counts would read as perfectly balanced and run skewed; printing both shows it.
+            ! box-count imbalance beside weight: a block's advance cost has a large fixed component
             cmx = maxval(rc); cmean = sum(rc)/real(num_procs, wp)
-            ! Not merge(): merge is a function, so both arms are evaluated and the mean == 0 arm would still divide by zero.
-            ! no_blocks_ranks counts ranks holding no block at this level; they are not idle (they still own level-0 work and
-            ! possibly other levels), they just take no share of this level's.
-            ! cmean cannot be zero here: nb >= 1, so sum(rc) = nb >= 1. No guard needed.
             if (mean > 0._wp) print '(A,I0,A,I0,A,I0,A,F8.3,A,F8.3,A,I0,A,I0)', ' [amr-balance] level ', lev, ': boxes ', nb, &
                 & '/ranks ', num_procs, ' max/mean ', mx/mean, ' boxes_max/mean ', cmx/cmean, ' no_blocks_ranks ', empty, ' of ', &
                 & num_procs
         end do
-        ! per-rank weight (fine cells), so rhs time can be regressed against actual load
+        ! per-rank weight (fine cells)
         if (proc_rank == 0) then
             write (*, '(A)', advance='no') ' [amr-balance] per-rank fine_work :'
             do k = 0, num_procs - 1; write (*, '(I12)', advance='no') nint(tw(k), kind=8); end do
             write (*, '(A)') ''
         end if
         mean = sum(tw)/real(num_procs, wp)
-        ! fine_work = sum of the assigned weights = the fine cells advanced per step (with no cost signals wt is exactly that).
-        ! Without it an AMR-vs-uniform wall-clock ratio cannot separate "more cells advanced" from "more overhead per cell".
+        ! fine_work = sum of assigned weights = fine cells advanced per step
         if (mean > 0._wp) print '(A,F8.3,A,I0,A,I0)', ' [amr-balance] TOTAL   : max/mean ', maxval(tw)/mean, &
             & ' ranks_with_no_fine_block ', count(tw <= 0._wp), ' fine_work ', nint(sum(tw), kind=8)
         deallocate (rw, tw, rc)
 
     end subroutine s_amr_report_balance
 
-    !> Owner rank of block k from the O(num_procs) SFC cut-points: binary-search k's own Morton key in the owning authority's cut. A
-    !! block resolves against its own level's cut amr_fine_cut(:, level), so its owner depends on its own key and level alone.
-    !! Reproduces s_amr_assign_block_owners' cost-weighted SFC assignment exactly.
+    !> Owner rank of block k by binary search of its Morton key in its level's cut amr_fine_cut(:, level); reproduces
+    !! s_amr_assign_block_owners' assignment exactly.
     pure integer function f_amr_owner(k) result(r)
 
         integer, intent(in) :: k
@@ -737,13 +692,15 @@ contains
         integer :: k
 
         do k = 1, amr_num_blocks
-            if (amr_place_owner .and. amr_block_level(k) >= 1) cycle  ! placed owners are not SFC-contiguous
+            if (amr_place_owner) cycle  ! placed owners are not SFC-contiguous
             if (f_amr_owner(k) /= amr_block_owner(k)) &
                 & call s_mpi_abort('SFC cut-point owner disagrees with amr_block_owner - cut capture or search is wrong')
         end do
 
     end subroutine s_amr_validate_owner
 
+    !> Set this rank's intersection of box lo:hi with its subdomain (amr_isect_lo/hi) and whether it holds fine cells
+    !! (amr_rank_owns_block: nonempty in all active dims). Call with the coarse grid state in m/n/p, never inside the fine advance.
     impure subroutine s_amr_compute_isect(lo, hi)
 
         integer, intent(in) :: lo(3), hi(3)
@@ -753,8 +710,8 @@ contains
 
     end subroutine s_amr_compute_isect
 
-    !> Rank r's coarse interior box (global) from the computed decomposition (s_amr_rank_decomp, no ghosts). Covered coarse cells
-    !! are in-domain, so restriction targets are identified by interior overlap alone.
+    !> Rank r's coarse interior box (global, no ghosts) from s_amr_rank_decomp; restriction targets are identified by interior
+    !! overlap alone.
     pure subroutine s_amr_rank_interior(r, ilo, ihi)
 
         integer, intent(in)  :: r
@@ -766,13 +723,8 @@ contains
 
     end subroutine s_amr_rank_interior
 
-    !> Expand a candidate regrid box (global indices) to fully contain every immersed body it overlaps, with a buff_size margin (the
-    !! IB image-point stencils need resolved surroundings). Expansion is re-clamped to the domain interior by the caller's own
-    !! guards; a body too large for the per-rank block cap aborts with a named message. The bbox reads the live centroid, so a
-    !! moving body's box tracks its current position; between regrids s_amr_update_mib_fine guards containment.
-
     !> Margin-padded global coarse-index bounding box of immersed body i (supported analytic geometries only; aborts on others).
-    !! Reads the body's live centroid, so a moving body's box tracks its current position.
+    !! Reads the body's live centroid, so a moving body's box tracks it.
     impure subroutine s_amr_body_bbox(i, mrg, blo, bhi)
 
         integer, intent(in)  :: i, mrg
@@ -798,23 +750,21 @@ contains
 
     end subroutine s_amr_body_bbox
 
+    !> Expand a candidate regrid box (global indices) to fully contain every immersed body it overlaps, with a margin; aborts if a
+    !! body exceeds the per-rank block cap.
     impure subroutine s_amr_expand_box_over_bodies(lo, hi)
 
         integer, intent(inout) :: lo(3), hi(3)
         integer                :: i, blo(3), bhi(3), mrg
 
-        ! containment margin: the IB image-point stencil reaches a few cells beyond the surface (the static-block goldens keep ~5);
-        ! buff_size (floored to 10 by ib) would exceed the per-rank block cap for ordinary bodies. For amr_max_level > 1 the body
-        ! must survive every child nesting inset (amr_cpat_mar per level down to amr_max_level), so the parent block clears the
-        ! body by that many extra cells, keeping the finest C/F boundary a full image-point stencil off the surface (refining the
-        ! surface, not the interior).
+        ! margin: the IB image-point stencil reaches a few cells past the surface (buff_size would exceed the block cap). For
+        ! amr_max_level > 1 add amr_cpat_mar per nesting level so the finest C/F boundary stays a stencil off the surface.
 
         mrg = max(amr_buf, 4) + max(0, amr_max_level - 1)*amr_cpat_mar
 
         do i = 1, num_ibs
             call s_amr_body_bbox(i, mrg, blo, bhi)
-            ! blocks must stay buff_size inside the domain: a body whose margin-padded bbox does not fit cannot be contained; fail
-            ! with a named message instead of a clipped body
+            ! blocks stay buff_size inside the domain: fail with a named message instead of a clipped body
             if (any(amr_dim .and. (blo < buff_size .or. bhi > [m_glb, n_glb, p_glb] - buff_size))) then
                 call s_mpi_abort('amr dynamic regrid with ib: the immersed body plus its containment ' &
                                  & // 'margin does not fit inside the refinable domain interior (blocks stay buff_size off the edges)')
@@ -829,23 +779,19 @@ contains
 
     end subroutine s_amr_expand_box_over_bodies
 
-    !> max_grid_size tiling: split box [lo:hi] into a grid of contiguous sub-boxes each <= amr_maxc_fit per dim (the max a rank can
-    !! whole-own), appending them to out(nt+1:). Tiles are adjacent (share fine seams); the block-to-block fine-fine halo makes
-    !! those seams conservative. Even split: ntl = ceil(ext/amr_maxc_fit) tiles, each of size ceil(ext/ntl) <= amr_maxc_fit. Sets
-    !! capped=1 and stops if the amr_max_blocks cap is hit. Collapsed dims stay [0:0].
+    !> Split box [lo:hi] into an even grid of adjacent sub-boxes each <= amr_maxc_fit per dim (the max a rank can whole-own),
+    !! appended to out(nt+1:); sets capped=1 and stops if the cap is hit. Collapsed dims stay [0:0].
     pure subroutine s_amr_tile_box(lo, hi, out, nt, cap, capped, tsz)
 
         integer, intent(in)        :: lo(3), hi(3), cap
         type(t_box), intent(inout) :: out(:)
         integer, intent(inout)     :: nt, capped
-        !> per-dim tile size (default amr_maxc_fit; a level-lev caller passes amr_maxc_fit/amr_ref_ratio**(lev-1): the slot holds
-        !! amr_ref_ratio*amr_maxc_fit fine cells and a level-lev block spans amr_ref_ratio**lev per coarse cell)
+        !> per-dim tile size (default amr_maxc_fit)
         integer, intent(in), optional :: tsz(3)
         integer                       :: ntl(3), s(3), t1, t2, t3, qlo(3), qhi(3), tc(3)
 
         tc = amr_maxc_fit; if (present(tsz)) tc = tsz
-        tc = max(tc, 1)  ! a level>=2 caller passes amr_maxc_fit/2, which is 0 when a rank's fine half-extent is 1 (small subdomain
-        ! at high np); a 0 tile size would divide-by-zero below, and a 1-cell tile is the valid floor
+        tc = max(tc, 1)  ! a 0 tile size would divide by zero; 1 cell is the floor
         ntl = (hi - lo + tc)/tc; s = (hi - lo + ntl)/ntl  ! a collapsed dim ([0:0]) tiles once with size 1
         do t3 = 0, ntl(3) - 1
             qlo(3) = lo(3) + t3*s(3); qhi(3) = min(lo(3) + (t3 + 1)*s(3) - 1, hi(3))

@@ -86,9 +86,7 @@ contains
             @:EOS_INIT_REFERENCE_STATE(i)
             if (f_is_state_dependent(i)) state_dependent = .true.
         end do
-        ! Baked in at build time (every build, see case.py), so a case whose EOS family differs from the
-        ! build's would silently run the wrong branch. The namelist still carries fluid_pp%eos, so check
-        ! the two agree.
+        ! baked in at build time, so a case whose EOS family differs from the build's would silently run the wrong branch
         @:PROHIBIT(state_dependent .neqv. any_state_dependent_eos, &
                    & "This case's equations of state do not match the ones this binary was built for. Rebuild with this case.")
         any_state_dependent_eos_rt = state_dependent
@@ -604,10 +602,8 @@ contains
             pi_inf_K = 0._wp
             qv_K = 0._wp
 
-            ! Stiffened-gas fast path: the phase coefficients are the constants gammas/pi_infs, and calling
-            ! s_phase_coefficients per fluid per cell drags the state-dependent EOS chain (reference-curve Newton loop)
-            ! into every conversion and Riemann kernel even when no fluid uses it.
-            ! Same arithmetic as the general branch with gamma_i = gammas(i), pi_inf_i = pi_infs(i).
+            ! Stiffened-gas fast path (same arithmetic as the general branch with gamma_i = gammas(i), pi_inf_i = pi_infs(i)):
+            ! avoids dragging the state-dependent EOS chain into every conversion and Riemann kernel
             if (.not. any_state_dependent_eos) then
                 $:GPU_LOOP(parallelism='[seq]')
                 do i = 1, num_fluids
