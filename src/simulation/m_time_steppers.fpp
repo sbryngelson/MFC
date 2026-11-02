@@ -298,19 +298,16 @@ contains
             end if
 
             if (chemistry .or. heat_conduction) then
-                ! allocation bounds, not runtime bounds: q_T_sf is the one array here that crosses into the AMR fine advance (it is
-                ! passed through s_amr_fine_stage_advance_batched to s_compute_rhs), so it must hold a slab of refined blocks as
-                ! well as the coarse subdomain. Every other array in this module is coarse-only - the fine advance works through the
-                ! flat store and the pooled q_prim/rhs scratch (m_amr).
+                ! allocation bounds: q_T_sf is the one array here that crosses into the AMR fine advance, so it must hold a slab of
+                ! refined blocks as well as the coarse subdomain
                 @:ALLOCATE(q_T_sf%sf(idwbuff_alloc(1)%beg:idwbuff_alloc(1)%end, idwbuff_alloc(2)%beg:idwbuff_alloc(2)%end, &
                            & idwbuff_alloc(3)%beg:idwbuff_alloc(3)%end))
-                ! The cache is the Newton guess of every conversion, and a fine block wider than this rank's coarse subdomain reads
-                ! it at fine indices no coarse conversion ever wrote: seed the whole allocation so that guess is finite and
-                ! positive.
+                ! the cache is the Newton guess of every conversion; a fine block wider than the coarse subdomain reads it at fine
+                ! indices no coarse conversion wrote, so seed the whole allocation
                 q_T_sf%sf = dflt_T_guess
                 @:ACC_SETUP_SFs(q_T_sf)
-                ! @:ALLOCATE creates the device copy without copying, and the ACC_SETUP copyin above is Cray-only: without
-                ! this the seed stays on the host and every other offload build Newton-iterates on uninitialized device memory.
+                ! @:ALLOCATE does not copy and the ACC_SETUP copyin is Cray-only: push the seed so other offload builds do not
+                ! Newton-iterate on uninitialized device memory
                 $:GPU_UPDATE(device='[q_T_sf%sf]')
             end if
         end if
@@ -474,14 +471,13 @@ contains
 
         ! Adaptive dt: initial stage
         if (adap_dt) call s_adaptive_dt_bubble(1)
-        amr_sub_on = amr .and. amr_subcycle  ! level 0's stages capture its dt-weighted face fluxes for the state reflux
+        amr_sub_on = amr .and. amr_subcycle  ! level 0's stages capture its dt-weighted face fluxes
 
         do s = 1, nstage
             call system_clock(stage_t0)
             ! mytime is read on the device by the GRCBC inflow ramp, so it has to be current before the RHS that
             ! reads it, not after. Its GPU_DECLARE only creates device storage and never copies the host value, so
             ! without this the first RHS of a run reads uninitialised memory and later stages read a stale time.
-            ! Stage top, ahead of every RHS this stage runs (coarse, fine batches).
             $:GPU_UPDATE(device='[mytime]')
             ! Dirichlet inflows ramp too; their ghost fill lives in common code, which cannot read mytime
             if (any([bc_x%vel_in_ramp, bc_y%vel_in_ramp, bc_z%vel_in_ramp] > 0._wp)) then
@@ -523,9 +519,7 @@ contains
             if (.not. amr_sub_on) call s_amr_stage_fine(s, t_step, rk_coef(s,:), q_cons_ts(1)%vf, q_T_sf, bc_type, rhs_vf, &
                 & pb_ts(1)%sf, rhs_pb, mv_ts(1)%sf, rhs_mv)
 
-            ! TWIN of the AMR fine-block RK update: this coarse rk_coef stage combination (q = (c1*q + c2*q_stor + c3*dt*rhs)/c4)
-            ! is mirrored by s_amr_fine_rk_update_batch in m_amr_advance - change the algebra here and it must follow, else fine
-            ! blocks integrate a different scheme.
+            ! TWIN of s_amr_fine_rk_update_batch (m_amr_advance): change the stage algebra here and it must follow
             if (bubbles_lagrange .and. .not. adap_dt) call s_update_lagrange_tdv_rk(q_prim_vf, bc_type, stage=s)
             $:GPU_PARALLEL_LOOP(collapse=4)
             do i = 1, sys_size

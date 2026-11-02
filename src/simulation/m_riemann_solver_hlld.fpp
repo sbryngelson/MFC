@@ -125,11 +125,9 @@ contains
                                     end if
                                 end if
 
-                                ! Mixture coefficients inline: with the EOS flag folded at compile time, amdflang miscompiles this
-                                ! kernel's two direct calls into s_compute_mixture_coefficients (the routine is still
-                                ! reached through s_compute_energy). mhd pins num_fluids = 1 with a stiffened-gas EOS, so this is
-                                ! that routine's fast path; its bubbles_euler branch is not reproduced (mhd with bubbles_euler is
-                                ! prohibited in case_validator).
+                                ! Mixture coefficients inline: with the EOS flag folded at compile time amdflang miscompiles this
+                                ! kernel's two direct calls into s_compute_mixture_coefficients. mhd pins num_fluids = 1 with a
+                                ! stiffened-gas EOS, so this is that routine's fast path (bubbles_euler is prohibited with mhd).
                                 rho%L = 0._wp; gamma%L = 0._wp; pi_inf%L = 0._wp; qv%L = 0._wp
                                 rho%R = 0._wp; gamma%R = 0._wp; pi_inf%R = 0._wp; qv%R = 0._wp
                                 $:GPU_LOOP(parallelism='[seq]')

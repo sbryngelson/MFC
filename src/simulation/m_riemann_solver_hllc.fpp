@@ -873,11 +873,9 @@ contains
                             ! statement and private variable from the pure-fluid emission, keeping its body and directive
                             ! identical to the single kernel a build without hypoelasticity would compile. Sharing one kernel
                             ! pinned it at the GPU register ceiling for every HLLC user.
-                            ! One source of truth for this kernel's private variables: both emissions of the shared body take
-                            ! _hllc_s* (scalars) and _hllc_a* (arrays), and only the hypoelastic one adds _hllc_e*/_hllc_ea. Two
-                            ! hand-written lists drifted apart once -- c_sum_Yi_Phi was private in one and shared in the other,
-                            ! which races under OpenMP offload. Names are lists joined once, so no fragment carries a trailing
-                            ! separator to get wrong.
+                            ! One source of truth for this kernel's private variables: both emissions take _hllc_s* (scalars) and
+                            ! _hllc_a* (arrays); only the hypoelastic one adds _hllc_e*/_hllc_ea. (Two hand-written lists drifted: a
+                            ! variable private in one and shared in the other races under OpenMP offload.)
                             #:set _hllc_s1 = ['i', 'j', 'k', 'l', 'q', 'T_L', 'T_R', 'vel_L_rms', 'vel_R_rms', 'pres_L', 'pres_R', &
                                 & 'rho_L', 'gamma_L', 'pi_inf_L', 'qv_L', 'rho_R', 'gamma_R']
                             #:set _hllc_s2 = ['pi_inf_R', 'qv_R', 'alpha_L_sum', 'alpha_R_sum', 'E_L', 'E_R', 'MW_L', 'MW_R', &
@@ -912,11 +910,9 @@ contains
                                 #:set _hllc_priv = '[' + ', '.join(_hllc_s1 + _hllc_s2 + _hllc_s3 + _hllc_s4) + ']'
                                 #:set _hllc_arr = '[' + ', '.join(_hllc_a1 + _hllc_a2) + ']'
                             #:endif
-                            ! The two calls below are identical on purpose. An offload kernel is named
-                            ! after the .fpp line of its GPU_PARALLEL_LOOP, so one shared call would give
-                            ! both emissions the same name; amdflang then launches the wrong one and a
-                            ! hypoelastic run faults inside the pure-fluid kernel. Two call sites are what
-                            ! give two line numbers. Do not merge them back into one (still faults on AFAR 24.3).
+                            ! The two calls below are identical on purpose: an offload kernel is named after the .fpp line of its
+                            ! GPU_PARALLEL_LOOP, so a shared call would give both emissions one name and amdflang would launch the
+                            ! wrong one (still faults on AFAR 24.3). Do not merge them.
                             #:if HYPO
                                 $:GPU_PARALLEL_LOOP(collapse=3, private=_hllc_priv, privateArrays=_hllc_arr, copyin='[is1, is2, &
                                                     & is3]', firstprivate='[Re_size_loc1, Re_size_loc2]')

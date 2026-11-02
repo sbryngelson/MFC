@@ -507,9 +507,8 @@ contains
 
     end subroutine s_mpi_allreduce_max
 
-    !> In-place elementwise max-reduction of a real array across all ranks. Assembles a rank-partitioned global array: each element
-    !! written (identically) by its owner(s), sentinel-low elsewhere, so MAX recovers the exact global array with no
-    !! double-counting.
+    !> In-place elementwise max-reduction of a real array across all ranks: each element is written (identically) by its owner(s)
+    !! and sentinel-low elsewhere, so MAX recovers the global array.
     impure subroutine s_mpi_allreduce_array_max(arr, arr_len)
 
         integer, intent(in)                         :: arr_len
@@ -1680,14 +1679,13 @@ contains
             call MPI_CART_COORDS(MPI_COMM_CART, proc_rank, 1, proc_coords, ierr)
         end if
 
-        ! Global Parameters for x-direction - equal split via the box layer (byte-identical with inline arithmetic)
+        ! Global Parameters for x-direction - equal split via the box layer
         block
             integer, allocatable :: off_x(:), off_y(:), off_z(:)
             integer              :: coords3(3)
             type(t_box)          :: box
-            ! Explicit allocate before assignment (not allocate-on-assignment): Intel defaults to
-            ! -assume norealloc_lhs, under which assigning to an unallocated allocatable is undefined.
-            ! Guard collapsed dims: num_procs_y/z are uninitialized locals (pre/post) when n/p_glb==0.
+            ! explicit allocate (Intel's -assume norealloc_lhs makes assignment to an unallocated allocatable undefined); collapsed
+            ! dims get [0,1] since num_procs_y/z are uninitialized there
             allocate (off_x(0:num_procs_x)); off_x = f_equal_splits(m_glb + 1, num_procs_x)
             if (n_glb > 0) then
                 allocate (off_y(0:num_procs_y)); off_y = f_equal_splits(n_glb + 1, num_procs_y)
@@ -1749,29 +1747,6 @@ contains
 #endif
 
     end subroutine s_mpi_decompose_computational_domain
-
-    !> Override this rank's local extents and starting indices from cumulative Cartesian split-plane offsets, leaving the MPI_CART
-    !! topology and BC neighbors (which stay proc_coords-derived) untouched. Each off_d is a cumulative cell-boundary array
-    !! (off_d(0)=0, off_d(num_procs_d)=G_d).
-    subroutine s_apply_weighted_offsets(off_x, off_y, off_z)
-
-        integer, dimension(0:), intent(in) :: off_x, off_y, off_z
-
-#ifdef MFC_MPI
-        m = off_x(proc_coords(1) + 1) - off_x(proc_coords(1)) - 1
-        start_idx(1) = off_x(proc_coords(1))
-        if (num_dims >= 2) then
-            n = off_y(proc_coords(2) + 1) - off_y(proc_coords(2)) - 1
-            start_idx(2) = off_y(proc_coords(2))
-        end if
-        if (num_dims >= 3) then
-            p = off_z(proc_coords(3) + 1) - off_z(proc_coords(3)) - 1
-            start_idx(3) = off_z(proc_coords(3))
-        end if
-        call s_update_cell_bounds(cells_bounds, m, n, p)
-#endif
-
-    end subroutine s_apply_weighted_offsets
 
     !> Apply executable-configured output and local-domain policies after the shared Cartesian decomposition.
     subroutine s_apply_decomposition_policies(proc_counts, remainders, local_cells, global_cells, write_silo_ghost_offsets, &

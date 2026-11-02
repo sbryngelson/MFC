@@ -124,7 +124,7 @@ contains
                        & idwbuff_alloc(3)%beg:idwbuff_alloc(3)%end))
             @:PREFER_GPU(jac)
         else
-            ! _alloc bounds mirroring the on-GPU branch: the AMR fine advance can exceed coarse extents
+            ! _alloc bounds as on the GPU branch: the AMR fine advance can exceed coarse extents
             allocate (jac_host(idwbuff_alloc(1)%beg:idwbuff_alloc(1)%end,idwbuff_alloc(2)%beg:idwbuff_alloc(2)%end, &
                       & idwbuff_alloc(3)%beg:idwbuff_alloc(3)%end))
 
@@ -245,8 +245,8 @@ contains
         end if
 
         do q = 1, num_iters
-            ! a batched AMR slab updates only the member interiors, so the ghost shells between members keep the frozen parent
-            ! sigma and the members stay decoupled; the plain kernel stays free of that test
+            ! a batched AMR slab updates only member interiors, so ghost shells between members keep the frozen parent sigma and the
+            ! members stay decoupled; the plain kernel stays free of that test
             #:for BAT in [False, True]
                 #:set PRIV = '[j, k, l, rho_lx, rho_rx, rho_ly, rho_ry, rho_lz, rho_rz, fd_coeff' &
                     & + (', ibm, jl, kl, ll]' if BAT else ']')
@@ -331,9 +331,8 @@ contains
                 end if
             #:endfor
 
-            ! AMR fine advance: the block's jac ghost shell holds frozen Dirichlet data prolonged
-            ! from the converged coarse sigma (seeded by s_amr_igr_swap_sigma); the physical-BC/halo
-            ! populate would write wrong (coarse-indexed) data on the swapped block grid
+            ! AMR fine advance: the jac ghost shell holds frozen Dirichlet data from the coarse sigma (s_amr_igr_swap_sigma); a
+            ! BC/halo populate would write coarse-indexed data on the swapped block grid
             if (.not. amr_in_fine_advance) call s_populate_F_igr_buffers(bc_type, jac_sf)
 
             if (igr_iter_solver == 1) then  ! Jacobi iteration

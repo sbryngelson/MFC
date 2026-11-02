@@ -4,16 +4,14 @@
 
 #:include 'macros.fpp'
 
-!> @brief The AMR fine-level restart file's layout, shared by the simulation's writer/reader (m_amr_restart) and post_process's
-!! overlay reader (m_data_input): the file path, the fine cell-boundary subdivision, the global-header check and, under parallel_io,
-!! the per-block catalog (header + ownership record + data offset of every block). The data itself is read by the callers, which
-!! differ in what they keep (the simulation restores whole blocks into its store; post_process keeps each rank's intersection
-!! slice).
+!> @brief The AMR fine-level restart file layout shared by m_amr_restart (writer/reader) and post_process's overlay reader
+!! (m_data_input): path, fine cell-boundary subdivision, global-header check and the parallel_io per-block catalog. Callers read the
+!! data themselves.
 !!
-!! Layout (parallel_io): 3-int global header [-num_procs, nblk, nvar] (the NEGATIVE rank count marks the current format), then per
-!! block: amr_restart_blk_hdr_ints ints [region lo(3), hi(3), level], amr_restart_blk_own_ints ints [owner + 1, m, n, p], and the
-!! owner's contiguous data chunk nvar*(m+1)*(n+1)*(p+1) stp words (absent when the block has no owner). The serial per-rank file
-!! (p_all/p<rank>/<step>/amr_fine.dat) holds the same records as Fortran unformatted sequential records, data only for owned blocks.
+!! Layout (parallel_io): 3-int header [-num_procs, nblk, nvar] (negative rank count = current format), then per block
+!! amr_restart_blk_hdr_ints ints [region lo(3), hi(3), level], amr_restart_blk_own_ints ints [owner + 1, m, n, p] and the owner's
+!! data chunk nvar*(m+1)*(n+1)*(p+1) stp words (absent without an owner). The serial per-rank file
+!! (p_all/p<rank>/<step>/amr_fine.dat) holds the same records as unformatted sequential records, data only for owned blocks.
 module m_amr_restart_io
 
 #ifdef MFC_MPI
@@ -32,7 +30,7 @@ module m_amr_restart_io
 #ifdef MFC_MPI
     public :: t_amr_restart_catalog, s_amr_restart_read_catalog
 
-    !> Every block's header and ownership record plus the byte offset of its data chunk, read collectively by all ranks.
+    !> Every block's header, ownership record and data-chunk byte offset, read collectively by all ranks.
     type t_amr_restart_catalog
         integer                                    :: nblk = 0
         integer, allocatable                       :: reg(:,:)      !< (6, nblk): region lo(3), hi(3) in global coarse cells
@@ -61,8 +59,8 @@ contains
     end function f_amr_restart_path
 
     !> Fine cell boundaries fcb(-1:nfine) by rr-way subdivision of the coarse cells of pcb starting at coarse index lo; pcb_lb is
-    !! lbound(pcb) in the caller (an assumed-shape dummy resets it to 1). Every coarse cell's right edge is copied exactly, so the
-    !! subdivision of a subdivision reproduces the deeper level bit-for-bit, and at rr = 2 it is a plain bisection.
+    !! lbound(pcb) in the caller (an assumed-shape dummy resets it to 1). Coarse right edges are copied exactly, so a subdivision of
+    !! a subdivision reproduces the deeper level bit-for-bit.
     pure subroutine s_amr_subdivide_cb(pcb, pcb_lb, lo, nfine, rr, fcb)
 
         real(wp), intent(in)    :: pcb(:)
@@ -86,9 +84,8 @@ contains
 
     end subroutine s_amr_subdivide_cb
 
-    !> Validate the 3-int global header against this run: the rank count (serial files are per rank, so it must match; a parallel_io
-    !! file may be read at any rank count, but only in the current format) and the conserved-variable count nvar the caller expects.
-    !! Returns the block count.
+    !> Validate the 3-int global header: the rank count (serial files need a match; parallel_io files read at any count but only in
+    !! the current format) and the variable count nvar. Returns the block count.
     impure subroutine s_amr_restart_check_header(ghdr, nvar, who, nblk)
 
         integer, intent(in)          :: ghdr(3), nvar
@@ -115,8 +112,7 @@ contains
     end subroutine s_amr_restart_check_header
 
 #ifdef MFC_MPI
-    !> Read every block's header and ownership record from an open parallel_io file (collective: all ranks call, all get the same
-    !! catalog) and lay out the data offsets. nvar is the conserved-variable count the writer used.
+    !> Read every block's header and ownership record from an open parallel_io file (collective) and lay out the data offsets.
     impure subroutine s_amr_restart_read_catalog(ifile, nblk, nvar, cat)
 
         integer, intent(in)                      :: ifile, nblk, nvar

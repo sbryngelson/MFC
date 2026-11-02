@@ -2,9 +2,8 @@
 !!@file
 !!@brief Contains module m_amr
 
-#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). A conditionally allocated module
-#! array a kernel names launches only under its allocation's own condition (sw_jac/jac: igr); a kernel naming an unallocated
-#! array aborts. Keep it so.
+#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). A kernel naming an unallocated
+#! module array aborts, so conditionally allocated ones (sw_jac/jac: igr) are named only under their allocation condition.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 
@@ -21,7 +20,6 @@ module m_amr
     use m_global_parameters
     use m_mpi_proxy, only: s_mpi_abort
     use m_mpi_common, only: s_mpi_allreduce_integer_min, s_mpi_allreduce_integer_max
-    use m_phase_timing
     use m_ibm, only: s_ibm_alloc_fine
     use m_amr_state
     use m_amr_distribution
@@ -34,12 +32,11 @@ module m_amr
 
     implicit none
 
-    !> Every AMR service module is re-exported here so that "use m_amr" keeps reaching all of them.
+    !> Re-exports every AMR service module.
 
 contains
 
-    !> Build the static refined level-1 block. No-op unless amr. Called after the level-0 grid (x_cb/dx ready) and time-steppers
-    !! (sys_size/buff_size set). Per-slot fine arrays allocated lazily (s_amr_reconcile_slots) - only the blocks a rank owns.
+    !> Build the static refined level-1 block (no-op unless amr); runs after the level-0 grid and time-steppers are set up.
     impure subroutine s_initialize_amr_module()
 
         amr_dim = [.true., n_glb > 0, p_glb > 0]
@@ -67,38 +64,31 @@ contains
         call s_amr_init_swap_buffers()
         call s_amr_build_global_cb(0)  ! the fine-distribution owner rebuilds whole-block fine coordinates from these
         call s_amr_init_coarse_patch()
-        ! the coarse decomposition (each rank's coarse start_idx + local m/n/p) is a structured cartesian split, computed O(1) per
-        ! rank by s_amr_rank_decomp - no replicated table, no allgather. Validate the formula against this rank's actual values.
+        ! the coarse decomposition is a structured split computed O(1) per rank by s_amr_rank_decomp; validate it against this rank
         call s_amr_validate_decomp()
-        ! per-slot fine-grid IB marker fields (static-body AMR); sized to the same max buffered fine extents as q_cons so the fine
-        ! IB pipeline can resolve the body on the block
+        ! per-slot fine-grid IB marker fields, sized like q_cons
         if (ib) call s_ibm_alloc_fine(amr_max_blocks, mbuf_lo(1), mbuf_hi(1), mbuf_lo(2), mbuf_hi(2), mbuf_lo(3), mbuf_hi(3))
         call s_amr_init_first_blocks()
         call s_amr_init_tags()
 
     end subroutine s_initialize_amr_module
 
-    !> The block caps and the preallocation extents. Mirror decomposition: each rank holds the fine cells covering block /\ its own
-    !! subdomain (np=1: the whole block). buff_size is not available at checker time, so the geometric aborts live here.
+    !> Block caps and preallocation extents. buff_size is unknown at checker time, so the geometric aborts live here.
     impure subroutine s_amr_init_extents()
 
         integer :: d, bad_loc, bad_glb, fit_d
 
         call s_amr_compute_isect(amr_block_beg, amr_block_end)
 
-        ! the fine ghost shell and reflux outside cells must stay inside the global domain (identical inputs on all ranks; every
-        ! rank takes the same branch)
+        ! the fine ghost shell and reflux outside cells must stay inside the global domain
         if (amr_block_beg(1) < buff_size .or. amr_block_end(1) > m_glb - buff_size .or. (n_glb > 0 .and. (amr_block_beg(2) &
             & < buff_size .or. amr_block_end(2) > n_glb - buff_size)) .or. (p_glb > 0 .and. (amr_block_beg(3) < buff_size &
             & .or. amr_block_end(3) > p_glb - buff_size))) then
             call s_mpi_abort('amr block must lie at least buff_size cells inside the domain boundaries')
         end if
 
-        ! Scratch constraint: the fine advance reuses the solver scratch (m_rhs/WENO/Riemann work arrays) and the global coordinate
-        ! arrays, all sized to this rank's local grid. Fine-level distribution gives a block whole to its owner, so the whole
-        ! block's fine extent (2*block-1) must fit every rank's local extent. non-IB: the block is tiled into <= amr_maxc_fit
-        ! sub-blocks (each fits every rank's scratch), so no cap is needed. IB keeps a single contiguous block per body, so an IB
-        ! block must itself fit a rank's local half-extent. Checked on the replicated block box so all ranks agree.
+        ! The fine advance reuses solver scratch sized to the local grid, so an IB block (never tiled) must fit a rank's local
+        ! half-extent; non-IB blocks are tiled to <= amr_maxc_fit.
         bad_loc = 0
         if (ib) then
             if (amr_ref_ratio*(amr_block_end(1) - amr_block_beg(1) + 1) - 1 > m) bad_loc = 1
@@ -112,18 +102,11 @@ contains
                              & // 'dimension; shrink the body region or use fewer ranks')
         end if
 
-        ! max coarse block cells per dim (upper bound for any future regrid box); 1 for collapsed dims
+        ! max coarse block cells per dim; 1 for collapsed dims
         amr_maxc = merge(([m_glb, n_glb, p_glb] + 1)/amr_ref_ratio, 1, amr_dim)
 
-        ! regrid size cap. Default (amr_max_grid_size == 0): min over ranks of the local half-extent (= amr_maxc at np=1), so any
-        ! clamped box satisfies every rank's scratch constraint and can move freely across ranks. That cap shrinks as ranks are
-        ! added, which tiles a fixed feature into more and more blocks the further you scale (per-block cost is roughly fixed
-        ! regardless of block size, so the block count is what costs), and it makes the box set (and so the answer, within
-        ! tolerance) depend on the rank count. amr_max_grid_size > 0 pins the cap to an absolute number of coarse cells instead,
-        ! like AMReX's max_grid_size: the box set is then identical at every rank count, and the solver scratch is sized to the
-        ! cap rather than to the subdomain (idwbuff_alloc and m/n/p_alloc in m_global_parameters), so a block at the cap fits
-        ! however small the subdomain becomes. A block is owned whole, so amr_maxc_fit (every regrid box is clamped to it) is
-        ! the largest block any rank can own and sizes the fine/coord arrays.
+        ! Regrid box cap: min over ranks of the local half-extent, or the absolute amr_max_grid_size (rank-count-invariant box set,
+        ! scratch sized to the cap). Every box is clamped to amr_maxc_fit, which sizes the fine/coord arrays.
         amr_maxc_fit = amr_maxc
         do d = 1, num_dims
             call s_mpi_allreduce_integer_min((amr_ext(d) + 1)/amr_ref_ratio, fit_d)
@@ -134,22 +117,20 @@ contains
             end if
         end do
 
-        ! max fine extents and buffered bounds for preallocation
+        ! max fine extents and buffered bounds
         max_f = merge(amr_ref_ratio*amr_maxc_fit - 1, 0, amr_dim)
         call s_amr_set_mbuf()
 
     end subroutine s_amr_init_extents
 
-    !> Rank-0 advisories (advice, not constraints: every setting is legal and sometimes correct) and the memory demand. Collective:
-    !! the uniform-spacing check reduces over ranks.
+    !> Rank-0 advisories and the memory demand. Collective (reduces over ranks).
     impure subroutine s_amr_init_report()
 
         integer  :: nonuni, nonuni_glb
         real(wp) :: slot_gib, cells, nfam
 
-        ! stacked members share the batch leader's coordinate arrays in the non-stacked dimensions and read the coarse WENO
-        ! coefficients at their stacked index, which is exact only where the grid spacing is bitwise uniform. The validator
-        ! forbids stretched grids under amr; say so once when the spacing still differs at roundoff.
+        ! stacked members reuse the batch leader's coordinates, exact only on bitwise-uniform spacing; warn if it differs at
+        ! roundoff
 
         nonuni = 0
         if (any(dx(0:m) /= dx(0))) nonuni = 1
@@ -161,37 +142,31 @@ contains
         if (nonuni_glb == 1) print '(A)', &
             & ' [amr] NOTE: the grid''s cell spacing is not bitwise uniform: stacked blocks reuse the batch leader''s ' &
             & // 'coordinate arrays, so members after the first see the leader''s spacing'
-        ! the SFC map spreads whole blocks, so with fewer blocks than ranks some ranks own no fine work
+        ! the SFC map spreads whole blocks, so fewer blocks than ranks leaves some ranks without fine work
         if (num_procs > amr_max_blocks) print '(A,I0,A,I0,A)', ' [amr] WARNING: amr_max_blocks (', amr_max_blocks, &
             & ') < num_procs (', num_procs, &
             & '): the fine level can occupy at most amr_max_blocks ranks - raise amr_max_blocks for better fine-level balance'
-        ! Every fine block advances at the coarse dt, but a level-l cell is amr_ref_ratio**l smaller, so its CFL limit is
-        ! amr_ref_ratio**amr_max_level tighter than the coarse grid's; the dt (fixed, or the coarse-only cfl_dt estimate) is
-        ! not scaled for that. The true CFL is unknown at init, so warn rather than abort - a small enough dt is valid.
+        ! fine blocks advance at the coarse dt; the finest-cell CFL is unknown at init, so warn rather than abort
         if (amr_ref_ratio > 2 .or. amr_max_level > 1) print '(A,I0,A)', &
             & ' [amr] WARNING: fine blocks advance at the coarse dt, but the ' &
             & // 'finest cell is amr_ref_ratio**amr_max_level = ', amr_ref_ratio**amr_max_level, &
             & 'x smaller - ensure dt satisfies the FINEST cell CFL (roughly the coarse-stable dt divided by that ' &
             & // 'factor), else the fine block may go unstable'
-        ! amr_regrid_int = 0 is static AMR (the only mode above amr_max_level = 2), but a user who set amr = T expecting
-        ! adaptivity gets none, silently
+        ! amr_regrid_int = 0 is static AMR and never adapts
         if (amr_regrid_int == 0) print '(A)', &
             & ' [amr] NOTE: amr_regrid_int = 0 - the block set is STATIC and never adapts. ' &
             & // 'Set amr_regrid_int > 0 (4-8 is a reasonable start) for adaptive refinement.'
         if (amr_max_grid_size == 0 .and. num_procs > 1) print '(A)', &
             & ' [amr] NOTE: amr_max_grid_size = 0 derives the block cap from the ' &
             & // 'decomposition, so it SHRINKS as ranks are added and the box set depends on rank ' &
-            & // 'count. Pinning it (64 measured best in 3D on MI250X, memory-bounded) was 3.0x ' &
-            & // 'faster and makes the box set rank-invariant.'
+            & // 'count. Pin it to make the box set rank-invariant.'
         if (amr_regrid_int > 0 .and. amr_regrid_int < 4) print '(A,I0,A)', ' [amr] NOTE: amr_regrid_int = ', amr_regrid_int, &
-            & ' regrids often; the tag sweep is per-CELL and flat in box count, so interval 8 ' &
-            & // 'measured 1.39x faster. Raise it unless the refined feature moves quickly.'
+            & ' regrids often; the tag sweep is per-CELL and flat in box count. ' &
+            & // 'Raise it unless the refined feature moves quickly.'
 
-        ! Memory demand, reported rather than guessed: there is no portable way to ask how much device memory is available
-        ! across four compilers and three offload backends, so no cap is derived from a budget. A block costs 2 per-slot field
-        ! families (q_cons, q_cons_stor; q_prim/rhs are one pooled scratch pair) x sys_size arrays on the mbuf extents. Slot volume
-        ! goes as cap**num_dims, so one cap cannot serve 2D and 3D alike. Exceeding device memory aborts inside
-        ! __tgt_target_data_begin_mapper, which presents as a hang (one rank dies, the rest block in MPI).
+        ! Memory demand: a block costs 2 field families (q_cons, q_cons_stor; q_prim/rhs are pooled) x sys_size arrays on the mbuf
+        ! extents. Exceeding device memory presents as a hang (one rank dies in __tgt_target_data_begin_mapper, the rest block in
+        ! MPI).
         cells = real(product(mbuf_hi - mbuf_lo + 1), wp)
         nfam = 2._wp
         slot_gib = cells*real(sys_size, wp)*nfam*real(storage_size(1._wp)/8, wp)/1024._wp**3
@@ -202,8 +177,7 @@ contains
 
     end subroutine s_amr_init_report
 
-    !> The coarse-patch gather buffer (see amr_cg's declaration): sized to the largest block's coarse footprint (block coarse cells
-    !! + 2*amr_cpat_mar halo, block-local frame), device-mapped so the runtime ghost fill reads it on the owner.
+    !> Coarse-patch gather buffer (see amr_cg): the largest block's coarse footprint + 2*amr_cpat_mar halo, device-mapped.
     impure subroutine s_amr_init_coarse_patch()
 
         type(scalar_field), allocatable :: tmp_cg(:)
@@ -211,28 +185,23 @@ contains
 
         amr_cpat_mar = f_amr_cpat_mar()
         amr_cpat_hi = merge(amr_maxc_fit - 1 + 2*amr_cpat_mar, 0, amr_dim)
-        ! CCE OpenMP-offload leaves a bare module-scope derived-type (scalar_field) allocatable's descriptor uninitialized, so a
-        ! direct allocate(amr_cg(1:sys_size)) aborts with lib-4425 at program start (a local scalar_field array and a
-        ! GPU_DECLARE'd module one like q_prim_vf both allocate fine; only a bare module array does not). Allocate a local, which
-        ! gets a valid descriptor, and hand it to the module variable via move_alloc, then map.
+        ! CCE OpenMP-offload: allocating a bare module-scope scalar_field array aborts (lib-4425); allocate a local, then
+        ! move_alloc.
         allocate (tmp_cg(1:sys_size))
         @:ALLOCATE(amr_slab_tab(1:15, 1:64))
         call move_alloc(tmp_cg, amr_cg)
         $:GPU_ENTER_DATA(create='[amr_cg]')
         do i = 1, sys_size
             @:ALLOCATE(amr_cg(i)%sf(0:amr_cpat_hi(1), 0:amr_cpat_hi(2), 0:amr_cpat_hi(3)))
-            amr_cg(i)%sf = 0._stp  ! padding beyond a block's valid patch extent is never read; keep it finite for the device copy
+            amr_cg(i)%sf = 0._stp  ! padding beyond a block's patch is never read; keep it finite for the device copy
             @:ACC_SETUP_SFs(amr_cg(i))
         end do
 
     end subroutine s_amr_init_coarse_patch
 
-    !> Place the initial block(s) and set their geometry (region, m/n/p, idwbuff, coordinates). Under dynamic regrid with bodies the
-    !! initial block gets the same body-containment expansion regrid boxes get (the moving-body containment guard requires it from
-    !! step 1); for a static block (amr_regrid_int = 0) the user's placement is authoritative. max_grid_size tiling: the initial
-    !! block splits into <= amr_maxc_fit sub-blocks (at np=1 amr_maxc_fit == amr_maxc, so a normal block stays a single tile), one
-    !! per slot; IB keeps a single contiguous block. Per-slot field arrays are allocated lazily by s_amr_reconcile_slots once
-    !! ownership is known, so a rank holds only its owned blocks' fine arrays.
+    !> Place the initial block(s) and set their geometry. With dynamic regrid and bodies the block gets the same body-containment
+    !! expansion regrid boxes get; non-IB blocks are tiled to <= amr_maxc_fit, IB keeps one block. Slot arrays are allocated lazily
+    !! by s_amr_reconcile_slots.
     impure subroutine s_amr_init_first_blocks()
 
         type(t_box), allocatable :: tiled(:)
@@ -247,25 +216,23 @@ contains
             call s_amr_tile_box(blk_lo, blk_hi, tiled, nt, amr_max_blocks, capt)
         end if
         amr_num_blocks = nt
-        ! set block regions first so the owner assignment (reads amr_region_*_all) runs before the owner-dependent geometry -
-        ! else s_set_amr_fine_geometry would size the whole-block owner from a stale (default) amr_block_owner
+        ! set regions first: the owner assignment reads amr_region_*_all and s_set_amr_fine_geometry needs the owners
         do kk = 1, nt
             amr_region_lo_all(:,kk) = tiled(kk)%lo; amr_region_hi_all(:,kk) = tiled(kk)%hi
         end do
         call s_amr_assign_block_owners()
-        call s_amr_reconcile_slots()  ! allocate this rank's owned initial blocks (owner-guarded geometry writes below)
+        call s_amr_reconcile_slots()  ! allocate this rank's owned blocks
         do kk = 1, nt
             amr_cur = kk
             call s_set_amr_fine_geometry(tiled(kk)%lo, tiled(kk)%hi)
         end do
         call s_amr_reduce_xchg_flag()
-        call s_amr_select_slot(1)  ! refresh the per-block mirrors (geometry loop left them on the last tile)
+        call s_amr_select_slot(1)  ! refresh the per-block mirrors
         deallocate (tiled)
 
     end subroutine s_amr_init_first_blocks
 
-    !> The narrow-reduction tag base sits above the per-box tag space so the two cannot collide; the keyed band space starts at the
-    !! next 65536 boundary above every per-box tag.
+    !> Tag bases: narrow-reduction tags sit above the per-box tags; keyed bands start at the next 65536 boundary above them.
     impure subroutine s_amr_init_tags()
 
 #ifdef MFC_MPI
@@ -286,8 +253,7 @@ contains
 
     end subroutine s_amr_init_tags
 
-    !> [amr-cad] report: SUM-allreduce the cadence counters and print once on rank 0. Collective: the caller (s_finalize_amr_module)
-    !! runs it before the amr early-return so every rank participates (all-zero when amr is off).
+    !> Print the regrid-cadence containment counters on rank 0. Collective: runs before the amr early-return so every rank joins.
     impure subroutine s_amr_cad_report()
 
         integer(8) :: cad(2), cadr(2)
@@ -298,7 +264,6 @@ contains
         call MPI_ALLREDUCE(cad, cadr, 2, MPI_INTEGER8, MPI_SUM, MPI_COMM_WORLD, ierr)
 #endif
         if (proc_rank == 0) then
-            ! cadence containment: escaped > 0 means a feature outran amr_buf between regrids (see the decl)
             if (cadr(1) > 0) write (0, '(A,I0,A,I0,A,F6.3)') ' [amr-cad] L1 tags ', cadr(1), ' escaped ', cadr(2), ' frac ', &
                 & real(cadr(2))/real(cadr(1))
         end if
@@ -315,7 +280,7 @@ contains
             call s_amr_free_slot(islot)
         end do
         call s_amr_free_pool()
-        ! gfortran/ifx abort on deallocating an unallocated array (amdflang silently tolerates it): guard each
+        ! gfortran/ifx abort on deallocating an unallocated array: guard each
         if (allocated(amr_fw_rblk)) deallocate (amr_fw_rblk)
         if (allocated(amr_sw_sq)) deallocate (amr_sw_sq, amr_sw_rq)
         #:for A in ['amr_fw_sq', 'amr_fw_rq']

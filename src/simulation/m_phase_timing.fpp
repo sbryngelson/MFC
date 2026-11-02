@@ -4,9 +4,8 @@
 
 #:include 'macros.fpp'
 
-!> @brief Per-phase wall-time budget of the AMR step, reported when rank_time_wrt is on. The brackets are disjoint and sum to the
-!! step-loop wall (the residual is printed; the regrid sub-phases nest inside regrid), and each bracket drains the device first so a
-!! phase's time includes the GPU work it launched.
+!> @brief Per-phase wall-time budget of the AMR step, reported when rank_time_wrt is on. Brackets are disjoint (regrid sub-phases
+!! nest inside regrid) and drain the device first, so a phase's time includes the GPU work it launched.
 module m_phase_timing
 
     use m_global_parameters
