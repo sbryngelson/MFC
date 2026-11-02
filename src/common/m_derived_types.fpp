@@ -340,8 +340,9 @@ module m_derived_types
     end type ib_stl_parameters
 
     type ib_patch_parameters
-        integer  :: geometry                            !< Type of geometry for the patch
+        integer  :: geometry  !< Type of geometry for the patch
         integer  :: gbl_patch_id
+        integer  :: owner_rank  !< MPI rank whose subdomain holds the centroid; the only rank that sums this IB's force
         real(wp) :: x_centroid, y_centroid, z_centroid  !< Geometric center coordinates of the patch
 
         !> Centroid locations of intermediate steps in the time_stepper module
@@ -529,6 +530,7 @@ module m_derived_types
     type ghost_point
         integer, dimension(3)        :: loc            !< Physical location of the ghost point
         real(wp), dimension(3)       :: ip_loc         !< Physical location of the image point
+        real(wp)                     :: ip_dist        !< Distance from the boundary intercept to the image point
         integer, dimension(3)        :: ip_grid        !< Top left grid point of IP
         real(wp), dimension(2, 2, 2) :: interp_coeffs  !< Interpolation Coefficients of image point
         logical                      :: interp_valid   !< .false. if every image point stencil cell lies inside an IB

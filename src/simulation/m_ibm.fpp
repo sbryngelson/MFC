@@ -85,11 +85,10 @@ module m_ibm
     implicit none
 
     private :: s_compute_image_points, s_compute_interpolation_coeffs, s_interpolate_image_point, s_find_ghost_points, &
-        & s_find_num_ghost_points, s_compute_ghost_point_pressure, s_compute_ghost_point_velocity
-    ; public :: ib_gbl_idx_lookup, s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, &
-        & s_report_ibm_surface, s_ibm_alloc_fine, s_ibm_setup_fine, s_ibm_swap_to_fine, s_ibm_restore_from_fine, &
-        & s_ibm_load_fine_markers, s_ibm_reset_fine_park, num_gps, f_ibm_fine_gps, s_ibm_tally_gps_by_body, &
-        & s_ibm_check_bodies_on_one_rank
+        & s_find_num_ghost_points, s_compute_ghost_point_pressure, s_compute_ghost_point_velocity, s_interpolation_weights
+    ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, s_report_ibm_surface, &
+        & s_ibm_alloc_fine, s_ibm_setup_fine, s_ibm_swap_to_fine, s_ibm_restore_from_fine, s_ibm_load_fine_markers, &
+        & s_ibm_reset_fine_park, num_gps, f_ibm_fine_gps, s_ibm_tally_gps_by_body, s_ibm_check_bodies_on_one_rank
 
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
@@ -132,10 +131,12 @@ module m_ibm
     logical :: moving_immersed_boundary_flag
     logical :: centroid_offsets_active = .false.  !< some patch is a moving airfoil or STL, which carries a centroid_offset
 
-    ! IB MPI buffers
-    integer, allocatable  :: send_ids(:), recv_ids(:)
-    real(wp), allocatable :: send_ft(:,:), recv_ft(:,:)
-    real(wp), allocatable :: recv_forces_snap(:,:), recv_torques_snap(:,:)
+    ! IB force reduction (s_communicate_ib_forces): distinct neighborhood ranks in ascending order, and buffers allocated once
+    integer, parameter    :: ib_rec_len = 7  !< gbl_patch_id, force(1:3), torque(1:3)
+    integer               :: n_ib_nbrs = 0
+    integer, allocatable  :: ib_nbrs(:), ib_send_counts(:), ib_reqs(:), ib_stats(:,:)
+    real(wp), allocatable :: ib_send_bufs(:,:), ib_recv_bufs(:,:)
+    private :: ib_rec_len, n_ib_nbrs, ib_nbrs, ib_send_counts, ib_reqs, ib_stats, ib_send_bufs, ib_recv_bufs
 
 contains
 
@@ -168,6 +169,7 @@ contains
         @:ACC_SETUP_SFs(corrected_gps)
 
         $:GPU_ENTER_DATA(copyin='[num_gps]')
+        $:GPU_UPDATE(device='[ib_second_order_vel, ib_ip_min_dist]')
 
         if (collision_model > 0) call s_initialize_collisions_module()
 
@@ -209,11 +211,7 @@ contains
 
         ! allocate some arrays for MPI communication, if required by this simulation
 #ifdef MFC_MPI
-        if (num_procs > 1) then
-            @:ALLOCATE(send_ids(size(patch_ib)), send_ft(6, size(patch_ib)))
-            @:ALLOCATE(recv_forces_snap(size(patch_ib), 3), recv_torques_snap(size(patch_ib), 3), recv_ids(size(patch_ib)), &
-                       & recv_ft(6, size(patch_ib)))
-        end if
+        if (num_procs > 1) call s_setup_ib_force_comm()
 #endif
 
         call s_update_ib_lookup()
@@ -311,7 +309,7 @@ contains
         real(wp), intent(in)          :: rho, pres_IP
         real(wp), intent(out)         :: pres_GP
 
-        pres_GP = pres_IP/min(max(1._wp - 2._wp*abs(gp%levelset) &
+        pres_GP = pres_IP/min(max(1._wp - (abs(gp%levelset) + gp%ip_dist) &
                               & *rho/pres_IP*dot_product(patch_ib(gp_patch_id)%force/patch_ib(gp_patch_id)%mass, &
                               & gp%levelset_norm), 5.e-1_wp), 2._wp)
 
@@ -375,6 +373,9 @@ contains
             if (buf > 0._wp) vel_GP = vel_GP + v_blow_eff*norm/buf
         end if
 
+        ! extrapolate linearly through the boundary intercept, Mittal et al. (2008)
+        if (ib_second_order_vel) vel_GP = vel_GP - abs(gp%levelset)/max(gp%ip_dist, sgm_eps)*(vel_IP - vel_GP)
+
     end subroutine s_compute_ghost_point_velocity
 
     !> Update the conservative variables at the ghost points
@@ -412,7 +413,7 @@ contains
         real(wp), dimension(${NUM_SPECIES}$) :: Ys_IP, Ys_g, Ys_s, W_species
         real(wp) :: alpha_q, alpha_rho_q, e_q
         real(wp) :: T_IP, mw_IP, e_IP  !< Image-point temperature, mixture MW, and mass-specific internal energy (chemistry)
-        real(wp) :: T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d
+        real(wp) :: T_s, T_g, mw_s, mw_g, rho_s, rho_g, mdot_s, v_stefan, d
         logical :: surface_converged
         integer :: n_not_converged, n_ill_posed  !< Per-call reacting-surface failure tallies (see the module-level counters)
         real(wp), dimension(3) :: norm  !< Levelset normal at the ghost point, normalized below with buf
@@ -461,8 +462,8 @@ contains
             $:GPU_PARALLEL_LOOP(private='[i, physical_loc, dyn_pres, alpha_rho_IP, alpha_IP, alpha_rho_GP, pres_IP, pres_GP, &
                                 & vel_IP, vel_g, r_IP, v_IP, pb_IP, mv_IP, nmom_IP, presb_IP, massv_IP, rho, gamma, pi_inf, Re_K, &
                                 & G_K, Gs, gp, norm, buf, radial_vector, j, k, l, q, qv_K, c_IP, nbub, patch_id, Ys_IP, &
-                                & W_species, T_IP, mw_IP, e_IP, Ys_g, Ys_s, T_s, T_g, mw_s, mw_g, rho_s, mdot_s, v_stefan, d, &
-                                & surface_converged, vel_sum_g, E_ghost, alpha_q, alpha_rho_q, e_q]', &
+                                & W_species, T_IP, mw_IP, e_IP, Ys_g, Ys_s, T_s, T_g, mw_s, mw_g, rho_s, rho_g, mdot_s, v_stefan, &
+                                & d, surface_converged, vel_sum_g, E_ghost, alpha_q, alpha_rho_q, e_q]', &
                                 & reduction='[[n_not_converged, n_ill_posed]]', reductionOp='[+]', present='[ghost_points]')
             do i = 1, num_gps
                 gp = ghost_points(i)
@@ -552,10 +553,19 @@ contains
                         if (patch_ib(patch_id)%thermal_bc == 1) T_s = patch_ib(patch_id)%Twall
                     end if
 
-                    call s_blend_ghost_state(T_IP, T_s, Ys_IP, Ys_s, T_g, Ys_g)
+                    call s_blend_ghost_temperature(T_IP, T_s, T_surface_min, T_surface_max, T_g)
+                    call s_blend_ghost_species(Ys_IP, Ys_s, Ys_g)
 
                     call get_mixture_molecular_weight(Ys_g, mw_g)
                     alpha_rho_IP(1) = alpha_IP(1)*pres_IP*mw_g/(gas_constant*T_g)
+                end if
+
+                ! Isothermal wall without chemistry: keep p_IP, set the ghost density from the mirrored temperature.
+                if (.not. chemistry .and. patch_ib(patch_id)%thermal_bc == 1) then
+                    call s_phase_temperature(alpha_rho_IP(1)/alpha_IP(1), pres_IP, 1, T_IP)
+                    call s_blend_ghost_temperature(T_IP, patch_ib(patch_id)%Twall, 0._wp, huge(1._wp), T_g)
+                    call s_phase_density(pres_IP, T_g, 1, rho_g)
+                    alpha_rho_IP(1) = alpha_IP(1)*rho_g
                 end if
 
                 ! If in simulation, use acc mixture subroutines
@@ -824,6 +834,7 @@ contains
     impure subroutine s_compute_image_points()
 
         real(wp)                        :: dist
+        real(wp)                        :: min_cell_width
         real(wp), dimension(3)          :: norm
         real(wp), dimension(3)          :: physical_loc
         real(wp)                        :: temp_loc
@@ -839,8 +850,8 @@ contains
 
         bounds_error = .false.
 
-        $:GPU_PARALLEL_LOOP(private='[q, gp, i, j, k, physical_loc, patch_id, dist, norm, dim, bound, dir, index, temp_loc, &
-                            & s_cc]', copy='[bounds_error]', present='[ghost_points]')
+        $:GPU_PARALLEL_LOOP(private='[q, gp, i, j, k, physical_loc, patch_id, dist, min_cell_width, norm, dim, bound, dir, index, &
+                            & temp_loc, s_cc]', copy='[bounds_error]', present='[ghost_points]')
         do q = 1, num_gps
             gp = ghost_points(q)
             i = gp%loc(1)
@@ -858,7 +869,14 @@ contains
             patch_id = gp%ib_patch_id
             dist = abs(real(gp%levelset, kind=wp))
             norm(:) = gp%levelset_norm
-            ghost_points(q)%ip_loc(:) = physical_loc(:) + 2*dist*norm(:)
+            ghost_points(q)%ip_dist = dist
+            ! keep the image point stencil off the wall
+            if (ib_second_order_vel) then
+                min_cell_width = min(dx(i), dy(j))
+                if (p > 0) min_cell_width = min(min_cell_width, dz(k))
+                ghost_points(q)%ip_dist = max(dist, ib_ip_min_dist*min_cell_width)
+            end if
+            ghost_points(q)%ip_loc(:) = physical_loc(:) + (dist + ghost_points(q)%ip_dist)*norm(:)
 
             ! Find the closest grid point to the image point
             do dim = 1, num_dims
@@ -1152,15 +1170,12 @@ contains
     subroutine s_compute_interpolation_coeffs()
 
         real(wp), dimension(2, 2, 2) :: dist
-        real(wp), dimension(2, 2, 2) :: alpha
+        real(wp), dimension(2, 2, 2) :: fluid_mask
         real(wp), dimension(2, 2, 2) :: interp_coeffs
-        real(wp)                     :: buf
-        real(wp), dimension(2, 2, 2) :: eta
         type(ghost_point)            :: gp
         integer                      :: q, i, j, k, ii, jj, kk  !< Grid indexes and iterators
-        logical                      :: is_cell_center
 
-        $:GPU_PARALLEL_LOOP(private='[q, i, j, k, ii, jj, kk, dist, buf, gp, interp_coeffs, eta, alpha, is_cell_center]', &
+        $:GPU_PARALLEL_LOOP(private='[q, i, j, k, ii, jj, kk, dist, gp, interp_coeffs, fluid_mask]', &
                             & copyin='[ib_markers%sf]', present='[ghost_points]')
         do q = 1, num_gps
             gp = ghost_points(q)
@@ -1175,7 +1190,6 @@ contains
 
             ! get the distance to a cell in each direction
             dist = 0._wp
-            buf = 1._wp
             do ii = 0, 1
                 do jj = 0, 1
                     if (p == 0) then
@@ -1190,51 +1204,17 @@ contains
                 end do
             end do
 
-            ! check if we are arbitrarily close to a cell center
-            interp_coeffs = 0._wp
-            is_cell_center = .false.
-            check_is_cell_center: do ii = 0, 1
+            ! flag the fluid cells of the stencil
+            fluid_mask = 0._wp
+            do kk = 0, min(p, 1)
                 do jj = 0, 1
-                    ! A coincident solid cell leaves the point invalid: falling through to the eta
-                    ! branch with dist = 0 would give alpha*eta = 0*Inf = NaN.
-                    if (dist(ii + 1, jj + 1, 1) <= 1.e-16_wp) then
-                        if (ib_markers%sf(i + ii, j + jj, k) == 0) interp_coeffs(ii + 1, jj + 1, 1) = 1._wp
-                        is_cell_center = .true.
-                        exit check_is_cell_center
-                    else
-                        if (p /= 0) then
-                            if (dist(ii + 1, jj + 1, 2) <= 1.e-16_wp) then
-                                if (ib_markers%sf(i + ii, j + jj, k + 1) == 0) interp_coeffs(ii + 1, jj + 1, 2) = 1._wp
-                                is_cell_center = .true.
-                                exit check_is_cell_center
-                            end if
-                        end if
-                    end if
+                    do ii = 0, 1
+                        if (ib_markers%sf(i + ii, j + jj, k + kk) == 0) fluid_mask(ii + 1, jj + 1, kk + 1) = 1._wp
+                    end do
                 end do
-            end do check_is_cell_center
+            end do
 
-            if (.not. is_cell_center) then
-                ! if we are not arbitrarily close, interpolate
-                alpha = 1._wp
-                if (ib_markers%sf(i, j, k) /= 0) alpha(1, 1, 1) = 0._wp
-                if (ib_markers%sf(i + 1, j, k) /= 0) alpha(2, 1, 1) = 0._wp
-                if (ib_markers%sf(i, j + 1, k) /= 0) alpha(1, 2, 1) = 0._wp
-                if (ib_markers%sf(i + 1, j + 1, k) /= 0) alpha(2, 2, 1) = 0._wp
-
-                if (p == 0) then
-                    eta(:,:,1) = 1._wp/dist(:,:,1)**2
-                    buf = sum(alpha(:,:,1)*eta(:,:,1))
-                    if (buf > 0._wp) interp_coeffs(:,:,1) = alpha(:,:,1)*eta(:,:,1)/buf
-                else
-                    if (ib_markers%sf(i, j, k + 1) /= 0) alpha(1, 1, 2) = 0._wp
-                    if (ib_markers%sf(i + 1, j, k + 1) /= 0) alpha(2, 1, 2) = 0._wp
-                    if (ib_markers%sf(i, j + 1, k + 1) /= 0) alpha(1, 2, 2) = 0._wp
-                    if (ib_markers%sf(i + 1, j + 1, k + 1) /= 0) alpha(2, 2, 2) = 0._wp
-                    eta = 1._wp/dist**2
-                    buf = sum(alpha*eta)
-                    if (buf > 0._wp) interp_coeffs = alpha*eta/buf
-                end if
-            end if
+            call s_interpolation_weights(gp, i, j, k, dist, fluid_mask, interp_coeffs)
 
             ! An image point buried in a neighboring IB gets no weights at all: its ghost point is
             ! averaged from its own neighbors instead, in s_ibm_correct_state.
@@ -1245,6 +1225,53 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
     end subroutine s_compute_interpolation_coeffs
+
+    !> Fluid-masked image-point weights: bilinear for second-order IBM, else inverse distance squared
+    subroutine s_interpolation_weights(gp, i, j, k, dist, fluid_mask, interp_coeffs)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+
+        type(ghost_point), intent(in)             :: gp
+        integer, intent(in)                       :: i, j, k      !< lower corner of the stencil
+        real(wp), dimension(2, 2, 2), intent(in)  :: dist, fluid_mask
+        real(wp), dimension(2, 2, 2), intent(out) :: interp_coeffs
+        real(wp), dimension(2, 2, 2)              :: weights
+        real(wp), dimension(2, 3)                 :: axis_weight  !< (stencil side, dimension) linear weights
+        real(wp)                                  :: weight_sum
+        integer                                   :: ii, jj, kk, num_z_layers
+
+        num_z_layers = min(p, 1) + 1
+
+        if (ib_second_order_vel) then
+            ! bilinear weights, Mittal et al. (2008)
+            axis_weight(2, 1) = (gp%ip_loc(1) - x_cc(i))/(x_cc(i + 1) - x_cc(i))
+            axis_weight(2, 2) = (gp%ip_loc(2) - y_cc(j))/(y_cc(j + 1) - y_cc(j))
+            axis_weight(2, 3) = 0._wp
+            if (p /= 0) axis_weight(2, 3) = (gp%ip_loc(3) - z_cc(k))/(z_cc(k + 1) - z_cc(k))
+            axis_weight(2,:) = min(max(axis_weight(2,:), 0._wp), 1._wp)  ! clamp to the cell edges
+            axis_weight(1,:) = 1._wp - axis_weight(2,:)
+            do kk = 1, num_z_layers
+                do jj = 1, 2
+                    do ii = 1, 2
+                        weights(ii, jj, kk) = axis_weight(ii, 1)*axis_weight(jj, 2)*axis_weight(kk, 3)
+                    end do
+                end do
+            end do
+        else
+            ! inverse distance squared, Chaudhuri et al. JCP (2011)
+            if (minval(dist(:,:,1:num_z_layers)) <= 1.e-16_wp) then
+                weights(:,:,1:num_z_layers) = merge(1._wp, 0._wp, dist(:,:,1:num_z_layers) <= 1.e-16_wp)
+            else
+                weights(:,:,1:num_z_layers) = 1._wp/dist(:,:,1:num_z_layers)**2
+            end if
+        end if
+
+        interp_coeffs = 0._wp
+        weights(:,:,1:num_z_layers) = fluid_mask(:,:,1:num_z_layers)*weights(:,:,1:num_z_layers)
+        weight_sum = sum(weights(:,:,1:num_z_layers))
+        if (weight_sum > 0._wp) interp_coeffs(:,:,1:num_z_layers) = weights(:,:,1:num_z_layers)/weight_sum
+
+    end subroutine s_interpolation_weights
 
     !> Interpolate primitive variables to a ghost point's image point using bilinear or trilinear interpolation
     subroutine s_interpolate_image_point(q_prim_vf, gp, alpha_rho_IP, alpha_IP, pres_IP, vel_IP, c_IP, r_IP, v_IP, pb_IP, mv_IP, &
@@ -1631,10 +1658,14 @@ contains
             $:END_GPU_PARALLEL_LOOP()
         end if
 
+        call nvtxStartRange("APPLY-COLLISION-FORCES")
         call s_apply_collision_forces(ghost_points, num_gps, ib_markers, forces, torques)
+        call nvtxEndRange
 
         ! reduce the forces across local neighborhood ranks
+        call nvtxStartRange("COMMUNICATE-IB-FORCES")
         call s_communicate_ib_forces(forces, torques)
+        call nvtxEndRange
 
         ! consider body forces after reducing to avoid double counting
         do i = 1, num_ibs
@@ -1877,159 +1908,165 @@ contains
 
     end subroutine s_wrap_periodic_ibs
 
-    !> @brief Swaps ownership of IBs and passes ownership of IBs to neighbor processors
-    !> Reduces forces and torques across the local neighborhood without a global allreduce. Accumulation phase: 2 passes per
-    !! dimension receiving from the low-index (-X) neighbor. Pass 1: add received values; save what was received as recv_snap. Pass
-    !! 2: send current (post-pass-1) values; add received; subtract recv_snap to remove double-counting of the direct contribution
-    !! already added in pass 1. Back-propagation phase: 2 passes per dimension receiving from the high-index (+X) neighbor, each
-    !! overwriting local forces with the neighbor's accumulated total.
+    !> Builds the ascending list of distinct neighborhood ranks used by s_communicate_ib_forces and allocates its buffers once. The
+    !! ascending order is the fixed order in which an owner adds its neighbors' contributions.
+    impure subroutine s_setup_ib_force_comm()
+
+#ifdef MFC_MPI
+        integer                            :: i, j, r, max_recs
+        integer, allocatable, dimension(:) :: flat
+
+        if (num_procs == 1 .or. allocated(ib_nbrs)) return
+        @:PROHIBIT(num_gbl_ibs >= min(2_8**digits(0._wp), int(huge(0), 8)), &
+                   & "Too many IBs to encode their ids exactly in real(wp) force messages")
+
+        ! a rank can fill several table slots (periodicity, few ranks) or be its own neighbor; keep each distinct rank once
+        flat = reshape(ib_neighbor_ranks, [size(ib_neighbor_ranks)])
+        allocate (ib_nbrs(size(flat)))
+        n_ib_nbrs = 0
+        do i = 1, size(flat)
+            r = flat(i)
+            if (r < 0 .or. r == proc_rank) cycle
+            if (any(ib_nbrs(1:n_ib_nbrs) == r)) cycle
+            ! insert in ascending order
+            j = n_ib_nbrs
+            do while (j > 0)
+                if (ib_nbrs(j) < r) exit
+                ib_nbrs(j + 1) = ib_nbrs(j)
+                j = j - 1
+            end do
+            ib_nbrs(j + 1) = r
+            n_ib_nbrs = n_ib_nbrs + 1
+        end do
+
+        ! an owner never receives more records than it owns, and a broadcast never carries more than its sender owns
+        max_recs = min(size(patch_ib), num_local_ibs_max)
+        allocate (ib_send_counts(n_ib_nbrs), ib_reqs(2*n_ib_nbrs), ib_stats(MPI_STATUS_SIZE, 2*n_ib_nbrs))
+        allocate (ib_send_bufs(ib_rec_len*max_recs, max(n_ib_nbrs, 1)), ib_recv_bufs(ib_rec_len*max_recs, max(n_ib_nbrs, 1)))
+#endif
+
+    end subroutine s_setup_ib_force_comm
+
+    !> Position of rank in ib_nbrs
+    function f_ib_nbr_slot(rank) result(slot)
+
+        integer, intent(in) :: rank
+        integer             :: slot
+
+        do slot = 1, n_ib_nbrs
+            if (ib_nbrs(slot) == rank) return
+        end do
+        call s_mpi_abort('IB owner is not a neighborhood rank')
+
+    end function f_ib_nbr_slot
+
+    !> Reduces forces and torques so every rank holding an IB ends with bit-identical values. Each IB has one owner, the rank whose
+    !! subdomain holds its centroid (patch_ib%owner_rank, stamped at handoff). Phase 1: each rank sends its nonzero partials to the
+    !! owner, which adds them to its own partial in ascending source-rank order once all have arrived. Phase 2: each owner sends its
+    !! totals to every neighborhood rank, which overwrite their partials. One nonblocking message per neighbor per phase.
     subroutine s_communicate_ib_forces(forces, torques)
 
         real(wp), dimension(num_ibs, 3), intent(inout) :: forces, torques
 
 #ifdef MFC_MPI
-        integer                       :: i, j, k, l, pack_pos, unpack_pos, buf_size, ierr
-        integer                       :: send_neighbor, recv_neighbor, recv_count, tag
-        character(len=1), allocatable :: ib_force_send_buf(:), ib_force_recv_buf(:)
+        integer :: i, j, s, r, slot, pos, nvals, ierr
 
-        if (num_procs == 1) return
+        if (num_procs == 1 .or. n_ib_nbrs == 0) return
 
-        buf_size = storage_size(0)/8 + (storage_size(0)/8 + 6*storage_size(0._wp)/8)*size(patch_ib)
-        allocate (ib_force_send_buf(buf_size), ib_force_recv_buf(buf_size))
+        ! Phase 1: send each partial to the owner of its IB
+        do s = 1, n_ib_nbrs
+            call MPI_IRECV(ib_recv_bufs(:,s), size(ib_recv_bufs, 1), mpi_p, ib_nbrs(s), 610, MPI_COMM_WORLD, ib_reqs(s), ierr)
+        end do
 
-        ! Accumulation phase: propagate contributions toward the high-index corner.
-        #:for X, ID in [('x', 1), ('y', 2), ('z', 3)]
-            if (num_dims >= ${ID}$) then
-                send_neighbor = merge(bc_${X}$%end, MPI_PROC_NULL, bc_${X}$%end >= 0)
-                recv_neighbor = merge(bc_${X}$%beg, MPI_PROC_NULL, bc_${X}$%beg >= 0)
+        ib_send_counts = 0
+        do i = 1, num_ibs
+            if (patch_ib(i)%owner_rank == proc_rank) cycle
+            if (all(forces(i,:) == 0._wp) .and. all(torques(i,:) == 0._wp)) cycle
+            slot = f_ib_nbr_slot(patch_ib(i)%owner_rank)
+            pos = ib_rec_len*ib_send_counts(slot)
+            ib_send_bufs(pos + 1, slot) = real(patch_ib(i)%gbl_patch_id, wp)
+            ib_send_bufs(pos + 2:pos + 4,slot) = forces(i,1:3)
+            ib_send_bufs(pos + 5:pos + 7,slot) = torques(i,1:3)
+            ib_send_counts(slot) = ib_send_counts(slot) + 1
+        end do
 
-                recv_forces_snap = 0._wp
-                recv_torques_snap = 0._wp
-                $:GPU_UPDATE(device='[recv_forces_snap, recv_torques_snap]')
-                tag = 300
+        ! every neighbor gets a message, possibly empty, so every posted receive completes
+        do s = 1, n_ib_nbrs
+            call MPI_ISEND(ib_send_bufs(:,s), ib_rec_len*ib_send_counts(s), mpi_p, ib_nbrs(s), 610, MPI_COMM_WORLD, &
+                           & ib_reqs(n_ib_nbrs + s), ierr)
+        end do
+        call MPI_WAITALL(2*n_ib_nbrs, ib_reqs, ib_stats, ierr)
 
-                do k = 1, min(2*ib_neighborhood_radius, num_procs_${X}$ - 1)
-                    ! send forces to +${X}$ neighbor; receive from -${X}$ neighbor. Add received values then
-                    pack_pos = 0
-                    if (num_ibs > 0) then
-                        $:GPU_PARALLEL_LOOP(private='[i, l]', copyin='[forces, torques]')
-                        do i = 1, num_ibs
-                            send_ids(i) = patch_ib(i)%gbl_patch_id
-                            do l = 1, 3
-                                send_ft(l, i) = forces(i, l)
-                                send_ft(l + 3, i) = torques(i, l)
-                            end do
-                        end do
-                        $:END_GPU_PARALLEL_LOOP()
-                    end if
-                    $:GPU_UPDATE(host='[send_ids, send_ft]')
-                    call MPI_PACK(num_ibs, 1, MPI_INTEGER, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
-                    call MPI_PACK(send_ids, num_ibs, MPI_INTEGER, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
-                    call MPI_PACK(send_ft, 6*num_ibs, mpi_p, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
-                    call MPI_SENDRECV(ib_force_send_buf, pack_pos, MPI_PACKED, send_neighbor, tag, ib_force_recv_buf, buf_size, &
-                                      & MPI_PACKED, recv_neighbor, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE, ierr)
+        ! owner sum: own partial first, then each neighbor in ascending rank order, whatever order the messages arrived in
+        do s = 1, n_ib_nbrs
+            call MPI_GET_COUNT(ib_stats(:,s), mpi_p, nvals, ierr)
+            do r = 0, nvals/ib_rec_len - 1
+                pos = ib_rec_len*r
+                call s_get_neighborhood_idx(nint(ib_recv_bufs(pos + 1, s)), j)
+                @:ASSERT(j > 0, 'IB force contribution for an IB this rank does not hold')
+                @:ASSERT(patch_ib(j)%owner_rank == proc_rank, 'IB force contribution for an IB this rank does not own')
+                forces(j,1:3) = forces(j,1:3) + ib_recv_bufs(pos + 2:pos + 4,s)
+                torques(j,1:3) = torques(j,1:3) + ib_recv_bufs(pos + 5:pos + 7,s)
+            end do
+        end do
 
-                    if (recv_neighbor /= MPI_PROC_NULL) then
-                        unpack_pos = 0
-                        call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_count, 1, MPI_INTEGER, MPI_COMM_WORLD, ierr)
-                        call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_ids, recv_count, MPI_INTEGER, &
-                                        & MPI_COMM_WORLD, ierr)
-                        call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_ft, 6*recv_count, mpi_p, MPI_COMM_WORLD, ierr)
-                        $:GPU_UPDATE(device='[recv_ids(1:recv_count), recv_ft(:, 1:recv_count)]')
-                        if (num_ibs > 0) then
-                            $:GPU_PARALLEL_LOOP(private='[i, j, l]', copy='[forces, torques]')
-                            do i = 1, recv_count
-                                call s_get_neighborhood_idx(recv_ids(i), j)
-                                if (j > 0) then
-                                    ! add forces and subtract recv_snap prevent double-counting
-                                    do l = 1, 3
-                                        forces(j, l) = forces(j, l) + recv_ft(l, i) - recv_forces_snap(j, l)
-                                        torques(j, l) = torques(j, l) + recv_ft(l + 3, i) - recv_torques_snap(j, l)
-                                        recv_forces_snap(j, l) = recv_ft(l, i)
-                                        recv_torques_snap(j, l) = recv_ft(l + 3, i)
-                                    end do
-                                end if
-                            end do
-                            $:END_GPU_PARALLEL_LOOP()
-                        end if
-                    end if
-                    tag = tag + 2
-                end do
-            end if
-        #:endfor
+        ! Phase 2: each owner sends its totals to every neighbor
+        do s = 1, n_ib_nbrs
+            call MPI_IRECV(ib_recv_bufs(:,s), size(ib_recv_bufs, 1), mpi_p, ib_nbrs(s), 611, MPI_COMM_WORLD, ib_reqs(s), ierr)
+        end do
 
-        ! Send final sums back to neighbors in -X direction
-        #:for X, ID in [('x', 1), ('y', 2), ('z', 3)]
-            if (num_dims >= ${ID}$) then
-                send_neighbor = merge(bc_${X}$%beg, MPI_PROC_NULL, bc_${X}$%beg >= 0)
-                recv_neighbor = merge(bc_${X}$%end, MPI_PROC_NULL, bc_${X}$%end >= 0)
+        do i = 1, num_local_ibs
+            j = local_ib_patch_ids(i)
+            pos = ib_rec_len*(i - 1)
+            ib_send_bufs(pos + 1, 1) = real(patch_ib(j)%gbl_patch_id, wp)
+            ib_send_bufs(pos + 2:pos + 4,1) = forces(j,1:3)
+            ib_send_bufs(pos + 5:pos + 7,1) = torques(j,1:3)
+        end do
 
-                do k = 1, min(2*ib_neighborhood_radius, num_procs_${X}$ - 1)
-                    pack_pos = 0
-                    if (num_ibs > 0) then
-                        $:GPU_PARALLEL_LOOP(private='[i, l]', copyin='[forces, torques]')
-                        do i = 1, num_ibs
-                            send_ids(i) = patch_ib(i)%gbl_patch_id
-                            do l = 1, 3
-                                send_ft(l, i) = forces(i, l)
-                                send_ft(l + 3, i) = torques(i, l)
-                            end do
-                        end do
-                        $:END_GPU_PARALLEL_LOOP()
-                    end if
-                    $:GPU_UPDATE(host='[send_ids, send_ft]')
-                    call MPI_PACK(num_ibs, 1, MPI_INTEGER, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
-                    call MPI_PACK(send_ids, num_ibs, MPI_INTEGER, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
-                    call MPI_PACK(send_ft, 6*num_ibs, mpi_p, ib_force_send_buf, buf_size, pack_pos, MPI_COMM_WORLD, ierr)
-                    call MPI_SENDRECV(ib_force_send_buf, pack_pos, MPI_PACKED, send_neighbor, tag, ib_force_recv_buf, buf_size, &
-                                      & MPI_PACKED, recv_neighbor, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE, ierr)
-                    if (recv_neighbor /= MPI_PROC_NULL) then
-                        unpack_pos = 0
-                        call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_count, 1, MPI_INTEGER, MPI_COMM_WORLD, ierr)
-                        call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_ids, recv_count, MPI_INTEGER, &
-                                        & MPI_COMM_WORLD, ierr)
-                        call MPI_UNPACK(ib_force_recv_buf, buf_size, unpack_pos, recv_ft, 6*recv_count, mpi_p, MPI_COMM_WORLD, ierr)
-                        $:GPU_UPDATE(device='[recv_ids(1:recv_count), recv_ft(:, 1:recv_count)]')
-                        if (num_ibs > 0) then
-                            $:GPU_PARALLEL_LOOP(private='[i, j, l]', copy='[forces, torques]')
-                            do i = 1, recv_count
-                                call s_get_neighborhood_idx(recv_ids(i), j)
-                                if (j > 0) then
-                                    do l = 1, 3
-                                        forces(j, l) = recv_ft(l, i)
-                                        torques(j, l) = recv_ft(l + 3, i)
-                                    end do
-                                end if
-                            end do
-                            $:END_GPU_PARALLEL_LOOP()
-                        end if
-                    end if
-                    tag = tag + 2
-                end do
-            end if
-        #:endfor
+        do s = 1, n_ib_nbrs
+            call MPI_ISEND(ib_send_bufs(:,1), ib_rec_len*num_local_ibs, mpi_p, ib_nbrs(s), 611, MPI_COMM_WORLD, &
+                           & ib_reqs(n_ib_nbrs + s), ierr)
+        end do
+        call MPI_WAITALL(2*n_ib_nbrs, ib_reqs, ib_stats, ierr)
+
+        ! holders take the owner's bits
+        do s = 1, n_ib_nbrs
+            call MPI_GET_COUNT(ib_stats(:,s), mpi_p, nvals, ierr)
+            do r = 0, nvals/ib_rec_len - 1
+                pos = ib_rec_len*r
+                call s_get_neighborhood_idx(nint(ib_recv_bufs(pos + 1, s)), j)
+                if (j <= 0) cycle
+                @:ASSERT(patch_ib(j)%owner_rank == ib_nbrs(s), 'IB force total from a rank that does not own the IB')
+                forces(j,1:3) = ib_recv_bufs(pos + 2:pos + 4,s)
+                torques(j,1:3) = ib_recv_bufs(pos + 5:pos + 7,s)
+            end do
+        end do
 #endif
 
     end subroutine s_communicate_ib_forces
 
+    !> @brief Swaps ownership of IBs and passes ownership of IBs to neighbor processors
     subroutine s_handoff_ib_ownership()
 
-        integer                               :: i, j, k, output_idx, local_output_idx
-        integer                               :: old_num_local_ibs
-        integer                               :: new_count, recv_count
-        integer                               :: pack_pos, unpack_pos, buf_size, patch_bytes
-        integer                               :: send_neighbor, recv_neighbor, ierr
-        integer                               :: dx, dy, dz, tag, nbr_idx, nreqs
-        real(wp), dimension(3)                :: centroid
-        logical                               :: is_new
-        type(ib_patch_parameters)             :: tmp_patch
-        integer, dimension(num_local_ibs_max) :: local_ib_idx_old
+        integer                                         :: i, j, k, output_idx, local_output_idx
+        integer                                         :: old_num_local_ibs, num_ibs_old, num_ibs_pre
+        integer                                         :: new_count, recv_count
+        integer                                         :: pack_pos, unpack_pos, buf_size, patch_bytes
+        integer                                         :: send_neighbor, recv_neighbor, ierr
+        integer                                         :: dx, dy, dz, tag, nbr_idx, nreqs
+        real(wp), dimension(3)                          :: centroid
+        logical                                         :: is_new
+        type(ib_patch_parameters)                       :: tmp_patch
+        integer, dimension(num_local_ibs_max)           :: local_ib_idx_old
+        integer, dimension(num_ib_patches_max_namelist) :: old_to_new  ! old patch_ib slot -> slot after compaction
         ! (2R+1)^num_dims - 1 neighbors in the radius-R neighborhood; each gets its own recv buffer
         integer                       :: max_nbrs
         character(len=1), allocatable :: send_buf(:), recv_bufs(:,:)
         integer, allocatable          :: requests(:), recv_neighbor_list(:)
 
 #ifdef MFC_MPI
+        call nvtxStartRange("HANDOFF-IB-OWNERSHIP")
+
         if (num_procs > 1) then
             ! save a copy of the local IB's global indices to cross-reference for later.
             local_ib_idx_old = 0
@@ -2043,15 +2080,18 @@ contains
             $:GPU_UPDATE(host='[patch_ib]')
 
             ! delete any particles that no longer need to be tracked and coalesce the array
+            num_ibs_old = num_ibs
             output_idx = 0
             local_output_idx = 0
             do i = 1, num_ibs
+                old_to_new(i) = -1
                 centroid = [patch_ib(i)%x_centroid, patch_ib(i)%y_centroid, 0._wp]
                 if (num_dims == 3) centroid(3) = patch_ib(i)%z_centroid
 
                 ! delete if not in neighborhood
                 if (f_neighborhood_ranks_own_location(centroid)) then
                     output_idx = output_idx + 1
+                    old_to_new(i) = output_idx
                     if (i /= output_idx) then
                         patch_ib(output_idx) = patch_ib(i)
                     end if
@@ -2062,14 +2102,15 @@ contains
                         @:PROHIBIT(local_output_idx > num_local_ibs_max, &
                                    & "Too many IBs on a single processor rank. Modify case file or increase limit of num_local_ibs_max to resolve.")
                         local_ib_patch_ids(local_output_idx) = output_idx
+                        patch_ib(output_idx)%owner_rank = proc_rank
                     end if
                 end if
             end do
             num_ibs = output_idx
             num_local_ibs = local_output_idx
-            ! num_ibs shrinks here, so refresh it with patch_ib: s_update_ib_lookup scatters over it on the device
+            ! num_ibs shrinks here, so refresh it with patch_ib: s_get_neighborhood_idx bounds its search by it on the device
             $:GPU_UPDATE(device='[patch_ib, num_ibs]')
-            call s_update_ib_lookup()
+            call s_compact_ib_lookup(old_to_new, num_ibs_old)
 
             ! Broadcast newly-owned patches to all neighborhood neighbors
             patch_bytes = storage_size(tmp_patch)/8
@@ -2144,6 +2185,7 @@ contains
             call MPI_WAITALL(nreqs, requests, MPI_STATUSES_IGNORE, ierr)
 
             ! Unpack all received buffers
+            num_ibs_pre = num_ibs
             do nbr_idx = 1, max_nbrs
                 if (recv_neighbor_list(nbr_idx) == MPI_PROC_NULL) cycle
                 unpack_pos = 0
@@ -2151,52 +2193,46 @@ contains
                 do i = 1, recv_count
                     call MPI_UNPACK(recv_bufs(:,nbr_idx), buf_size, unpack_pos, tmp_patch, patch_bytes, MPI_BYTE, MPI_COMM_WORLD, &
                                     & ierr)
-                    call s_get_neighborhood_idx(tmp_patch%gbl_patch_id, j)
+                    call s_get_neighborhood_idx(tmp_patch%gbl_patch_id, j, num_ibs_pre)
                     if (j < 0) then
                         num_ibs = num_ibs + 1
                         @:ASSERT(num_ibs <= size(patch_ib), 'patch_ib overflow in neighborhood handoff')
                         patch_ib(num_ibs) = tmp_patch
+                    else
+                        ! an IB we already hold changed owner: record the new owner, keep our own copy of its state
+                        patch_ib(j)%owner_rank = tmp_patch%owner_rank
                     end if
                 end do
             end do
 
             deallocate (send_buf, recv_bufs, requests, recv_neighbor_list)
             $:GPU_UPDATE(device='[patch_ib, num_ibs]')
-            call s_update_ib_lookup()
+            call s_merge_ib_lookup(num_ibs_pre)
         end if
+
+        call nvtxEndRange()
 #endif
 
     end subroutine s_handoff_ib_ownership
 
-    subroutine s_get_neighborhood_idx(gbl_idx, neighborhood_idx)
-
-        $:GPU_ROUTINE(parallelism='[seq]')
-
-        integer, intent(in)  :: gbl_idx
-        integer, intent(out) :: neighborhood_idx
-        integer              :: i
-
-        neighborhood_idx = ib_gbl_idx_lookup(gbl_idx)
-
-    end subroutine s_get_neighborhood_idx
-
-    !> Abort if any immersed boundary marks no cell anywhere. The owning rank is chosen by the patch centroid, so an STL placed with
-    !! model_translate while its centroid is left elsewhere is handed to ranks that do not hold it, and it vanishes silently. One
-    !! pass over the cells and one reduction, whatever the number of patches.
+    !> Abort if any namelist immersed boundary marks no cell anywhere. The owning rank is chosen by the patch centroid, so an STL
+    !! placed with model_translate while its centroid is left elsewhere is handed to ranks that do not hold it, and it vanishes
+    !! silently. Cloud particles are skipped: a particle's centroid is its body, so it cannot vanish this way.
     impure subroutine s_check_every_patch_marked()
 
         integer(kind=8), allocatable :: cnt_loc(:), cnt_glb(:)
-        integer                      :: gid, i, j, k
+        integer                      :: gid, i, j, k, num_checked
 
-        if (num_gbl_ibs == 0) return
-        allocate (cnt_loc(num_gbl_ibs), cnt_glb(num_gbl_ibs))
+        num_checked = num_gbl_ibs - sum(particle_cloud(1:num_particle_clouds)%num_particles)
+        if (num_checked <= 0) return
+        allocate (cnt_loc(num_checked), cnt_glb(num_checked))
         cnt_loc = 0_8
         do k = 0, p
             do j = 0, n
                 do i = 0, m
                     if (ib_markers%sf(i, j, k) /= 0) then
                         call s_decode_patch_periodicity(ib_markers%sf(i, j, k), gid)
-                        cnt_loc(gid) = cnt_loc(gid) + 1_8
+                        if (gid <= num_checked) cnt_loc(gid) = cnt_loc(gid) + 1_8
                     end if
                 end do
             end do
@@ -2209,23 +2245,6 @@ contains
         deallocate (cnt_loc, cnt_glb)
 
     end subroutine s_check_every_patch_marked
-
-    subroutine s_update_ib_lookup()
-
-        integer :: i
-
-        ib_gbl_idx_lookup = -1
-        $:GPU_UPDATE(device='[ib_gbl_idx_lookup]')
-
-        $:GPU_PARALLEL_LOOP(private='[i]')
-        do i = 1, num_ibs
-            ib_gbl_idx_lookup(patch_ib(i)%gbl_patch_id) = i
-        end do
-        $:END_GPU_PARALLEL_LOOP()
-
-        $:GPU_UPDATE(host='[ib_gbl_idx_lookup]')
-
-    end subroutine s_update_ib_lookup
 
     !> Compute the deepest-level marker-field bounds into the module mkr_lo/mkr_hi. Encloses BOTH the coarse block (m/n/p with
     !! ghosts) AND the deepest fine block a rank can own (level amr_max_level). A level-l block has amr_ref_ratio**l * base_ext - 1
@@ -2557,7 +2576,6 @@ contains
         if (associated(ib_markers_fine%sf)) then
             @:DEALLOCATE(ib_markers_fine%sf)
         end if
-        @:DEALLOCATE(ib_gbl_idx_lookup)
         do i = 1, num_ib_airfoils_max
             if (allocated(ib_airfoil_grids(i)%upper)) then
                 @:DEALLOCATE(ib_airfoil_grids(i)%upper)
@@ -2585,10 +2603,7 @@ contains
         end if
         if (collision_model > 0) call s_finalize_collisions_module()
 #ifdef MFC_MPI
-        if (num_procs > 1) then
-            @:DEALLOCATE(send_ids, send_ft)
-            @:DEALLOCATE(recv_forces_snap, recv_torques_snap, recv_ids, recv_ft)
-        end if
+        if (allocated(ib_nbrs)) deallocate (ib_nbrs, ib_send_counts, ib_reqs, ib_stats, ib_send_bufs, ib_recv_bufs)
 #endif
 
     end subroutine s_finalize_ibm_module
@@ -2713,40 +2728,51 @@ contains
     !! 270:106134, 2024) trace the same cold-wall, large-gradient regime in ablation to ghost-cell mass conservation error
     !! that surfaces as spurious blowing, and resolve it only by moving to a flux-based cut-cell boundary -- a different
     !! discretization from this one, not a tuning of it.
-    subroutine s_blend_ghost_state(T_IP, T_s, Ys_IP, Ys_s, T_g, Ys_g)
+    subroutine s_blend_ghost_temperature(T_IP, T_s, T_lo, T_hi, T_g)
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
-        real(wp), intent(in)  :: T_IP, T_s
-        real(wp), intent(in)  :: Ys_IP(num_species), Ys_s(num_species)
-        real(wp), intent(out) :: T_g, Ys_g(num_species)
-        ! Stop short of the admissibility boundary rather than landing exactly on it, so that a mass fraction driven to the
-        ! limit stays strictly positive instead of becoming a hard zero that roundoff can push negative.
+        real(wp), intent(in)  :: T_IP, T_s, T_lo, T_hi
+        real(wp), intent(out) :: T_g
+        ! Stop short of the bound so roundoff cannot cross it.
         real(wp), parameter :: blend_safety = 0.9_wp
-        real(wp)            :: theta_T, theta_Y
-        integer             :: k
+        real(wp)            :: theta_T
 
-        ! Temperature is held inside the window the thermodynamic model is fitted over, not merely above zero. Positivity alone
-        ! is too weak: a 300 K wall in 1500 K gas admits theta = 0.225, and the 30 K ghost temperature that follows is positive
-        ! but evaluates the NASA polynomials far below their T_low. Both ends are constrained, since a hot wall extrapolates
-        ! the other way. T_s itself can sit outside the window only if the case prescribed a Twall there; theta = 0 then hands
-        ! back exactly that value rather than quietly substituting a different wall temperature.
+        ! Largest theta <= 1 keeping T_g in [T_lo, T_hi]: the NASA fit range with chemistry, positivity without.
+        ! The bounds are compared before dividing, so T_hi = huge() cannot overflow.
         theta_T = 1._wp
-        if (T_s < T_IP) theta_T = min(theta_T, blend_safety*(T_s - T_surface_min)/(T_IP - T_s))
-        if (T_s > T_IP) theta_T = min(theta_T, blend_safety*(T_surface_max - T_s)/(T_s - T_IP))
+        if (T_s < T_IP .and. blend_safety*(T_s - T_lo) < T_IP - T_s) then
+            theta_T = blend_safety*(T_s - T_lo)/(T_IP - T_s)
+        else if (T_s > T_IP .and. blend_safety*(T_hi - T_s) < T_s - T_IP) then
+            theta_T = blend_safety*(T_hi - T_s)/(T_s - T_IP)
+        end if
         theta_T = max(theta_T, 0._wp)
+
+        T_g = T_s + theta_T*(T_s - T_IP)
+
+    end subroutine s_blend_ghost_temperature
+
+    !> Species half of the ghost-state blend: one theta shared by every species (see s_blend_ghost_temperature).
+    subroutine s_blend_ghost_species(Ys_IP, Ys_s, Ys_g)
+
+        $:GPU_ROUTINE(parallelism='[seq]')
+
+        real(wp), intent(in)  :: Ys_IP(num_species), Ys_s(num_species)
+        real(wp), intent(out) :: Ys_g(num_species)
+        real(wp), parameter   :: blend_safety = 0.9_wp
+        real(wp)              :: theta_Y
+        integer               :: k
 
         theta_Y = 1._wp
         do k = 1, num_species
             if (Ys_s(k) < Ys_IP(k)) theta_Y = min(theta_Y, blend_safety*Ys_s(k)/(Ys_IP(k) - Ys_s(k)))
         end do
 
-        T_g = T_s + theta_T*(T_s - T_IP)
         do k = 1, num_species
             Ys_g(k) = Ys_s(k) + theta_Y*(Ys_s(k) - Ys_IP(k))
         end do
 
-    end subroutine s_blend_ghost_state
+    end subroutine s_blend_ghost_species
 
     !> Index of the most abundant species, i.e. the balance the sum constraint displaces.
     !!
