@@ -427,7 +427,8 @@ contains
         end if
         ! slot coordinate arrays are sized to max_f, which derives from the rank count unless amr_max_grid_size is pinned
         if (any(merge((amr_ref_ratio**lvl)*(reg(4:6) - reg(1:3) + 1) - 1 > max_f, .false., amr_dim))) then
-            call s_mpi_abort('amr restart: block exceeds the rank-count cap; pin amr_max_grid_size')
+            call s_mpi_abort('amr restart: a block exceeds this rank count''s block cap; restart on no more ranks ' &
+                             & // 'than wrote the checkpoint, or set amr_max_grid_size in both runs')
         end if
         amr_region_lo_all(:,k) = reg(1:3); amr_region_hi_all(:,k) = reg(4:6)
         amr_block_level(k) = lvl
