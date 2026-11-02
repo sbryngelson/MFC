@@ -99,6 +99,7 @@
       "m_amr_stage",
       "m_amr_cluster",
       "m_amr_regrid",
+      "m_amr_nest",
       "m_amr_restart",
       "m_amr_restart_io",
       "m_amr_registers",

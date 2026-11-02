@@ -724,6 +724,7 @@ contains
 
         type(scalar_field), dimension(sys_size), intent(inout) :: coarse_tgt
         integer                                                :: rr, o1, o2, o3, owner, r, idx, boxsz, maxsz, nsrc, ierr
+        integer                                                :: h_loc  !< plain scalar for device routines (NVHPC -Minline)
         integer                                                :: rlo(3), rhi(3), ilo(3), ihi(3), bl(3), bh(3)
         real(wp), allocatable                                  :: sbuf(:,:), rbuf(:)
         integer, allocatable                                   :: reqs(:)
@@ -744,6 +745,7 @@ contains
         call s_amr_region_box(amr_cur, rlo, rhi)
         owner = amr_block_owner(amr_cur)
         o1 = amr_sidx(1); o2 = amr_sidx(2); o3 = amr_sidx(3)
+        h_loc = amr_loc_of(amr_cur)
         maxsz = sys_size*product(rhi - rlo + 1)
 
         ! block set changed: rebuild the cached overlap-rank lists (local, replicated)
@@ -755,7 +757,7 @@ contains
             call s_amr_box_isect(rlo, rhi, ilo, ihi, bl, bh)
             ! owner-local covered cells: restrict fine(device) -> coarse(device) touching only those cells; never push the
             ! whole coarse array to the device (stale host copy would clobber device-advanced cells)
-            if (all(bl <= bh)) call s_amr_restrict_device_sf(coarse_tgt, amr_loc_of(amr_cur), bl, bh, rlo, rr, o1, o2, o3)
+            if (all(bl <= bh)) call s_amr_restrict_device_sf(coarse_tgt, h_loc, bl, bh, rlo, rr, o1, o2, o3)
             ! cached destination list (every listed rank's interior overlaps the region)
             nsrc = 0
             do idx = 1, amr_ovl_scatter_n(amr_cur)
@@ -773,7 +775,7 @@ contains
                     boxsz = sys_size*product(bh - bl + 1)
                     ! pack this destination's slice on the device: restrict straight into the wire buffer (same child-sum order
                     ! as the overwrite above)
-                    call s_amr_restrict_device_wire(sbuf(1:boxsz,nsrc), amr_loc_of(amr_cur), bl, bh, rlo, rr)
+                    call s_amr_restrict_device_wire(sbuf(1:boxsz,nsrc), h_loc, bl, bh, rlo, rr)
 #ifdef MFC_MPI
                     call MPI_ISEND(sbuf(1, nsrc), boxsz, mpi_p, r, amr_cur, MPI_COMM_WORLD, reqs(nsrc), ierr)
 #endif
@@ -811,7 +813,7 @@ contains
         integer               :: pblk, rr, cowner, powner, boxsz, ierr
         integer               :: plo(3), phi(3)
         real(wp), allocatable :: xbuf(:)
-        integer               :: h_plo_1, h_plo_2, h_plo_3  !< plain scalar for device routines (NVHPC -Minline)
+        integer               :: h_plo_1, h_plo_2, h_plo_3, h_ploc, h_cloc  !< plain scalars for device routines (NVHPC -Minline)
 
         pblk = f_amr_parent_block(amr_cur)
         cowner = amr_block_owner(amr_cur); powner = amr_block_owner(pblk)
@@ -822,10 +824,11 @@ contains
         if (any(plo > phi)) return  ! empty
 
         rr = amr_ref_ratio
+        h_ploc = amr_loc_of(pblk); h_cloc = amr_loc_of(amr_cur)
 
         if (powner == cowner) then
             ! co-located: fold straight into the parent
-            call s_amr_restrict_device_st(amr_loc_of(pblk), amr_loc_of(amr_cur), plo, phi, plo, rr, 0, 0, 0)
+            call s_amr_restrict_device_st(h_ploc, h_cloc, plo, phi, plo, rr, 0, 0, 0)
             return
         end if
 
@@ -835,7 +838,7 @@ contains
         boxsz = sys_size*product(phi - plo + 1)
         allocate (xbuf(boxsz))
         if (proc_rank == cowner) then
-            call s_amr_restrict_device_wire(xbuf, amr_loc_of(amr_cur), plo, phi, plo, rr)
+            call s_amr_restrict_device_wire(xbuf, h_cloc, plo, phi, plo, rr)
             call MPI_SEND(xbuf, boxsz, mpi_p, powner, amr_cur, MPI_COMM_WORLD, ierr)
         else
             call MPI_RECV(xbuf, boxsz, mpi_p, cowner, amr_cur, MPI_COMM_WORLD, MPI_STATUS_IGNORE, ierr)
@@ -843,7 +846,7 @@ contains
             h_plo_1 = plo(1)
             h_plo_2 = plo(2)
             h_plo_3 = plo(3)
-            call s_amr_pack_unpack_block_st(amr_loc_of(pblk), h_plo_1, h_plo_2, h_plo_3, phi(1) - h_plo_1, phi(2) - h_plo_2, &
+            call s_amr_pack_unpack_block_st(h_ploc, h_plo_1, h_plo_2, h_plo_3, phi(1) - h_plo_1, phi(2) - h_plo_2, &
                                             & phi(3) - h_plo_3, xbuf, .false.)
         end if
         deallocate (xbuf)
@@ -920,7 +923,7 @@ contains
     impure subroutine s_amr_restrict_parent_wave(lev)
 
         integer, intent(in) :: lev
-        integer             :: h_bl_1, h_bl_2, h_bl_3  !< plain scalar for device routines (NVHPC -Minline)
+        integer             :: h_bl_1, h_bl_2, h_bl_3, h_ploc, h_cloc  !< plain scalars for device routines (NVHPC -Minline)
 
 #ifdef MFC_MPI
         integer :: k, pblk, cowner, powner, rr, idx, lo, hi, kk
@@ -942,7 +945,8 @@ contains
             call s_amr_parent_foot(k, pblk, plo, phi)
             if (any(plo > phi)) cycle
             if (cowner == powner) then
-                call s_amr_restrict_device_st(amr_loc_of(pblk), amr_loc_of(k), plo, phi, plo, rr, 0, 0, 0)
+                h_ploc = amr_loc_of(pblk); h_cloc = amr_loc_of(k)
+                call s_amr_restrict_device_st(h_ploc, h_cloc, plo, phi, plo, rr, 0, 0, 0)
                 cycle
             end if
             call s_amr_wave_add(amr_wsend, powner, k, plo, phi, sys_size*product(phi - plo + 1))
@@ -965,8 +969,8 @@ contains
         call s_amr_wave_post(amr_wave, amr_wrecv, amr_fw_rq, amr_fw_dev)
         do idx = 1, amr_wsend%nx
             call s_amr_wave_slice(amr_wsend, idx, lo, hi)
-            call s_amr_restrict_device_wire(amr_fw_sq(lo:hi), amr_loc_of(amr_wsend%blk(idx)), amr_wsend%bl(:,idx), amr_wsend%bh(:, &
-                                            & idx), amr_wsend%bl(:,idx), rr)
+            bl = amr_wsend%bl(:,idx); bh = amr_wsend%bh(:,idx); h_cloc = amr_loc_of(amr_wsend%blk(idx))
+            call s_amr_restrict_device_wire(amr_fw_sq(lo:hi), h_cloc, bl, bh, bl, rr)
         end do
         call s_amr_wave_send(amr_wave, amr_wsend, amr_fw_sq, amr_fw_dev)
         call s_amr_wave_wait(amr_wave)
@@ -976,8 +980,9 @@ contains
             h_bl_1 = bl(1)
             h_bl_2 = bl(2)
             h_bl_3 = bl(3)
-            call s_amr_pack_unpack_block_st(amr_loc_of(amr_parent_blk(amr_wrecv%blk(idx))), h_bl_1, h_bl_2, h_bl_3, &
-                                            & bh(1) - h_bl_1, bh(2) - h_bl_2, bh(3) - h_bl_3, amr_fw_rq(lo:hi), .false.)
+            h_ploc = amr_loc_of(amr_parent_blk(amr_wrecv%blk(idx)))
+            call s_amr_pack_unpack_block_st(h_ploc, h_bl_1, h_bl_2, h_bl_3, bh(1) - h_bl_1, bh(2) - h_bl_2, bh(3) - h_bl_3, &
+                                            & amr_fw_rq(lo:hi), .false.)
         end do
 #endif
 
