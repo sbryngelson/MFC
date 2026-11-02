@@ -185,16 +185,15 @@ contains
         real(stp), dimension(:,:,:,:,:), intent(inout) :: pb_in, mv_in
         real(wp), dimension(:,:,:,:,:), intent(inout) :: rhs_pb, rhs_mv
         integer :: i, j, g, h, ibm, nb
-        integer, allocatable :: ord(:), my(:)
+        integer, allocatable :: my(:)
         logical, allocatable :: done(:)
         logical :: last_batch
         integer :: h_bat_blk_ibm  !< plain scalars for device routines (NVHPC -Minline)
         real(wp) :: h_coefs_1, h_coefs_2, h_coefs_3, h_coefs_4, h_merge_1_wp_dt_igr
 
         call s_amr_refresh_my_blocks()
-        allocate (done(amr_n_my), ord(amr_n_my)); done = .false.
-        call s_amr_batch_order(ord)
-        my = amr_my_blk(ord)
+        allocate (done(amr_n_my)); done = .false.
+        my = amr_my_blk(1:amr_n_my)
         do i = 1, amr_n_my
             if (done(i)) cycle
             done(i) = .true.
@@ -203,7 +202,7 @@ contains
             if (amr_adv_level > 0 .and. amr_block_level(g) /= amr_adv_level) cycle  ! subcycling: one level at a time
             amr_bat_n = 1; amr_bat_blk(1) = g
             do j = i + 1, amr_n_my
-                if (amr_bat_n == amr_bat_lim*amr_bat_cols) exit
+                if (amr_bat_n == amr_bat_lim) exit
                 h = my(j)
                 if (done(j) .or. amr_block_level(h) /= amr_block_level(g)) cycle
                 ! padded membership: no larger than the leader in any dim, and the padding wastes <= amr_bat_pad of its cells
@@ -286,51 +285,19 @@ contains
 
     end subroutine s_amr_fine_stage_advance_batched
 
-    !> The batch's slab layout (leader extents amr_bat_ext): stacks of up to amr_bat_lim members along the last active dim, stride
-    !! amr_bat_w, and under amr_bat_cols > 1 the stacks side by side along the next dim, stride amr_bat_w2. amr_bat_ns slots fill
-    !! the stacks in use (a partial last stack is padded by repeating the last member, s_amr_br_load_batch), so the slab is a full
-    !! rectangle; a single stack is the plain 1D layout.
+    !> The batch's slab layout (leader extents amr_bat_ext): the members stacked along the last active dim, stride amr_bat_w.
     impure subroutine s_amr_bat_layout()
 
-        integer :: ibm, nz
+        integer :: ibm
 
         amr_bat_sd = num_dims
         amr_bat_w = amr_bat_ext(amr_bat_sd) + 2*buff_size + 1
-        nz = min(amr_bat_n, amr_bat_lim)
-        amr_bat_sd2 = 0; amr_bat_w2 = 0
-        if (amr_bat_n > nz) then
-            amr_bat_sd2 = num_dims - 1
-            amr_bat_w2 = amr_bat_ext(amr_bat_sd2) + 2*buff_size + 1
-        end if
-        amr_bat_ns = nz*((amr_bat_n + nz - 1)/nz)
-        do ibm = 1, amr_bat_ns
+        do ibm = 1, amr_bat_n
             amr_bat_off(:,ibm) = 0
-            amr_bat_off(amr_bat_sd, ibm) = mod(ibm - 1, nz)*amr_bat_w
-            if (amr_bat_sd2 > 0) amr_bat_off(amr_bat_sd2, ibm) = ((ibm - 1)/nz)*amr_bat_w2
+            amr_bat_off(amr_bat_sd, ibm) = (ibm - 1)*amr_bat_w
         end do
 
     end subroutine s_amr_bat_layout
-
-    !> The order the batched advance groups the owned blocks in: as owned, or under amr_tile_cluster (many box shapes) largest
-    !! first, so a batch leader can take the smaller blocks the padding allowance admits.
-    impure subroutine s_amr_batch_order(ord)
-
-        integer, intent(out)    :: ord(:)
-        integer(8), allocatable :: key(:)
-        integer                 :: i, g
-
-        if (.not. amr_tile_cluster) then
-            ord = [(i, i=1, size(ord))]
-            return
-        end if
-        allocate (key(size(ord)))
-        do i = 1, size(ord)
-            g = amr_my_blk(i)
-            key(i) = -int(amr_slots(g)%m + 1, 8)*int(amr_slots(g)%n + 1, 8)*int(amr_slots(g)%p + 1, 8)
-        end do
-        call s_amr_sort_by_key(key, size(ord), ord)
-
-    end subroutine s_amr_batch_order
 
     !> RHS pass of a fine-block RK stage: step-entry backup, swap grid globals to the block, s_compute_rhs (fills amr_slots%rhs +
     !! captures the block's freg / its children's creg), restore coarse globals. Leaves the per-slot rhs ready for the RK pass (or,

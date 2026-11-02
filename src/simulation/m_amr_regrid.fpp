@@ -21,7 +21,7 @@ module m_amr_regrid
     use m_mpi_common, only: s_mpi_allreduce_min, s_mpi_allreduce_max
     use m_amr_wave
     use m_phase_timing
-    use m_amr_cluster, only: s_amr_cluster, s_amr_tile_cluster
+    use m_amr_cluster, only: s_amr_cluster
     use m_amr_distribution, only: s_amr_sort_by_key
     use m_amr, only: amr_slots, amr_cons_st, amr_stor_st, amr_loc_of, amr_slot_live, amr_my_blk, amr_n_my, &
         & s_amr_refresh_my_blocks, amr_maxc_fit, amr_seam_pairs_dirty, amr_mesh_epoch, amr_cpat_mar, s_amr_alloc_slot, &
@@ -84,14 +84,6 @@ contains
                                      & // "restricted and refluxed twice, silently breaking conservation. Adjust the body/" &
                                      & // "regrid inputs so body-expanded child boxes merge or separate.")
                 end if
-                if (amr_tile_cluster .and. amr_block_level(xb) == 1) then
-                    if (.not. f_amr_boxes_compatible(amr_region_lo_all(:,xb), amr_region_hi_all(:,xb), amr_region_lo_all(:,yb), &
-                        & amr_region_hi_all(:,yb), 1)) then
-                        call s_mpi_abort("AMR: two level-1 blocks face each other one coarse cell apart: both would reflux " &
-                                         & // "the cell between them in one kernel.")
-                    end if
-                    cycle  ! any contact is a general seam
-                end if
                 do d = 1, num_dims
                     ! relaxed adjacency: touching faces in dim d with any transverse overlap
                     adj = amr_region_lo_all(d, yb) == amr_region_hi_all(d, xb) + 1
@@ -151,7 +143,7 @@ contains
     !! overlap-merge; relied on by the rebuild's overlap carry-forward and by per-peer unpack reordering in the exchange plans, so
     !! it is enforced here rather than assumed. All levels share the global coarse index space (see the cap formula in
     !! s_amr_check_box_caps), so the interval test is valid across parents. A sweep in x-lo order compares each box only with the
-    !! boxes starting inside its x range, so tile clustering's thousands of small boxes stay cheap.
+    !! boxes starting inside its x range, so many small boxes stay cheap.
     impure subroutine s_amr_check_box_disjoint(boxes, nboxes, box_level)
 
         type(t_box), intent(in) :: boxes(:)
@@ -443,7 +435,7 @@ contains
         call s_phase_tic(PH_RG_CLUS)
         call s_amr_regrid_nest_children(boxes, nboxes, box_level)
         ! lattice boxes move by whole tiles, never by the few cells a snap absorbs
-        if (amr_snap > 0 .and. .not. amr_tile_cluster) call s_amr_regrid_snap_boxes(boxes, nboxes, box_level)
+        if (amr_snap > 0) call s_amr_regrid_snap_boxes(boxes, nboxes, box_level)
         call s_amr_check_box_caps(boxes, nboxes, box_level)  ! invariant: no box may exceed its level's slot cap
         call s_amr_check_box_disjoint(boxes, nboxes, box_level)  ! invariant: same-level boxes are pairwise disjoint
         if (rank_time_wrt .and. proc_rank == 0) call s_amr_report_coverage(boxes, nboxes, box_level)
@@ -585,22 +577,17 @@ contains
 
         call s_amr_local_tags(tag_grid, sidx, tags, ntag)
         deallocate (tag_grid)
-        if (amr_tile_cluster) then
-            call s_amr_tile_cluster(tags, ntag, boxes, nboxes)
-        else
-            call s_amr_cluster(tags, ntag, boxes, nboxes, .true.)
-        end if
+        call s_amr_cluster(tags, ntag, boxes, nboxes, .true.)
         deallocate (tags)
 
     end subroutine s_amr_regrid_cluster_tags
 
     !> True iff two same-level blocks can coexist: disjoint, and either farther apart than the reflux's coincident-outside-cell
     !! hazard (at least 2 empty coarse cells in some dimension) or face-adjacent with exactly matching transverse extents (a regular
-    !! tile grid, which the fine-fine seam halo reconciles). Level-1 boxes under amr_tile_cluster take any contact (the general seam
-    !! pieces reconcile it); only a one-cell gap remains, the coincident outside cell. Mirrors s_amr_check_seam_topology.
-    pure logical function f_amr_boxes_compatible(alo, ahi, blo, bhi, lev) result(ok)
+    !! tile grid, which the fine-fine seam halo reconciles). Mirrors s_amr_check_seam_topology.
+    pure logical function f_amr_boxes_compatible(alo, ahi, blo, bhi) result(ok)
 
-        integer, intent(in) :: alo(3), ahi(3), blo(3), bhi(3), lev
+        integer, intent(in) :: alo(3), ahi(3), blo(3), bhi(3)
         integer             :: d, t, gap
         logical             :: tmatch, tover
 
@@ -616,8 +603,6 @@ contains
                 tover = tover .and. alo(t) <= bhi(t) .and. blo(t) <= ahi(t)
                 tmatch = tmatch .and. alo(t) == blo(t) .and. ahi(t) == bhi(t)
             end do
-            ! tile-clustered level 1 takes any contact; only the one-cell gap (a shared outside cell) remains
-            if (amr_tile_cluster .and. lev == 1) tmatch = gap == 0
             if (tover .and. .not. (gap == 0 .and. tmatch)) then; ok = .false.; return; end if
         end do
 
@@ -668,7 +653,7 @@ contains
                     ok = .false.; exit
                 end if
                 ! a snapped box can land touching, or one cell from, a box that did not snap
-                if (.not. f_amr_boxes_compatible(snapped(k)%lo, snapped(k)%hi, snapped(kk)%lo, snapped(kk)%hi, box_level(k))) then
+                if (.not. f_amr_boxes_compatible(snapped(k)%lo, snapped(k)%hi, snapped(kk)%lo, snapped(kk)%hi)) then
                     ok = .false.; exit
                 end if
             end do
@@ -920,7 +905,7 @@ contains
 
         ! 3) pad + clamp + size-cap each box (amr_maxc_fit lets each box move freely across rank boundaries); drop margin-only boxes
 
-        pad = merge(0, amr_buf, amr_tile_cluster)  ! tile boxes come padded
+        pad = amr_buf
         k = 0
         do kk = 1, nboxes
             lo = merge(max(boxes(kk)%lo - pad, buff_size), 0, amr_dim)

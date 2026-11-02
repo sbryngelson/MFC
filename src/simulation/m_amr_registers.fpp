@@ -86,10 +86,6 @@ module m_amr_registers
     integer(8) :: amr_ctab_epoch_built = -1_8
     integer    :: amr_ctab_nblk_built = -1
 
-    !> amr_tile_cluster: this rank's coarse cells (0:m, 0:n, 0:p) under a level-1 block. A level-1 face whose outside cell is
-    !! covered is fine-fine (the ghost pieces match its flux on both sides), so the apply skips the correction there. 0:0 when off.
-    logical, allocatable :: l1cov(:,:,:)
-    $:GPU_DECLARE(create='[l1cov]')
 
 contains
 
@@ -237,26 +233,8 @@ contains
         call s_amr_reg_reserve(amr_reg_n)
         call s_amr_zero_registers(.true., 1, amr_reg_n)
         call s_amr_zero_registers(.false., 1, amr_reg_n)
-        if (amr_tile_cluster) call s_amr_l1cov_build()
 
     end subroutine s_amr_reg_prepare
-
-    !> Mark this rank's coarse cells covered by a level-1 block (l1cov).
-    impure subroutine s_amr_l1cov_build()
-
-        integer :: g, lo(3), hi(3)
-
-        l1cov = .false.
-        do g = 1, amr_num_blocks
-            if (amr_block_level(g) /= 1) cycle
-            lo = merge(max(amr_region_lo_all(:,g) - amr_sidx, 0), 0, amr_dim)
-            hi = merge(min(amr_region_hi_all(:,g) - amr_sidx, amr_ext), 0, amr_dim)
-            if (any(lo > hi)) cycle
-            l1cov(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)) = .true.
-        end do
-        $:GPU_UPDATE(device='[l1cov]')
-
-    end subroutine s_amr_l1cov_build
 
     !> The faces of the current block (amr_region_lo/hi, set on every rank by s_amr_select_slot) whose outside coarse layer lies in
     !! the coarse subdomain [sidx, sidx + ext] with transverse overlap: the faces that subdomain's rank refluxes. With clip,
@@ -278,7 +256,7 @@ contains
             s_lo(d) = tvd .and. amr_region_lo(d) - 1 >= sidx(d) .and. amr_region_lo(d) - 1 <= sidx(d) + ext(d)
             s_hi(d) = tvd .and. amr_region_hi(d) + 1 >= sidx(d) .and. amr_region_hi(d) + 1 <= sidx(d) + ext(d)
             ! nested so the O(blocks) seam search runs only for a face that survived the box tests
-            if (clip .and. .not. amr_tile_cluster) then
+            if (clip) then
                 if (s_lo(d)) then
                     if (f_amr_face_is_seam(d, -1)) s_lo(d) = .false.
                 end if
@@ -317,8 +295,7 @@ contains
 
     !> True iff the current block's face on `side` (+1 high / -1 low) in dim d is shared with an adjacent sub-block (max_grid_size
     !! tiling), i.e. another block's opposite face is exactly one cell away with matching transverse extents. Such a seam is
-    !! fine-fine, not a c/f boundary. Reads the replicated block list (amr_region_*_all); no tiling means no match. Not consulted
-    !! under amr_tile_cluster, whose apply skips covered outside cells one by one (l1cov).
+    !! fine-fine, not a c/f boundary. Reads the replicated block list (amr_region_*_all); no tiling means no match.
     pure logical function f_amr_face_is_seam(d, side) result(seam)
 
         integer, intent(in) :: d, side
@@ -372,11 +349,6 @@ contains
         bcap = 0; bmax = 0
         @:ALLOCATE(aint(1:11, 1:amr_max_blocks, 1:3), areal(1:2, 1:amr_max_blocks, 1:3))
         aint = 0; areal = 1._wp; amr_ctab_epoch_built = -1_8; amr_ctab_nblk_built = -1
-        if (amr_tile_cluster) then
-            @:ALLOCATE(l1cov(0:m, 0:n, 0:p))
-        else
-            @:ALLOCATE(l1cov(0:0, 0:0, 0:0))
-        end if
         ! participation-local register index (host-only ints; the register reals are what the dense map shrinks)
         allocate (amr_reg_of(1:amr_max_blocks))
         amr_reg_of = 0; amr_reg_n = 0; amr_reg_cur = 0
@@ -713,13 +685,12 @@ contains
             integer                                                :: eq, c1, c2, c1w, c2w, k, gmax1, gmax2
             integer                                                :: f10, f20, dd1, dd2, nch, rr, dd1_hi, dd2_hi, side
             integer                                                :: i2, i3
-            logical                                                :: dta, dtb, tcl, wl
+            logical                                                :: dta, dtb
             real(wp)                                               :: fb
 
             call s_amr_coarse_tables()
             if (a_n(${D}$) == 0) return
             rr = amr_ref_ratio
-            tcl = amr_tile_cluster
             dta = amr_dim(${TA}$); dtb = amr_dim(${TB}$)
             nch = rr**count([dta, dtb])
             dd1_hi = merge(rr - 1, 0, dta); dd2_hi = merge(rr - 1, 0, dtb)
@@ -727,7 +698,7 @@ contains
             ! low faces, then high faces: one block's high outside cell can be another's low outside cell (a one-cell gap),
             ! so a single launch over both would race on it
             do side = 0, 1
-                $:GPU_PARALLEL_LOOP(collapse=4, private='[c1, c2, f10, f20, dd1, dd2, fb, i2, i3, wl]')
+                $:GPU_PARALLEL_LOOP(collapse=4, private='[c1, c2, f10, f20, dd1, dd2, fb, i2, i3]')
                 do k = 1, amr_reg_n
                     do c2w = 0, gmax2
                         do c1w = 0, gmax1
@@ -736,10 +707,6 @@ contains
                                 c1 = aint(5, k, ${D}$) + c1w; c2 = aint(7, k, ${D}$) + c2w
                                 if (c1 > aint(6, k, ${D}$) .or. c2 > aint(8, k, ${D}$)) cycle
                                 i2 = aint(3, k, ${D}$) + c1; i3 = aint(4, k, ${D}$) + c2
-                                ! tile clustering: no correction where another level-1 block covers the outside cell
-                                wl = .true.
-                                if (tcl) wl = .not. l1cov(${IDX.replace('aint(1,', 'aint(1 + side,')}$)
-                                if (.not. wl) cycle
                                 f10 = 0; if (dta) f10 = rr*c1
                                 f20 = 0; if (dtb) f20 = rr*c2
                                 fb = 0._wp
@@ -880,7 +847,7 @@ contains
         do d = 1, num_dims
             @:DEALLOCATE(creg(d)%lo, creg(d)%hi, freg(d)%lo, freg(d)%hi)
         end do
-        @:DEALLOCATE(bcap, aint, areal, l1cov)
+        @:DEALLOCATE(bcap, aint, areal)
         if (allocated(amr_reg_of)) deallocate (amr_reg_of)
         amr_reg_n = 0; amr_reg_cur = 0
 

@@ -159,7 +159,6 @@ contains
         deallocate (amr_slot_live)
         call s_amr_st_finalize()
         if (allocated(amr_seam_pairs)) deallocate (amr_seam_pairs)
-        if (allocated(amr_pcs)) deallocate (amr_pcs)
         if (allocated(amr_ovl_gather)) deallocate (amr_ovl_gather)
         if (allocated(amr_ovl_scatter)) deallocate (amr_ovl_scatter)
         deallocate (amr_ovl_gather_n, amr_ovl_scatter_n, amr_slots, amr_block_owner, amr_block_level, amr_owner_cut, amr_fine_cut)
@@ -326,8 +325,6 @@ contains
         call s_amr_dev_mem(free_b, total_b)
         newcap = max(2*oldcap, nloc, 8)
         if (.not. f_fits(newcap)) newcap = max(oldcap + max(min(oldcap/4, 16), 8), nloc)
-        ! tile clustering: hundreds of small columns per rank; doubling keeps the growth (and its device fragmentation) to a few
-        if (amr_tile_cluster) newcap = max(2*oldcap, nloc)
         dev_stage = f_fits(newcap)
         if (free_b < 0) dev_stage = int(oldcap, 8)*st_col_bytes <= amr_grow_dev_bytes
 
@@ -409,8 +406,6 @@ contains
         if (.not. allocated(amr_cons_br)) then
             brlo = [mbuf_lo(1), mbuf_lo(2), mbuf_lo(3)]; brhi = [mbuf_hi(1), mbuf_hi(2), mbuf_hi(3)]
             brhi(num_dims) = brlo(num_dims) + amr_br_batch*(brhi(num_dims) - brlo(num_dims) + 1) - 1
-            if (num_dims > 1) brhi(num_dims - 1) = brlo(num_dims - 1) + amr_bat_cols*(brhi(num_dims - 1) - brlo(num_dims - 1) + 1) &
-                & - 1
             ! Same CCE descriptor defect as amr_cg / amr_scr_prim: a bare module-scope derived-type allocatable must be given a
             ! valid descriptor by allocating a local and handing it over with move_alloc, then mapped.
             allocate (tmp_br(1:sys_size)); call move_alloc(tmp_br, amr_cons_br)
@@ -521,15 +516,14 @@ contains
     impure subroutine s_amr_br_load_batch(nb)
 
         integer, intent(in) :: nb
-        integer             :: ibm, i, j, k, l, loc, b1l, b1h, b2l, b2h, b3l, b3h, jj, kk, ll, bs, ns, mb
+        integer             :: ibm, i, j, k, l, loc, b1l, b1h, b2l, b2h, b3l, b3h, jj, kk, ll, bs, mb
 
         bs = buff_size
-        ns = max(nb, amr_bat_ns)
         b1l = amr_slots(amr_cur)%idwbuff(1)%beg; b1h = amr_slots(amr_cur)%idwbuff(1)%end
         b2l = amr_slots(amr_cur)%idwbuff(2)%beg; b2h = amr_slots(amr_cur)%idwbuff(2)%end
         b3l = amr_slots(amr_cur)%idwbuff(3)%beg; b3h = amr_slots(amr_cur)%idwbuff(3)%end
-        $:GPU_PARALLEL_LOOP(collapse=5, private='[loc, jj, kk, ll, mb]', copyin='[nb, ns, b1l, b1h, b2l, b2h, b3l, b3h, bs]')
-        do ibm = 1, ns
+        $:GPU_PARALLEL_LOOP(collapse=5, private='[loc, jj, kk, ll, mb]', copyin='[nb, nb, b1l, b1h, b2l, b2h, b3l, b3h, bs]')
+        do ibm = 1, nb
             do i = 1, sys_size
                 do l = b3l, b3h
                     do k = b2l, b2h

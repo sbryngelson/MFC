@@ -395,16 +395,6 @@ class TestAltSoundspeedHlld(ConstraintTestCase):
         self.assertNotIn(self.MSG, self.errors_for({**TWO_FLUID, "riemann_solver": 4}))
 
 
-class TestAmrSubcycleTiles(ConstraintTestCase):
-    SUB = {**BASE, "amr": "T", "amr_regrid_int": 2, "amr_tag_eps": 0.01, "amr_max_grid_size": 16, "time_stepper": 3, "amr_subcycle": "T"}
-
-    def test_rejects_tile_cluster(self):
-        self.assertRejects({**self.SUB, "amr_tile_cluster": "T"}, "amr_subcycle does not support amr_tile_cluster")
-
-    def test_no_tile_rejection_without_tiles(self):
-        self.assertNotIn("amr_tile_cluster", self.errors_for(self.SUB))
-
-
 class TestAmrDefaults(unittest.TestCase):
     """The derived AMR defaults apply only where the validator admits them, and never to a non-AMR case."""
 

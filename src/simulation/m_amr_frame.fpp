@@ -130,7 +130,7 @@ contains
         ! amr_bat_w along amr_bat_sd), since the flux divergence reads dx/dy/dz at every slab cell. Cell boundaries (x_cb etc.)
         ! are not replicated: nothing on the batched path reads them (WENO coefficients are not recomputed on a uniform grid).
         if (amr_bat_n > 1) then
-            do ibm = 2, max(amr_bat_n, amr_bat_ns)
+            do ibm = 2, amr_bat_n
                 #:for D, X, E in [(1, 'x', 'm'), (2, 'y', 'n'), (3, 'z', 'p')]
                     o = amr_bat_off(${D}$, ibm); e = amr_bat_ext(${D}$)
                     if (o > 0) then
@@ -140,8 +140,8 @@ contains
                 #:endfor
             end do
             #:for D, E in [(1, 'm'), (2, 'n'), (3, 'p')]
-                if (${D}$ == amr_bat_sd .or. ${D}$ == amr_bat_sd2) then
-                    e = maxval(amr_bat_off(${D}$,1:max(amr_bat_n, amr_bat_ns))) + amr_bat_ext(${D}$)
+                if (${D}$ == amr_bat_sd) then
+                    e = maxval(amr_bat_off(${D}$,1:amr_bat_n)) + amr_bat_ext(${D}$)
                     ${E}$ = e; idwint(${D}$)%end = e; idwbuff(${D}$)%end = e + buff_size
                 end if
             #:endfor
