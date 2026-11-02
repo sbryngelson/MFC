@@ -142,19 +142,11 @@ reuses the rank-local solver scratch; wider features tile into adjacent blocks.
 `parallel_io` restart repartitions the blocks across any rank count. The serial
 (per-rank-file) path needs the rank count that wrote the file and aborts otherwise.
 
-### Load-balance coupling {#amr-loadbalance}
+### Block cost {#amr-blockcost}
 
-With `load_balance = T` (see @ref case) the weighted decomposition charges cells under a
-block for the fine work they carry, moving the rank boundaries toward balance. A
-deterministic clamp keeps the weighted split inside the half-subdomain limit.
-
-Block ownership weights each block by a cost model over its footprint: base cell cost, plus
-IB-marked cells, plus phase-change iteration counts when the load-weight writer is on. A
-block full of expensive physics therefore outweighs a quiet one of the same size.
-
-The Cartesian split is fixed after startup, but `s_load_balance_rebalance` runs at every
-startup, so a long run rebalances by checkpoint-and-restart: stop, restart with
-`load_balance = T`, and the split planes come from the saved state.
+Block ownership weights each block by its footprint: one per coarse cell plus `K_ib` per
+IB-marked cell, so a block full of immersed-boundary work outweighs a quiet one of the same
+size.
 
 Rebalancing the base grid mid-run is a separate opt-in. `l0_ntile` tiles it into
 `l0_ntile**num_dims` ratio-1 blocks that advance through the same per-block solver as the

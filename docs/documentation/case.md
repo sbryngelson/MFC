@@ -768,10 +768,7 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `file_per_process`      | Logical | Whether or not to write one IO file per process |
 | `cons_vars_wrt`         | Logical | Write conservative variables |
 | `prim_vars_wrt`         | Logical | Write primitive variables	|
-| `load_weight_wrt`       | Logical | Write per-cell load-weight diagnostic field |
-| `sfc_partition_wrt`     | Logical | Report SFC-weighted load-balance partition |
 | `rank_time_wrt`         | Logical | Print the per-phase wall-time budget of the AMR step and the AMR instrument reports |
-| `load_balance`          | Logical | (Experimental/diagnostic) Weighted static Cartesian decomposition at init (requires `parallel_io = T`, >1 rank). Measured gain is small on CPU (~5%) and can be slower on GPU due to the occupancy floor; equal decomposition is near-optimal for uniform-cost workloads. |
 | `amr`                   | Logical | (Experimental) Enable block-structured AMR: a 2:1 refined level-1 block with gradient-based dynamic regrid and conservative coupling with refluxing. Requires WENO reconstruction, SSP-RK3, model_eqns=2 or 3; num_fluids > 1 requires mpp_lim; supports physical viscosity. |
 | `amr_block_beg(i)`      | Integer | Refined-block start cell index in direction $i$ (level-0 index space) |
 | `amr_block_end(i)`      | Integer | Refined-block end cell index in direction $i$ (level-0 index space) |
@@ -794,7 +791,6 @@ To restart the simulation from $k$-th time step, see @ref running "Restarting Ca
 | `l0_ntile`              | Integer | L0-as-blocks spike: tiles per dimension per rank the base grid is split into (0 = off, monolithic base grid; experimental) |
 | `l0_migrate_step`       | Integer | L0-as-blocks spike: time step at which a forced test migration moves the last tile to rank 0 (0 = off; experimental) |
 | `l0_rebalance_interval` | Integer | L0-as-blocks spike: steps between measured-cost rebalance events that migrate tiles to level load (0 = off; experimental) |
-| `partition_tile_size`   | Integer | Tile side for the SFC partitioner (default 8) |
 | `alpha_rho_wrt(i)`      | Logical | Add the partial density of the fluid $i$ to the database \|
 | `rho_wrt`               | Logical | Add the mixture density to the database	 |
 | `mom_wrt(i)`            | Logical | Add the $i$-direction momentum to the database	 |

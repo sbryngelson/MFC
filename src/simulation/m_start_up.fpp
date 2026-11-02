@@ -53,9 +53,6 @@ module m_start_up
     use m_body_forces
     use m_sim_helpers
     use m_igr
-    use m_load_weight
-    use m_load_balance, only: s_load_balance_rebalance
-    use m_sfc_partition
     use m_amr, only: amr_maxc_fit, s_initialize_amr_module, s_populate_amr_fine, s_finalize_amr_module, s_amr_setup_ib, &
         & s_l0_tiles_init, s_l0_tiles_finalize, s_l0_scatter_tiles_to_coarse
     use m_amr_regrid, only: s_amr_regrid
@@ -934,20 +931,10 @@ contains
 
         call s_initialize_rhs_module()
 
-        call s_initialize_load_weight_module()
-        call s_initialize_sfc_partition_module()
 
         if (surface_tension) call s_initialize_surface_tension_module()
 
-        if (relax) then
-            ! the load-weight field is computed for load_weight_wrt AND for sfc_partition_wrt: allocate under the
-            ! same condition, else the sfc-only path reads unallocated (or never-written) iteration counts
-            if (load_weight_wrt .or. sfc_partition_wrt) then
-                call s_initialize_phasechange_module([m_alloc, n_alloc, p_alloc])
-            else
-                call s_initialize_phasechange_module([-1, -1, -1])
-            end if
-        end if
+        if (relax) call s_initialize_phasechange_module()
 
         call s_initialize_data_output_module()
         call s_initialize_derived_variables_module()
@@ -1132,11 +1119,6 @@ contains
 
         call s_mpi_decompose_computational_domain(write_silo_ghost_offsets=.false., adjust_local_domains=.false.)
 
-        ! Weighted static decomposition: probe one field from the restart file at the equal
-        ! layout and re-split axes toward the load concentration. Must run here, before
-        ! s_initialize_modules allocates extent-dependent arrays at the equal layout.
-        call s_load_balance_rebalance()
-
         bc = bc_xyz_info(bc_x, bc_y, bc_z)
 
     end subroutine s_initialize_mpi_domain
@@ -1234,8 +1216,6 @@ contains
         call s_finalize_derived_variables_module()
         call s_finalize_data_output_module()
         call s_finalize_rhs_module()
-        call s_finalize_load_weight_module()
-        call s_finalize_sfc_partition_module()
         if (igr) then
             call s_finalize_igr_module()
         else

@@ -116,9 +116,6 @@ DESCRIPTIONS = {
     # Output
     "run_time_info": "Output run-time information",
     "prim_vars_wrt": "Write primitive variables",
-    "load_weight_wrt": "Write per-cell load-weight diagnostic field",
-    "sfc_partition_wrt": "Report SFC-weighted load-balance partition",
-    "load_balance": "Apply weighted static Cartesian decomposition at init",
     "rank_time_wrt": "Print the per-phase wall-time budget of the AMR step and the AMR instrument reports",
     "amr": "(Experimental) Block-structured AMR: 2:1 refined level-1 block with gradient-based dynamic regrid and conservative coupling with refluxing.",
     "amr_block_beg": "Refined-block start cell index per axis (level-0 index space; 0-based, inclusive). Required when amr = T",
@@ -142,7 +139,6 @@ DESCRIPTIONS = {
     "l0_ntile": "L0-as-blocks spike: tiles per dimension per rank the base grid is split into (0 = off, monolithic base grid)",
     "l0_migrate_step": "L0-as-blocks spike: time step at which a forced test migration moves the last tile to rank 0 (0 = off)",
     "l0_rebalance_interval": "L0-as-blocks spike: steps between measured-cost rebalance events that migrate tiles to level load (0 = off)",
-    "partition_tile_size": "Tile side for the SFC partitioner",
     "cons_vars_wrt": "Write conservative variables",
     "probe_wrt": "Write probe data",
     "parallel_io": "Enable parallel I/O",

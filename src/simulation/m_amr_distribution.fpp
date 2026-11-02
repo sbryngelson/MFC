@@ -18,9 +18,8 @@ module m_amr_distribution
     use m_derived_types  ! scalar_field, t_box, int_bounds_info
     use m_box, only: f_morton
     use m_global_parameters
-    use m_constants, only: K_ib, K_pc
+    use m_constants, only: K_ib
     use m_mpi_proxy, only: s_mpi_abort
-    use m_phase_change, only: pc_iter_count
     use m_phase_timing
     use m_amr_xchg_audit  ! per-call-site accounting of every AMR p2p transfer (s_xa_rec + XA_* site ids)
     use m_ibm, only: ib_markers
@@ -193,12 +192,8 @@ contains
 
     end subroutine s_amr_box_isect
 
-    !> Per-block measured-cost weight over each block's level-0 footprint, replicated on every rank: each rank sums the load-weight
-    !! cost model (base 1 + K_ib per IB-marked cell + K_pc per phase-change Newton iteration, when that diagnostic array is live)
-    !! over its owned coarse cells inside the footprint, then one MPI_ALLREDUCE(SUM) makes the vector identical everywhere. No cost
-    !! signals -> cost(k) = footprint cell count exactly (pure-geometry fallback). The Lagrangian cloud is excluded from blocks by
-    !! construction, so K_bub never applies here; pc_iter_count is populated only when a load-weight diagnostic writer is on (enable
-    !! load_weight_wrt to make the balance phase-change-aware), guarded by allocated().
+    !> Per-block cost over each block's level-0 footprint (1 per cell + K_ib per IB-marked cell), summed over each rank's owned
+    !! coarse cells and replicated by one MPI_ALLREDUCE(SUM).
     impure subroutine s_amr_block_cost(cost)
 
         real(wp), intent(out) :: cost(:)
@@ -209,12 +204,8 @@ contains
         integer :: ierr
 #endif
 
-        ! one host refresh per regrid: both signal fields advance on the device between regrids
         if (ib) then
             $:GPU_UPDATE(host='[ib_markers%sf]')
-        end if
-        if (allocated(pc_iter_count)) then
-            $:GPU_UPDATE(host='[pc_iter_count]')
         end if
         do k = 1, amr_num_blocks
             ! block footprint /\ this rank's coarse subdomain, in local interior indices (empty -> no-trip loops)
@@ -228,7 +219,6 @@ contains
                         if (ib) then
                             if (ib_markers%sf(j, kk, l) /= 0) c = c + K_ib
                         end if
-                        if (allocated(pc_iter_count)) c = c + K_pc*real(pc_iter_count(j, kk, l), wp)
                     end do
                 end do
             end do
@@ -272,7 +262,7 @@ contains
             tgt = real(r + 1, wp)*total/real(num_procs, wp)
             ! cum is an n-term accumulation while tgt is closed form over another n-term sum, so at an exact share boundary the
             ! two differ by rounding rather than by intent, and the comparison turns on 1 ULP. With integer-valued cost terms
-            ! (footprint cells, K_ib, K_pc x integer counts) the arithmetic is exact, but a fractional cost term can split
+            ! (footprint cells, K_ib) the arithmetic is exact, but a fractional cost term can split
             ! identical weights unevenly (e.g. 5/3 instead of 4/4). Tolerance is the accumulated rounding bound, O(n) ULP of
             ! the target; far from a boundary it is negligible and the greedy is unchanged.
             tol = spacing(tgt)*real(n, wp)
@@ -329,7 +319,7 @@ contains
     end subroutine s_amr_sort_by_key
 
     !> Fine-level distribution map: assigns each active block a single owner rank by chains-on-chains balancing of fine-work weight
-    !! in Morton order of the block's low corner (the same SFC idea m_sfc_partition uses for the base grid, at block granularity).
+    !! in Morton order of the block's low corner (a space-filling-curve cut at block granularity).
     !! Fine work = measured coarse-footprint cost (s_amr_block_cost) x the level's refinement factor per active dim, so blocks
     !! concentrating IB or phase-change work weigh more than equal-size quiescent ones. The cost vector is allreduced (one
     !! collective; every rank must call this), after which the assignment is deterministic and identical on every rank.
@@ -677,7 +667,7 @@ contains
         real(wp)              :: mx, mean, cmx, cmean
         integer               :: k, lev, nb, empty
 
-        if (.not. load_weight_wrt) return
+        if (.not. rank_time_wrt) return
         if (proc_rank /= 0) return
 
         ! heap, not automatic: these are num_procs long, and automatic arrays would put O(num_procs) on the stack (the module

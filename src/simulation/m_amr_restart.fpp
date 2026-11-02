@@ -115,7 +115,7 @@ contains
             call MPI_ALLREDUCE(my_cnt_vec, tot_cnt_vec, amr_num_blocks, MPI_OFFSET, MPI_SUM, MPI_COMM_WORLD, ierr)
             ! Per-block (owner + 1, m, n, p): every rank contributes zeros except the one owner, so a MAX reduction recovers the
             ! record exactly. It carries the same information as the v1 3*num_procs extent vector (readers rebuild it from
-            ! their own decomposition and abort on mismatch, catching a different ownership pattern or load_balance split that
+            ! their own decomposition and abort on mismatch, catching a different ownership pattern that
             ! would otherwise silently misalign the concatenated per-rank data slices below) in O(blocks) rather than
             ! O(blocks x ranks), in memory and in the file.
             call MPI_ALLREDUCE(MPI_IN_PLACE, myown_all, amr_restart_blk_own_ints*amr_num_blocks, MPI_INTEGER, MPI_MAX, &
@@ -296,7 +296,7 @@ contains
         do k = 1, amr_num_blocks
             if (had_data(k) .neqv. amr_owns_all(k)) then
                 call s_mpi_abort('amr restart decomposition mismatch: the file''s block ownership differs from this' &
-                                 & // ' run''s (identical decomposition - rank count and load_balance settings - required)')
+                                 & // ' run''s (identical decomposition and rank count required)')
             end if
         end do
         deallocate (had_data)
@@ -305,8 +305,7 @@ contains
 
     !> Parallel (MPI-IO) read. The writer's rank count sets only the file layout: whole-block ownership makes each block's fine data
     !! one contiguous region-sized chunk, so any rank count can read it; owners are re-assigned for this run and each new owner
-    !! reads its whole blocks. At the writer's rank count the file's ownership record must reproduce this run's decomposition (a
-    !! re-derived load_balance split would silently misalign the chunk).
+    !! reads its whole blocks. At the writer's rank count the file's ownership record must reproduce this run's decomposition .
     impure subroutine s_amr_restart_read_parallel(file_loc)
 
         character(LEN=*), intent(in) :: file_loc
@@ -347,8 +346,8 @@ contains
                 mown = [proc_rank + 1, amr_slots(k)%m, amr_slots(k)%n, amr_slots(k)%p]
                 if (abs(ghdr(1)) == num_procs .and. any(cat%own(:,k) /= mown)) then
                     call s_mpi_abort('amr restart: the per-block owner/extent record in the file does not match ' &
-                                     & // 'this run''s decomposition; with the same rank count the ownership and ' &
-                                     & // '(with load_balance) the weighted splits must match the run that wrote the restart')
+                                     & // 'this run''s decomposition; with the same rank count the ownership must match ' &
+                                     & // 'the run that wrote the restart')
                 end if
             end if
             allocate (buf(max(cnt, 1)))

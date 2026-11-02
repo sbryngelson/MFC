@@ -718,11 +718,8 @@ def _load():
     ]:
         _r(n, LOG, {"output"})
 
-    # Load balance and AMR (load_weight/sfc_partition/rank_time writers are diagnostics)
+    # AMR (rank_time_wrt is a diagnostic)
     for n in [
-        "load_weight_wrt",
-        "sfc_partition_wrt",
-        "load_balance",
         "rank_time_wrt",
         "amr",
     ]:
@@ -749,7 +746,6 @@ def _load():
     _r("l0_ntile", INT)
     _r("l0_migrate_step", INT)
     _r("l0_rebalance_interval", INT)
-    _r("partition_tile_size", INT, {"output"})
     for n in [
         "schlieren_wrt",
         "alpha_wrt",
@@ -1398,9 +1394,7 @@ _nv(
     "t_save",
     "cfl_target",
     "prim_vars_wrt",
-    "load_balance",
     "rank_time_wrt",
-    "partition_tile_size",
     "fd_order",
     "ib_state_wrt",
     "ib_force_wrt",
@@ -1423,9 +1417,6 @@ _nv(
     "pi_fac",
 )
 _nv(_PRE_POST, "num_fluids", "weno_order", "recon_type", "muscl_order", "mhd", "nb", "igr", "igr_order", "sigR")
-# The load-weight/SFC diagnostic writers are read by src/common/m_phase_change, which compiles into
-# every target, so they are declared for all three rather than guarded by a stage ifdef.
-_nv(_ALL, "load_weight_wrt", "sfc_partition_wrt")
 _nv(_ALL, "reactive_burn", "rburn")
 _nv(_PRE_SIM, "ib_airfoil")
 _nv(_PRE_SIM, "stl_models", "num_stl_models")

@@ -5834,87 +5834,11 @@ def list_cases() -> typing.List[TestCaseBuilder]:
 
     amr_golden_tests()
 
-    def load_balance_tests():
-        """Golden for the weighted init-time decomposition (load_balance): a two-fluid material
-        interface at x=0.5 makes the alpha marginal asymmetric (fluid-1 volume fraction ~1 left,
-        ~0 right), so the 2-rank weighted split genuinely differs from the equal split and
-        s_apply_weighted_offsets re-decomposes. This is the only coverage of that path - the
-        feature is a no-op at 1 rank by construction, and wrong weighted halo extents would
-        corrupt the solution everywhere while looking plausible."""
-        eps_lb = 1.0e-6
-        stack.push(
-            "LoadBalance -> 1D -> weighted split",
-            {
-                "m": 63,
-                "n": 0,
-                "p": 0,
-                "dt": 5.0e-4,
-                "t_step_stop": 6,
-                "t_step_save": 6,
-                "x_domain%beg": 0.0,
-                "x_domain%end": 1.0,
-                "bc_x%beg": -3,
-                "bc_x%end": -3,
-                "parallel_io": "T",
-                "load_balance": "T",
-                # load_balance requires parallel_io = T, whose writer emits no D/ dump: without a probe the golden would be
-                # empty and compare equal to anything. The probe sits at the material interface the weighted split is decided
-                # from, so a wrong decomposition (or wrong weighted halo extents) moves it.
-                "probe_wrt": "T",
-                "num_probes": 1,
-                "probe(1)%x": 0.5,
-                "fd_order": 1,
-                "num_fluids": 2,
-                "fluid_pp(2)%gamma": 1.0e00 / (1.6e00 - 1.0e00),
-                "fluid_pp(2)%pi_inf": 0.0,
-                "fluid_pp(2)%cv": 0.0,
-                "fluid_pp(2)%qv": 0.0,
-                "fluid_pp(2)%qvp": 0.0,
-                "patch_icpp(1)%geometry": 1,
-                "patch_icpp(1)%x_centroid": 0.05,
-                "patch_icpp(1)%length_x": 0.1,
-                "patch_icpp(1)%vel(1)": 0.5,
-                "patch_icpp(2)%geometry": 1,
-                "patch_icpp(2)%x_centroid": 0.3,
-                "patch_icpp(2)%length_x": 0.4,
-                "patch_icpp(2)%vel(1)": 0.5,
-                "patch_icpp(3)%geometry": 1,
-                "patch_icpp(3)%x_centroid": 0.75,
-                "patch_icpp(3)%length_x": 0.5,
-                "patch_icpp(3)%vel(1)": 0.5,
-                "patch_icpp(1)%pres": 1.0,
-                "patch_icpp(2)%pres": 1.0,
-                "patch_icpp(3)%pres": 1.0,
-                "patch_icpp(1)%alpha_rho(1)": (1.0 - eps_lb) * 1.0,
-                "patch_icpp(1)%alpha_rho(2)": eps_lb * 10.0,
-                "patch_icpp(1)%alpha(1)": 1.0 - eps_lb,
-                "patch_icpp(1)%alpha(2)": eps_lb,
-                "patch_icpp(2)%alpha_rho(1)": (1.0 - eps_lb) * 1.0,
-                "patch_icpp(2)%alpha_rho(2)": eps_lb * 10.0,
-                "patch_icpp(2)%alpha(1)": 1.0 - eps_lb,
-                "patch_icpp(2)%alpha(2)": eps_lb,
-                "patch_icpp(3)%alpha_rho(1)": eps_lb * 1.0,
-                "patch_icpp(3)%alpha_rho(2)": (1.0 - eps_lb) * 10.0,
-                "patch_icpp(3)%alpha(1)": eps_lb,
-                "patch_icpp(3)%alpha(2)": 1.0 - eps_lb,
-            },
-        )
-        cases.append(define_case_d(stack, "", {}, ppn=2, honor_io_keys=True))
-        stack.pop()
-
-    load_balance_tests()
-
     def diagnostic_writer_tests():
-        """Smoke golden for the three load-diagnostic writers (load_weight_wrt,
-        sfc_partition_wrt, rank_time_wrt) - previously ZERO coverage. All three are rank-0
-        stdout reporters ([load_weight]/[sfc_partition]/[rank_time] imbalance lines printed
-        from s_write_data_files), so the golden captures the ordinary field output and the
-        test proves the writers execute without perturbing the solution (rank_time's
-        wall-clock metric reaches stdout only, keeping the golden deterministic). np=2 for
-        genuine cross-rank reductions (the load-balance context they diagnose); no
-        parallel_io needed; partition_tile_size keeps its default (8 -> 8 tiles on m=63)."""
+        """rank_time_wrt (a rank-0 stdout reporter) runs without perturbing the solution; np=2 for its
+        cross-rank reductions."""
         stack.push(
-            "Diagnostics -> 1D -> load writers np=2",
+            "Diagnostics -> 1D -> rank_time_wrt np=2",
             {
                 "m": 63,
                 "n": 0,
@@ -5938,8 +5862,6 @@ def list_cases() -> typing.List[TestCaseBuilder]:
                 "patch_icpp(3)%x_centroid": 0.9,
                 "patch_icpp(3)%length_x": 0.2,
                 "patch_icpp(3)%vel(1)": 0.0,
-                "load_weight_wrt": "T",
-                "sfc_partition_wrt": "T",
                 "rank_time_wrt": "T",
             },
         )

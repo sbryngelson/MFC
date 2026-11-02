@@ -36,7 +36,6 @@ contains
         end if
 
         ! lint: runtime-check num_procs is the MPI rank count, not a case-file value
-        @:PROHIBIT(load_balance .and. num_procs == 1, "load_balance requires more than one MPI rank")
 
         if (amr) then
             ! Euler-Euler bubbles are not supported under amr: the mpp_lim pre-conversion rescale

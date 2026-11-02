@@ -293,7 +293,7 @@ contains
 
         allocate (proc_coords(1:num_dims))
 
-        ! start_idx is read by decomposition-aware features (amr, sfc_partition_wrt) in ALL builds;
+        ! start_idx is read by decomposition-aware features (amr) in ALL builds;
         ! the serial/single-rank offset is 0 and the MPI decomposition overwrites it
         allocate (start_idx(1:num_dims))
         start_idx = 0
@@ -404,8 +404,6 @@ contains
         file_per_process = .false.
         down_sample = .false.
         fft_wrt = .false.
-        load_weight_wrt = .false.
-        sfc_partition_wrt = .false.
 
         ! Mixture conversion and sound-speed behavior
         avg_state = dflt_int

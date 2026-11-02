@@ -1905,19 +1905,6 @@ class CaseValidator:
                 self.prohibit(element_polygon_ratio is None, f"acoustic({jstr})%element_polygon_ratio must be specified for support = 11 (3D transducer)")
                 self.prohibit(element_polygon_ratio is not None and element_polygon_ratio <= 0, f"acoustic({jstr})%element_polygon_ratio must be positive for support = 11")
 
-    def check_load_balance(self):
-        """Checks load_balance requirements (simulation)"""
-        # PHYSICS_DOCS: load_balance requires parallel_io=T and more than one MPI rank.
-        load_balance = self.get("load_balance", "F") == "T"
-
-        if not load_balance:
-            return
-
-        parallel_io = self.get("parallel_io", "F") == "T"
-        file_per_process = self.get("file_per_process", "F") == "T"
-        self.prohibit(not parallel_io, "load_balance requires parallel_io = T")
-        self.prohibit(file_per_process, "load_balance is incompatible with file_per_process (per-rank restart files are sized for the equal decomposition)")
-
     def check_amr(self):
         """Checks AMR parameter constraints (simulation)"""
         amr = self.get("amr", "F") == "T"
@@ -2136,16 +2123,6 @@ class CaseValidator:
             amr_regrid_int is not None and amr_regrid_int > 0 and amr_buf is not None and amr_buf < amr_regrid_int,
             "amr_buf < amr_regrid_int: at CFL near 1 a feature can outrun the tag buffer between regrids; " "check the [amr-cad] escaped-tag report stays 0 for this case",
         )
-
-    def check_sfc_partition(self):
-        """Checks SFC partitioner tile-size guard (simulation)"""
-        sfc_partition_wrt = self.get("sfc_partition_wrt", "F") == "T"
-
-        if not sfc_partition_wrt:
-            return
-
-        partition_tile_size = self.get("partition_tile_size")
-        self.prohibit(partition_tile_size is not None and partition_tile_size < 1, "partition_tile_size must be >= 1")
 
     def check_adaptive_time_stepping(self):
         """Checks adaptive time stepping parameters (simulation)"""
@@ -3385,8 +3362,6 @@ class CaseValidator:
         self.check_igr_simulation()
         self.check_acoustic_source()
         self.check_amr()
-        self.check_sfc_partition()
-        self.check_load_balance()
         self.check_adaptive_time_stepping()
         self.check_alt_soundspeed()
         self.check_bubbles_lagrange()

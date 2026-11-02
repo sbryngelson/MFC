@@ -89,8 +89,8 @@ contains
     end function f_box_from_splits
 
     !> 3D Morton (Z-order) key interleaving the bits of (ix, iy, iz); collapsed dims contribute 0. 21 bits/dim (fits a 64-bit key
-    !! for grids up to 2^21 cells/dim). Shared by the AMR block partition (m_amr) and the SFC-partition diagnostic
-    !! (m_sfc_partition); negative coords clamp to 0.
+    !! for grids up to 2^21 cells/dim). Used by the AMR block partition; negative coords clamp to
+    !! 0.
     pure integer(kind=8) function f_morton(ix, iy, iz) result(key)
         integer, intent(in) :: ix, iy, iz
         integer             :: b

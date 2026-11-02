@@ -635,7 +635,6 @@ contains
         collision_time = dflt_real
         ib_coefficient_of_friction = dflt_real
         ib_state_wrt = .false.
-        load_balance = .false.
         rank_time_wrt = .false.
         amr = .false.
         amr_block_beg(:) = 0
@@ -667,7 +666,6 @@ contains
         l0_ntile = 0
         l0_migrate_step = 0
         l0_rebalance_interval = 0
-        partition_tile_size = 8
         ib_force_wrt = .false.
         ib_force_stride = 1
         many_ib_patch_parallelism = .false.
