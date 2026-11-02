@@ -178,7 +178,7 @@ contains
     !> Initializes the values of various IBM variables, such as ghost points and image points.
     impure subroutine s_ibm_setup()
 
-        integer                        :: i, j, k, gid
+        integer                        :: i, j, k, gid, nb
         integer(kind=8)                :: n_need
         real(wp)                       :: t_init  !< initial time for prescribed kinematics
         real(wp)                       :: max_num_gps_rank
@@ -279,9 +279,11 @@ contains
         ! GPU_ENTER_DATA (the amr_cg idiom) gives the bare derived-type allocatable a valid descriptor and device
         ! mapping; a direct @:ALLOCATE of it aborts with lib-4425 on CCE OpenMP-offload.
         if (allocated(ib_fine)) then
-            ! a body's ghost points fall in the one block per level that contains it, so at most num_gbl_ibs*amr_max_level
-            ! slots hold any; x2 margin, capped at the slot count
-            n_park = 1 + int(min(int(ib_coarse_slot - 1, 8), max(2_8*int(num_gbl_ibs, 8)*int(amr_max_level, 8), 8_8)))
+            ! a body's ghost points fall in the one block per level that contains it, and a rank's blocks only mark the bodies
+            ! it holds, so at most nb*amr_max_level local slots hold any; x2 margin, capped at the slot count. Fixed bodies:
+            ! nb = this rank's neighborhood (each column is a block-sized list, so global nb costs GBs per rank with many bodies)
+            nb = merge(num_gbl_ibs, num_ibs, moving_immersed_boundary_flag)
+            n_park = 1 + int(min(int(ib_coarse_slot - 1, 8), max(2_8*int(nb, 8)*int(amr_max_level, 8), 8_8)))
             allocate (tmp_park(1:max_num_gps,1:n_park))
             call move_alloc(tmp_park, gp_park)
             $:GPU_ENTER_DATA(create='[gp_park]')

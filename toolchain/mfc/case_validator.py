@@ -2079,6 +2079,8 @@ class CaseValidator:
             self.prohibit(self.get("chemistry", "F") == "T", "amr_subcycle does not support chemistry")
             self.prohibit(self.get("bubbles_lagrange", "F") == "T", "amr_subcycle does not support Lagrangian bubbles")
             self.prohibit(self.get("active_box", "F") == "T", "amr_subcycle does not support active_box")
+            # store slots are sized for full blocks; tiles exhaust device memory at the first subcycled regrid
+            self.prohibit(self.get("amr_tile_cluster", "F") == "T", "amr_subcycle does not support amr_tile_cluster")
             moving = [self.get(f"patch_ib({i})%moving_ibm", 0) for i in range(1, 1001) if self.get(f"patch_ib({i})%moving_ibm") is not None]
             moving += [self.get(f"particle_cloud({i})%moving_ibm", 0) for i in range(1, 11) if self.get(f"particle_cloud({i})%moving_ibm") is not None]
             self.prohibit(any(m not in (0, None) for m in moving), "amr_subcycle does not support moving immersed boundaries yet")

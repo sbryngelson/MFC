@@ -19,6 +19,7 @@ module m_amr_restart
     use m_mpi_proxy, only: s_mpi_abort
     use m_mpi_common, only: s_mpi_allreduce_integer_min
     use m_amr_restart_io
+    use m_amr_state, only: max_f
     use m_amr, only: s_amr_reduce_xchg_flag, amr_slots, amr_cons_st, amr_loc_of, amr_seam_pairs_dirty, amr_mesh_epoch, &
         & s_amr_alloc_slot, s_amr_reconcile_slots, s_amr_assign_block_owners, s_set_amr_fine_geometry
     use m_amr_regrid, only: s_amr_check_seam_topology
@@ -423,6 +424,11 @@ contains
         end if
         if (lvl < 1 .or. lvl > amr_max_level) then
             call s_mpi_abort('amr restart: corrupt block record (block level outside 1..amr_max_level)')
+        end if
+        ! slot coordinate arrays are sized to max_f, which derives from the rank count unless amr_max_grid_size is pinned
+        if (any(merge((amr_ref_ratio**lvl)*(reg(4:6) - reg(1:3) + 1) - 1 > max_f, .false., amr_dim))) then
+            call s_mpi_abort('amr restart: a block exceeds this rank count''s block cap; restart on no more ranks ' &
+                             & // 'than wrote the checkpoint, or set amr_max_grid_size in both runs')
         end if
         amr_region_lo_all(:,k) = reg(1:3); amr_region_hi_all(:,k) = reg(4:6)
         amr_block_level(k) = lvl

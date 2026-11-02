@@ -630,6 +630,7 @@ contains
         integer(kind=8) :: i, j, k, l, q                     !< Generic loop iterators
         integer :: cbjlo, cbjhi, cbklo, cbkhi, cbllo, cblhi  !< Active-box + halo copy bounds
         integer :: n_copy
+        integer :: copy_beg, copy_end                        !< q_prim_vf components refreshed from q_prim_qp
 
         ! RHS: halo exchange -> reconstruct -> Riemann solve -> flux difference -> source terms
 
@@ -988,22 +989,26 @@ contains
 
         ! END: Additional physics and source terms
 
-        ! run_time_info reads q_prim_vf only after the first stage (m_time_steppers); the hyper_cleaning damping above reads the
-        ! previous stage's copy
-        if (probe_wrt .or. ib .or. bubbles_lagrange .or. (run_time_info .and. (stage == 1 .or. hyper_cleaning))) then
-            if (.not. igr) then
-                $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
-                do i = 1, sys_size
-                    do l = idwbuff(3)%beg, idwbuff(3)%end
-                        do k = idwbuff(2)%beg, idwbuff(2)%end
-                            do j = idwbuff(1)%beg, idwbuff(1)%end
-                                q_prim_vf(i)%sf(j, k, l) = q_prim_qp%vf(i)%sf(j, k, l)
-                            end do
+        ! run_time_info reads q_prim_vf only after the first stage (m_time_steppers); the hyper_cleaning damping above reads psi
+        ! from the previous stage's copy, so psi is always copied
+        copy_beg = 1
+        copy_end = sys_size
+        if (.not. (probe_wrt .or. ib .or. bubbles_lagrange .or. (run_time_info .and. stage == 1))) then
+            copy_beg = merge(eqn_idx%psi, 1, hyper_cleaning)
+            copy_end = merge(eqn_idx%psi, 0, hyper_cleaning)
+        end if
+        if (.not. igr) then
+            $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
+            do i = copy_beg, copy_end
+                do l = idwbuff(3)%beg, idwbuff(3)%end
+                    do k = idwbuff(2)%beg, idwbuff(2)%end
+                        do j = idwbuff(1)%beg, idwbuff(1)%end
+                            q_prim_vf(i)%sf(j, k, l) = q_prim_qp%vf(i)%sf(j, k, l)
                         end do
                     end do
                 end do
-                $:END_GPU_PARALLEL_LOOP()
-            end if
+            end do
+            $:END_GPU_PARALLEL_LOOP()
         end if
 
         ! Per-rank compute timing ends here (brackets only the local compute above; excludes
