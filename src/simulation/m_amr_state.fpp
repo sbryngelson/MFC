@@ -53,7 +53,7 @@ module m_amr_state
 
     !> Copy bridge to the shared solver, whose routines take type(scalar_field) and serve the monolithic path too (a pointer view
     !! into the flat store is not attachable on OpenMP offload): load from the store, call, store back, in both directions since the
-    !! dummies are intent(inout). Not GPU_DECLAREd: a declare binds the present-table entry to the descriptor that move_alloc then
+    !! dummies are intent(inout). Not GPU_DECLARE'd: a declare binds the present-table entry to the descriptor that move_alloc then
     !! swaps out (CCE find_in_present_table failed); allocate via move_alloc + GPU_ENTER_DATA instead (CCE lib-4425 otherwise).
     type(scalar_field), allocatable :: amr_cons_br(:)
     !> Batched advance: the bridge spans amr_br_batch blocks along the last active dimension, member i at offset (i-1)*amr_bat_w

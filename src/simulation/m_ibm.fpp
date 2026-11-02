@@ -963,40 +963,34 @@ contains
 
     end subroutine s_find_num_ghost_points
 
-    !> Fill the geometry-independent fields of ghost point local_idx at marker cell (i, j, k): the patch, periodicity, slip flag and
-    !! the wall-adjacency flags. Device routine shared by the unordered and the slab-ordered gather.
-    subroutine s_fill_ghost_point(local_idx, i, j, k)
-
-        $:GPU_ROUTINE(parallelism='[seq]')
-        integer, intent(in) :: local_idx, i, j, k
-        integer             :: patch_id, encoded_patch_id, neighborhood_patch_id, xp, yp, zp
-
-        ghost_points(local_idx)%loc = [i, j, k]
+    ! Fill the geometry-independent fields of ghost point GP at marker cell (i, j, k): patch, periodicity, slip and wall flags.
+    ! Inlined (not a device routine) because NVHPC OpenACC loses the routine's writes to the declared ghost_points.
+    #:def FILL_GHOST_POINT(GP)
+        ghost_points(${GP}$)%loc = [i, j, k]
         encoded_patch_id = ib_markers%sf(i, j, k)
         call s_decode_patch_periodicity(encoded_patch_id, patch_id, xp, yp, zp)
         call s_get_neighborhood_idx(patch_id, neighborhood_patch_id)
-        ghost_points(local_idx)%ib_patch_id = neighborhood_patch_id
-        ghost_points(local_idx)%x_periodicity = xp
-        ghost_points(local_idx)%y_periodicity = yp
-        ghost_points(local_idx)%z_periodicity = zp
-        ghost_points(local_idx)%slip = patch_ib(neighborhood_patch_id)%slip
+        ghost_points(${GP}$)%ib_patch_id = neighborhood_patch_id
+        ghost_points(${GP}$)%x_periodicity = xp
+        ghost_points(${GP}$)%y_periodicity = yp
+        ghost_points(${GP}$)%z_periodicity = zp
+        ghost_points(${GP}$)%slip = patch_ib(neighborhood_patch_id)%slip
 
         #:for X, ID, IDX in [('x', 1, 'i'), ('y', 2, 'j'), ('z', 3, 'k')]
-            ghost_points(local_idx)%DB(${ID}$) = 0
+            ghost_points(${GP}$)%DB(${ID}$) = 0
             if (${ID}$ <= num_dims) then  ! Onlyrun the numeher of dimensions present
                 if (ib_bc_${X}$%beg /= BC_PERIODIC) then
                     if ((${X}$_cc(${IDX}$) - d${X}$(${IDX}$)) < glb_bounds(${ID}$)%beg) then
                         ! if the grid cell is in a wall on the "left"
-                        ghost_points(local_idx)%DB(${ID}$) = -1
+                        ghost_points(${GP}$)%DB(${ID}$) = -1
                     else if ((${X}$_cc(${IDX}$) + d${X}$(${IDX}$)) > glb_bounds(${ID}$)%end) then
                         ! if the grid cell is in a wall on the "right"
-                        ghost_points(local_idx)%DB(${ID}$) = 1
+                        ghost_points(${GP}$)%DB(${ID}$) = 1
                     end if
                 end if
             end if
         #:endfor
-
-    end subroutine s_fill_ghost_point
+    #:enddef
 
     !> Locate all ghost points in the domain
     subroutine s_find_ghost_points()
@@ -1004,6 +998,7 @@ contains
         ! operates on the declare-target module-global ghost_points, so nothing crosses host<->device here
         integer :: i, j, k, ii, jj, kk, gp_layers_z  !< Iterator variables
         integer :: count, count_i, local_idx
+        integer :: patch_id, encoded_patch_id, neighborhood_patch_id, xp, yp, zp
         logical :: is_gp
 
         count = 0
@@ -1019,8 +1014,9 @@ contains
             return
         end if
 
-        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, is_gp, local_idx]', copyin='[count, count_i, glb_bounds, &
-                            & ib_markers%sf]', firstprivate='[gp_layers, gp_layers_z]', present='[ghost_points]', collapse=3)
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, is_gp, local_idx, patch_id, encoded_patch_id, neighborhood_patch_id, &
+                            & xp, yp, zp]', copyin='[count, count_i, glb_bounds, ib_markers%sf]', firstprivate='[gp_layers, &
+                            & gp_layers_z]', present='[ghost_points]', collapse=3)
         do i = 0, m
             do j = 0, n
                 do k = 0, p
@@ -1044,7 +1040,7 @@ contains
                             local_idx = count
                             $:END_GPU_ATOMIC_CAPTURE()
 
-                            call s_fill_ghost_point(local_idx, i, j, k)
+                            @:FILL_GHOST_POINT(local_idx)
                         end if
                     end if
                 end do
@@ -1059,6 +1055,7 @@ contains
     subroutine s_find_ghost_points_ordered()
 
         integer :: i, j, k, ii, jj, kk, gp_layers_z, slab_n, run, c
+        integer :: patch_id, encoded_patch_id, neighborhood_patch_id, xp, yp, zp
         logical :: is_gp
 
         gp_layers_z = gp_layers
@@ -1103,8 +1100,9 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
-        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, is_gp, c]', copyin='[ib_markers%sf, glb_bounds]', &
-                            & firstprivate='[gp_layers, gp_layers_z]', present='[ghost_points, gp_slab]')
+        $:GPU_PARALLEL_LOOP(private='[i, j, k, ii, jj, kk, is_gp, c, patch_id, encoded_patch_id, neighborhood_patch_id, xp, yp, &
+                            & zp]', copyin='[ib_markers%sf, glb_bounds]', firstprivate='[gp_layers, gp_layers_z]', &
+                            & present='[ghost_points, gp_slab]')
         do i = 0, m
             c = gp_slab(i)
             do j = 0, n
@@ -1123,7 +1121,7 @@ contains
                         end do marker_search2
                         if (is_gp) then
                             c = c + 1
-                            call s_fill_ghost_point(c, i, j, k)
+                            @:FILL_GHOST_POINT(c)
                         end if
                     end if
                 end do
