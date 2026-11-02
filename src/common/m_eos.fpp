@@ -86,7 +86,7 @@ contains
             @:EOS_INIT_REFERENCE_STATE(i)
             if (f_is_state_dependent(i)) state_dependent = .true.
         end do
-        ! baked in at build time, so a case whose EOS family differs from the build's would silently run the wrong branch
+        ! baked at build time: a case whose EOS family differs from the build would run the wrong branch
         @:PROHIBIT(state_dependent .neqv. any_state_dependent_eos, &
                    & "This case's equations of state do not match the ones this binary was built for. Rebuild with this case.")
         any_state_dependent_eos_rt = state_dependent
@@ -602,8 +602,7 @@ contains
             pi_inf_K = 0._wp
             qv_K = 0._wp
 
-            ! Stiffened-gas fast path (same arithmetic as the general branch with gamma_i = gammas(i), pi_inf_i = pi_infs(i)):
-            ! avoids dragging the state-dependent EOS chain into every conversion and Riemann kernel
+            ! Stiffened-gas fast path: keeps the state-dependent EOS chain out of every conversion and Riemann kernel
             if (.not. any_state_dependent_eos) then
                 $:GPU_LOOP(parallelism='[seq]')
                 do i = 1, num_fluids

@@ -472,11 +472,8 @@ jobs:
 
       - name: Build (concurrent variants)
         if:   matrix.cluster == 'frontier_amd' && matrix.device == 'gpu'
-        # The suite needs a base, a chemistry and an eos_state_dependent simulation
-        # binary (see the variant list in common/build.sh), and on amdflang each device
-        # LTO link is ~1 h -- building them serially overruns the 2 h walltime. They
-        # touch disjoint staging directories, so submit one SLURM job per variant and
-        # wait on all (mirrors the case-optimization pre-build).
+        # base, chem and eos_state_dependent simulation binaries (see common/build.sh) use disjoint staging dirs; submit one
+        # SLURM job per variant so amdflang LTO links do not serialize past the 2 h walltime, and wait on all.
         run:  |
           pids=""
           for v in base chem eos; do

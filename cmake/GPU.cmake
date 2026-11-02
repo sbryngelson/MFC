@@ -90,11 +90,7 @@ elseif (CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
     add_link_options("SHELL:-hkeepfiles")
 
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        # -h bounds: array-bounds and pointer checking, the Cray equivalent of gfortran's
-        # -fcheck=bounds,pointer / Intel's -check bounds / NVHPC's -Mbounds, all of which the
-        # debug branches above already set. Cray was the ONLY compiler whose debug build had no
-        # bounds checking, so an out-of-bounds write showed up here only as a later, unrelated
-        # allocation failing with an uninitialised descriptor.
+        # -h bounds: Cray array-bounds/pointer checking, matching the other compilers' debug branches above.
         add_compile_options(
                 "SHELL:-h acc_model=auto_async_none"
                 "SHELL: -h acc_model=no_fast_addr"

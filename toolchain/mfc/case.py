@@ -380,8 +380,7 @@ gbl_id = patch_ib(i)%gbl_patch_id
             relativity = 1 if self.params.get("relativity", "F") == "T" else 0
             viscous = 1 if self.params.get("viscous", "F") == "T" else 0
 
-            # Case optimization compiles only the Riemann solver the case selects; -1 means the case
-            # did not pin one, in which case every solver is compiled (see m_riemann_solvers).
+            # Case optimization compiles only the selected Riemann solver; -1 (unpinned) compiles all (see m_riemann_solvers).
             riemann_solver = int(self.params.get("riemann_solver", -1))
             igr = 1 if self.params.get("igr", "F") == "T" else 0
             igr_pres_lim = 1 if self.params.get("igr_pres_lim", "F") == "T" else 0
@@ -432,11 +431,9 @@ gbl_id = patch_ib(i)%gbl_patch_id
         from . import build
 
         def _prepend() -> str:
-            # Like chemistry, a compile-time constant in every build (not only case-optimized ones): left as a runtime
-            # flag, the state-dependent EOS chain stays in the call graph of every conversion and Riemann kernel and
-            # costs registers and occupancy whether or not a fluid uses it. The empty case (a bare ./mfc.sh build)
-            # bakes it False; a mismatch at run time is caught by the PROHIBIT in
-            # s_initialize_variables_conversion_module.
+            # Like chemistry, a compile-time constant in every build: as a runtime flag the state-dependent EOS chain stays in every
+            # conversion and Riemann kernel's call graph, costing registers. The empty case bakes False; a runtime mismatch trips the
+            # PROHIBIT in s_initialize_variables_conversion_module.
             num_fluids_case = int(self.params.get("num_fluids", 1))
             any_eos = any(int(self.params.get(f"fluid_pp({f})%eos", 1)) in EOS_STATE_DEPENDENT_VALUES for f in range(1, num_fluids_case + 1))
             return f"""\

@@ -2166,9 +2166,7 @@ class CaseValidator:
         # inconsistent and the simulation NaNs. See MFlowCode/MFC#1470.
         self.prohibit(chemistry and num_fluids is not None and num_fluids != 1, "chemistry is only supported for single-component flows (num_fluids = 1)")
 
-        # Species diffusion is a chemistry transport term: the simulation sizes the source-flux buffer from component 1 only
-        # when chemistry and diffusion are both on, while every consumer of that buffer keys on diffusion alone, so diffusion
-        # without chemistry reads below the array's first component.
+        # The source-flux buffer is sized from component 1 only when chemistry and diffusion are both on, but consumers key on diffusion alone.
         self.prohibit(diffusion and not chemistry, "chem_params%diffusion requires chemistry = T")
 
         # Chemistry with Euler bubbles is not currently supported: the IBM image-point

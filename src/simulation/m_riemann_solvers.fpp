@@ -69,8 +69,7 @@ contains
         integer :: i, j, k, l, src_lo
 
         #:if MFC_CASE_OPTIMIZATION and riemann_solver != -1
-            ! Case-optimized: only the baked solver's branch exists but riemann_solver is not a case-optimization parameter, so fail
-            ! closed on a mismatch instead of leaving the flux buffers stale
+            ! Case-optimized builds contain only the baked solver: fail closed on a mismatch rather than leave flux buffers stale
             @:PROHIBIT(riemann_solver /= ${riemann_solver}$, &
                        & "this case-optimized binary was built for riemann_solver = ${riemann_solver}$; rebuild for the value in the case file, or build without --case-optimization")
         #:endif
@@ -82,7 +81,7 @@ contains
         end do
         $:GPU_UPDATE(device='[Gs_rs]')
 
-        ! Always allocated: the HLLC kernels name it under `if (viscous)` and amdflang's present:allocatable aborts on unallocated
+        ! Always allocated: HLLC kernels name it under `if (viscous)`; amdflang's present:allocatable aborts on unallocated
         @:ALLOCATE(Res_gs(1:2, 1:max(1, Re_size_max)))
 
         if (viscous) then
@@ -102,9 +101,8 @@ contains
         @:ALLOCATE(flux_rsx_vf(-1:m, -1:n, -1:p, 1:sys_size))
         @:ALLOCATE(vel_src_rsx_vf(-1:m+1, -1:n+1, -1:p+1, 1:num_vels))
 
-        ! Size the source-flux buffer to the band that is written (full-domain arrays). Chemistry diffusion: from 1, since
-        ! m_chemistry takes a flat dummy dimension(-1:, -1:, -1:, 1:) whose lower bounds must agree. Viscous/surface tension/heat
-        ! conduction: from mom%beg (heat conduction writes E, below adv%beg). Otherwise from adv%beg.
+        ! Source-flux band starts at 1 for chemistry diffusion (m_chemistry's flat dummy needs lower bound 1), at mom%beg for
+        ! viscous/surface tension/heat conduction (conduction writes E, below adv%beg), else at adv%beg.
         if (chemistry .and. chem_params%diffusion) then
             src_lo = 1
         else if (viscous .or. surface_tension .or. heat_conduction) then
@@ -114,8 +112,8 @@ contains
         end if
         @:ALLOCATE(flux_src_rsx_vf(-1:m+1, -1:n+1, -1:p+1, src_lo:sys_size))
 
-        ! The geometric source flux exists only on cyl_coord paths (grid_geometry == 3 implies cyl_coord); zeroed on allocation
-        ! since the solvers write only the components they touch while m_rhs reads the whole band.
+        ! Geometric source flux exists only on cyl_coord paths (grid_geometry == 3 implies cyl_coord);
+        ! zeroed because solvers write only the components they touch while m_rhs reads the whole band.
         if (cyl_coord) then
             @:ALLOCATE(flux_gsrc_rsx_vf(-1:m, -1:n, -1:p, 1:sys_size))
             $:GPU_PARALLEL_LOOP(collapse=4)
@@ -130,8 +128,8 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
         else
-            ! degenerate placeholders (here and below): HLLC kernels name these in branches never taken, and amdflang aborts on an
-            ! unallocated named array
+            ! degenerate placeholders (here and below): HLLC kernels name these in untaken branches and amdflang aborts on
+            ! unallocated arrays
             @:ALLOCATE(flux_gsrc_rsx_vf(-1:-1, -1:-1, -1:-1, 1:1))
         end if
 
@@ -158,8 +156,7 @@ contains
             end if
             if (cyl_coord) then
                 @:ALLOCATE(flux_gsrc_hatR_rsx_vf(-1:m, -1:n, -1:p, 1:sys_size))
-                ! zeroed as flux_gsrc_rsx_vf: nothing writes it, but s_finalize_riemann_solver_hatR copies it into flux_gsrc_n(id),
-                ! which m_rhs folds into the RHS
+                ! zeroed as flux_gsrc_rsx_vf: s_finalize_riemann_solver_hatR copies it into flux_gsrc_n(id), which m_rhs uses
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, sys_size
                     do l = -1, p

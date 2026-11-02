@@ -110,7 +110,7 @@ def _legacy_fortranize(expr, var_map):
 
 
 CORPUS = [
-    # harvested from examples/*/case.py with the grep commands above
+    # harvested as above
     "0.5 + 0.2 * sin(2.0 * pi * x / lx)",
     "0.5 - 0.5*sin(2*pi*x)",
     "0.5 + 0.5*sin(2*pi*x)",

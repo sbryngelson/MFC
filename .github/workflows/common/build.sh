@@ -54,20 +54,13 @@ if [ "$job_cluster" = "phoenix" ]; then
 fi
 
 # --- Variant selection ---
-# The suite needs three simulation binaries, one per always-on compile-time axis in
-# Case.get_fpp's _prepend(): the chemistry mechanism is compiled in, and so is
-# eos_state_dependent. Each distinct fpp hashes to its own build slug, for every
-# target including syscheck. On amdflang each device link is ~1 hour, so building
-# them serially exceeds the 2 h walltime. $job_variant lets the caller split them
+# The suite needs three simulation binaries (base, chem, eos_state_dependent), each with its own build slug.
+# Serial amdflang device links exceed the 2 h walltime, so $job_variant lets the caller split them
 # into concurrent jobs that write to disjoint staging directories:
-#   base -> the empty case, which bakes chemistry=False and eos_state_dependent=False
+#   base -> empty case (chemistry=False, eos_state_dependent=False)
 #   chem -> the chemistry variant only
-#   eos  -> the eos_state_dependent=True variant (Mie-Gruneisen, JWL, Vinet). All such
-#           cases share one slug per target, so any one of them builds it for all.
+#   eos  -> eos_state_dependent=True (Mie-Gruneisen, JWL, Vinet); one slug per target, so any such case builds it
 # Unset builds everything in this job (default for every other cluster).
-#
-# A variant missing from this list is now caught up front by the --no-build check in
-# mfc/test/test.py rather than by srun failing to exec a path that was never built.
 case "${job_variant:-}" in
     base) build_cmd=(./mfc.sh build -j 8 $build_opts) ;;
     chem) build_cmd=(./mfc.sh test -v --dry-run -a -j 8 -o Chemistry $build_opts) ;;

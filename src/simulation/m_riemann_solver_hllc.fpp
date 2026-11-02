@@ -5,13 +5,8 @@
 !> @brief HLLC Riemann solver with contact restoration, Toro et al. Shock Waves (1994)
 #:include 'case.fpp'
 #! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR).
-#! This is safe because the arrays a kernel names inside physics branches are always allocated:
-#! Re_avg_rsx_vf, flux_gsrc_rsx_vf, mom_sp_rsx_vf degenerate when viscous / cyl_coord / qbmm are
-#! off, Res_gs and Re_idx at max(1, Re_size_max) (m_riemann_solvers, m_global_parameters);
-#! weight/R0/rs/vs/ps exist whenever their bubbles_euler kernel launches; nc_iface_vel_rsx_vf is
-#! forced on by the hypoelastic path that names it; flux_rsx/src/vel_src and the fluid tables
-#! always exist. Without it every launch re-maps the descriptor of each named allocatable. A kernel
-#! naming an unallocated array aborts under present, so keep that invariant when adding kernels.
+#! Safe because arrays named in physics branches are always allocated (degenerate placeholders when viscous/cyl_coord/qbmm
+#! are off); keep that invariant when adding kernels.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 
@@ -49,8 +44,7 @@ contains
         integer, intent(in)               :: norm_dir
         type(int_bounds_info), intent(in) :: ix, iy, iz
 
-        ! Case optimization compiles this kernel only when the case selects this solver. Besides saving
-        ! build time, it keeps the compiler from having to codegen a kernel the case can never call.
+        ! Compiled only when case optimization selects this solver
 
         #:if not MFC_CASE_OPTIMIZATION or riemann_solver in (-1, 2)
             #:if not MFC_CASE_OPTIMIZATION and USING_AMD
@@ -873,9 +867,8 @@ contains
                             ! statement and private variable from the pure-fluid emission, keeping its body and directive
                             ! identical to the single kernel a build without hypoelasticity would compile. Sharing one kernel
                             ! pinned it at the GPU register ceiling for every HLLC user.
-                            ! One source of truth for this kernel's private variables: both emissions take _hllc_s* (scalars) and
-                            ! _hllc_a* (arrays); only the hypoelastic one adds _hllc_e*/_hllc_ea. (Two hand-written lists drifted: a
-                            ! variable private in one and shared in the other races under OpenMP offload.)
+                            ! Private variables come from one list: both emissions take _hllc_s*/_hllc_a*, only the hypoelastic one
+                            ! adds _hllc_e*/_hllc_ea (separate lists drifted and raced under OpenMP offload).
                             #:set _hllc_s1 = ['i', 'j', 'k', 'l', 'q', 'T_L', 'T_R', 'vel_L_rms', 'vel_R_rms', 'pres_L', 'pres_R', &
                                 & 'rho_L', 'gamma_L', 'pi_inf_L', 'qv_L', 'rho_R', 'gamma_R']
                             #:set _hllc_s2 = ['pi_inf_R', 'qv_R', 'alpha_L_sum', 'alpha_R_sum', 'E_L', 'E_R', 'MW_L', 'MW_R', &
@@ -910,9 +903,8 @@ contains
                                 #:set _hllc_priv = '[' + ', '.join(_hllc_s1 + _hllc_s2 + _hllc_s3 + _hllc_s4) + ']'
                                 #:set _hllc_arr = '[' + ', '.join(_hllc_a1 + _hllc_a2) + ']'
                             #:endif
-                            ! The two calls below are identical on purpose: an offload kernel is named after the .fpp line of its
-                            ! GPU_PARALLEL_LOOP, so a shared call would give both emissions one name and amdflang would launch the
-                            ! wrong one (still faults on AFAR 24.3). Do not merge them.
+                            ! Identical calls on purpose: offload kernels are named by the .fpp line of their GPU_PARALLEL_LOOP, so
+                            ! a shared call gives both emissions one name and amdflang launches the wrong one. Do not merge.
                             #:if HYPO
                                 $:GPU_PARALLEL_LOOP(collapse=3, private=_hllc_priv, privateArrays=_hllc_arr, copyin='[is1, is2, &
                                                     & is3]', firstprivate='[Re_size_loc1, Re_size_loc2]')

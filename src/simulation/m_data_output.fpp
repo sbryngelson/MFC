@@ -500,9 +500,7 @@ contains
         call my_inquire(file_path, file_exist)
         if (file_exist) call s_delete_directory(trim(t_step_dir))
         call s_create_directory(trim(t_step_dir))
-        ! The serial readers (post_process, and the simulation on restart) look for bc_type.dat and bc_buffers.dat in the
-        ! step directory; only pre_process wrote them (step 0), so every later step aborted. The buffers written are the
-        ! ones read at startup, i.e. the values pre_process prescribed.
+        ! Serial readers (post_process, restart) need bc_type.dat and bc_buffers.dat in every step directory, not just step 0.
         if (bc_io) call s_write_serial_boundary_condition_files(bc_type, t_step_dir, .false.)
 
         file_path = trim(t_step_dir) // '/x_cb.dat'

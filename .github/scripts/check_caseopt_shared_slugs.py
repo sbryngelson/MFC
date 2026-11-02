@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
-"""Assert the shared-target invariant that prebuild-case-optimization.sh relies on.
+"""Assert every benchmark case shares benchmarks[0]'s slug for syscheck, pre_process and post_process.
 
-That script builds syscheck, pre_process and post_process once, from benchmarks[0], behind a
-done-marker so concurrent shards skip them. That serialization only covers the benchmarks[0]
-slug. It is correct while every benchmark case hashes those three targets to that same slug:
-if two cases in *different* shards shared some other slug, both shards would build that
-staging directory at the same time, with no marker to serialize them.
-
-A target's slug covers Case.get_fpp, so it moves when the case changes any compile-time axis
-baked into it -- _prepend() bakes chemistry and eos_state_dependent (a Mie-Gruneisen, JWL or
-Vinet fluid flips the latter), and the pre_process half bakes analytic initial conditions.
-None of the current benchmarks trip any of those, which is precisely the property this check
-pins down so a future benchmark cannot quietly remove it.
+prebuild-case-optimization.sh builds those once from benchmarks[0] behind a done-marker; a case with a different
+slug (changed chemistry, eos_state_dependent or analytic ICs) would build its staging dir concurrently, unserialized.
 
 Usage: check_caseopt_shared_slugs.py <acc|mp|no> <case.py> [<case.py> ...]
 """
@@ -34,8 +25,7 @@ def main(argv):
     from mfc.state import MFCConfig
 
     state.gCFG = MFCConfig(gpu=interface)
-    # Only the keys the loader and the case files actually read: load() forwards ARGS() to each
-    # case.py as its DICT, and the benchmarks read gpu/nodes/tasks_per_node from it.
+    # Only keys load() forwards to case.py as DICT (benchmarks read gpu/nodes/tasks_per_node).
     state.gARG = {
         "gpu": interface != "no",
         "nodes": 1,

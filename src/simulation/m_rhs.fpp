@@ -4,13 +4,8 @@
 
 #:include 'case.fpp'
 #! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR).
-#! This is safe because every conditionally allocated module array a kernel here names launches
-#! only under its allocation's own condition (blkmod/alpha/Kterm: alt_soundspeed;
-#! flux_n/flux_gsrc_n/rhs_hat*: dual pass; nc_iface_vel_n: alpha_iface + alt_soundspeed, a subset
-#! of use_nc_iface_vel; tau_Re_vf: viscous; qL/qR_*, cons_copy_idx: .not. igr; flux_gsrc_rsx_vf: cyl_coord;
-#! dy/y_cc/dz: idir <= num_dims). Without it every launch re-maps the descriptor of each named
-#! allocatable. A kernel naming an unallocated array aborts under present, so keep that invariant
-#! when adding kernels.
+#! Safe because each conditionally allocated array a kernel names launches only under its allocation's condition;
+#! keep that invariant when adding kernels.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 
@@ -328,9 +323,8 @@ contains
             @:ALLOCATE(dqR_prim_dy_n(1:num_dims))
             @:ALLOCATE(dqR_prim_dz_n(1:num_dims))
 
-            ! qL_prim/qR_prim stage the reconstructed momentum components for the viscous path only (s_get_viscous fills them,
-            ! s_compute_viscous_source_flux and the weno_Re_flux branches read them), so an inviscid run skips the payload; the vf
-            ! containers stay allocated so the dummies remain valid
+            ! qL_prim/qR_prim stage reconstructed momentum for the viscous path only, so inviscid runs skip the payload;
+            ! the vf containers stay allocated so the dummies remain valid
             do i = 1, num_dims
                 @:ALLOCATE(qL_prim(i)%vf(1:sys_size))
                 @:ALLOCATE(qR_prim(i)%vf(1:sys_size))
@@ -584,8 +578,8 @@ contains
 
     end subroutine s_initialize_rhs_module
 
-    !> Select the q_cons_qp components the per-RHS copy must fill. Otherwise the conversion reads q_cons_vf directly, and only the
-    !! components q_prim_qp aliases (written by the conversion as primitives) need the copy for their ghost layers.
+    !> Select the q_cons_qp components the per-RHS copy fills: only those q_prim_qp aliases need it (ghost layers); otherwise the
+    !! conversion reads q_cons_vf directly.
     impure subroutine s_initialize_cons_copy
 
         integer :: l
@@ -696,7 +690,7 @@ contains
             if (t_step == t_step_stop) return
         end if
 
-        ! Per-rank compute timing starts here, after the halo exchange and early returns, so it excludes the halo wait
+        ! Per-rank compute timing starts here (excludes the halo wait)
 
         if (qbmm) call s_mom_inv(q_cons_qp%vf, q_prim_qp%vf, mom_sp, mom_3d, pb_in, rhs_pb, mv_in, rhs_mv, idwbuff(1), &
             & idwbuff(2), idwbuff(3))
@@ -937,7 +931,7 @@ contains
         ! END: Additional physics and source terms
 
         ! q_prim_vf is copied out only for its readers: probes, IB, Lagrangian bubbles, synthetic turbulence (m_time_steppers) every
-        ! stage, run_time_info after the first. hyper_cleaning reads psi from the previous stage's copy, so psi is always copied
+        ! stage, run_time_info after the first; psi is always copied since hyper_cleaning reads the previous stage's copy
         copy_beg = 1
         copy_end = sys_size
         if (.not. (probe_wrt .or. ib .or. bubbles_lagrange .or. synthetic_turbulence .or. (run_time_info .and. stage == 1))) then
@@ -1094,8 +1088,7 @@ contains
         ! Computing Riemann Solver Flux and Source Flux
         call nvtxStartRange("RHS-RIEMANN-SOLVER")
         if (hypo_nc_mode == hypo_nc_mode_dual_pass) then
-            ! Fused dual-pass: one call computes both anchored flux sets (hat_L -> flux_n via the solver's finalize; hat_R into
-            ! flux_hatR_rs*, finalized by s_finalize_riemann_solver_hatR between the two RHS assemblies)
+            ! Fused dual-pass: one call fills flux_n (hat_L) and flux_hatR_rs* (hat_R, finalized by s_finalize_riemann_solver_hatR)
             call s_hypo_hlld_riemann_solver(qR_rsx_vf, dqR_prim_dx_n(id)%vf, dqR_prim_dy_n(id)%vf, dqR_prim_dz_n(id)%vf, &
                                             & qR_prim(id)%vf, qL_rsx_vf, dqL_prim_dx_n(id)%vf, dqL_prim_dy_n(id)%vf, &
                                             & dqL_prim_dz_n(id)%vf, qL_prim(id)%vf, q_prim_qp%vf, flux_n(id)%vf, &

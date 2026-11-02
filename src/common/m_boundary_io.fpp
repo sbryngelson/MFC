@@ -60,8 +60,7 @@ contains
 
     end subroutine s_create_mpi_types
 
-    !> Write boundary condition type and the packed buffer data to serial (unformatted) restart files. The caller packs bc_buffers
-    !! first (pre_process) or writes the buffers it read at startup (simulation).
+    !> Write bc type and bc_buffers to serial restart files (pre_process packs them first; simulation writes the startup values).
     subroutine s_write_serial_boundary_condition_files(bc_type, step_dirpath, old_grid_in)
 
         type(integer_field), dimension(1:num_dims,1:2), intent(in) :: bc_type
