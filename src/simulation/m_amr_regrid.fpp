@@ -864,6 +864,7 @@ contains
         integer, intent(inout)                  :: nboxes, box_level(:)
         type(t_box), allocatable                :: grown(:)
         integer                                 :: lev, plo, phi, newlo, kb, ob, jch, nloc_send, ntot_g, nmych, ntot_ch, nct
+        integer                                 :: ls  !< host scalar slot: NVHPC maps an update-clause subscript array
         integer                                 :: mlo(3), mhi(3)
         integer, allocatable                    :: mlo_all(:,:), mhi_all(:,:), powner(:), mych(:,:), gch(:,:), chord(:)
         integer, allocatable                    :: skb(:), gkb(:), ctags(:,:)
@@ -881,7 +882,8 @@ contains
         ! host-refresh the old blocks: the sensor reads the flat store on the host, stale until the stash's update
         do ob = 1, amr_num_blocks
             if (.not. amr_owns_all(ob)) cycle
-            $:GPU_UPDATE(host='[amr_cons_st(:, :, :, :, amr_loc_of(ob))]')
+            ls = amr_loc_of(ob)
+            $:GPU_UPDATE(host='[amr_cons_st(:, :, :, :, ls)]')
         end do
         call s_amr_refresh_my_blocks()
 

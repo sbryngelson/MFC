@@ -41,6 +41,7 @@ contains
         integer, intent(in)                  :: t_step
         character(LEN=path_len + 3*name_len) :: file_loc
         integer                              :: i, k, wext(3)
+        integer                              :: ls
 
 #ifdef MFC_MPI
         integer :: ifile, ierr, cnt, idx, fi, fj, fk, bhdr(amr_restart_blk_hdr_ints), ibytes, sbytes
@@ -56,7 +57,8 @@ contains
         ! host consumer: fine state is device-current during stepping
         do k = 1, amr_num_blocks
             if (amr_owns_all(k)) then
-                $:GPU_UPDATE(host='[amr_cons_st(:, :, :, :, amr_loc_of(k))]')
+                ls = amr_loc_of(k)
+                $:GPU_UPDATE(host='[amr_cons_st(:, :, :, :, ls)]')
             end if
         end do
 
@@ -234,6 +236,7 @@ contains
 
         character(LEN=*), intent(in) :: file_loc
         integer                      :: i, k, ghdr(3), reg(6), lvl, rm, rn, rp, nblk
+        integer                      :: ls
         logical, allocatable         :: had_data(:)
 
         open (2, FILE=trim(file_loc), form='unformatted', ACTION='read', STATUS='old')
@@ -260,7 +263,8 @@ contains
             end do
             ! Push this block before the next s_amr_alloc_slot: a store growth pulls device->host first and would overwrite this
             ! block with the stale device copy. The store is device-authoritative at every alloc point.
-            $:GPU_UPDATE(device='[amr_cons_st(:, :, :, :, amr_loc_of(k))]')
+            ls = amr_loc_of(k)
+            $:GPU_UPDATE(device='[amr_cons_st(:, :, :, :, ls)]')
         end do
         close (2)
         call s_amr_restart_install_blocks()
@@ -283,6 +287,7 @@ contains
 
 #ifdef MFC_MPI
         integer                             :: i, k, ghdr(3), nblk, ifile, ierr, cnt, idx, fi, fj, fk
+        integer                             :: ls
         integer                             :: mown(amr_restart_blk_own_ints)
         type(t_amr_restart_catalog)         :: cat
         integer, dimension(MPI_STATUS_SIZE) :: status
@@ -344,7 +349,8 @@ contains
         ! growth and compaction left undefined
         do k = 1, amr_num_blocks
             if (amr_owns_all(k)) then
-                $:GPU_UPDATE(device='[amr_cons_st(:, :, :, :, amr_loc_of(k))]')
+                ls = amr_loc_of(k)
+                $:GPU_UPDATE(device='[amr_cons_st(:, :, :, :, ls)]')
             end if
         end do
 #endif
