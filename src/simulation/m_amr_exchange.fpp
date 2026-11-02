@@ -745,8 +745,8 @@ contains
                   & amr_sw_pxhi(amr_num_seam_pairs), amr_sw_pfm(3, amr_num_seam_pairs))
         ! Seam wave (plan-based exchange): the cross-rank pairs are one aggregated message per (peer, direction). Every pair
         ! contributes one send and one recv transfer on each of its two owners; both ranks walk the same replicated pair list
-        ! ascending, so the wire layout agrees with no metadata exchange. Wire is wp with the same stp cast on unpack. Same-rank pairs
-        ! use the batched kernel at drain. The wave stays open across the fill waves, so it has its own handle and sides.
+        ! ascending, so the wire layout agrees with no metadata exchange. Wire is wp with the same stp cast on unpack. Same-rank
+        ! pairs use the batched kernel at drain. The wave stays open across the fill waves, so it has its own handle and sides.
         call s_amr_wave_open(amr_wave_seam, 5)
         ! transfer records: blk = the slot the data belongs to, bl = (d, dlo, dhi) its slab, bh = (peer slot, its dlo, dhi)
         call s_amr_wave_reset(amr_wseam_snd); call s_amr_wave_reset(amr_wseam_rcv)

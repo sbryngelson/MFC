@@ -207,7 +207,8 @@ contains
 
     end subroutine s_amr_wave_add_slabs
 
-    !> Lay the side out in its pool: peers in first-appearance order, each peer's transfers contiguous in appended order; grows pool (device-resident when dev) to the words in use.
+    !> Lay the side out in its pool: peers in first-appearance order, each peer's transfers contiguous in appended order; grows pool
+    !! (device-resident when dev) to the words in use.
     impure subroutine s_amr_wave_close(s, pool, dev)
 
         type(t_amr_wave_side), intent(inout) :: s

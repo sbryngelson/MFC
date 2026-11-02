@@ -184,8 +184,8 @@ contains
     end subroutine s_amr_freg_pack
 
     !> The split-ownership level>=2 freg exchange as one wave, run once before the reflux fold (the registers are final after the
-    !! advance, and the applies keep their per-box reverse-order position). Same zero-copy design as the faces
-    !! wave; keyed tags on band 1 (the faces wave is band 0) keep the two disjoint.
+    !! advance, and the applies keep their per-box reverse-order position). Same zero-copy design as the faces wave; keyed tags on
+    !! band 1 (the faces wave is band 0) keep the two disjoint.
     impure subroutine s_amr_freg_wave()
 
 #ifdef MFC_MPI
@@ -237,8 +237,8 @@ contains
 
     end subroutine s_amr_freg_wave
 
-    !> Post one zero-copy request per flagged face register of the current slot (block k): dir 1 sends to / 2 receives from peer,
-    !! in (direction, face) order.
+    !> Post one zero-copy request per flagged face register of the current slot (block k): dir 1 sends to / 2 receives from peer, in
+    !! (direction, face) order.
     impure subroutine s_amr_freg_faces_req(dir, peer, f_lo, f_hi)
 
         integer, intent(in) :: dir, peer
