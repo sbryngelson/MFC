@@ -35,7 +35,6 @@ module m_amr_store
     use m_mpi_proxy, only: s_mpi_abort  ! @:ASSERT expands to it
     use m_variables_conversion, only: s_convert_species_to_mixture_variables_kernel, s_compute_pressure, enforce_density_floor_vc
     use m_phase_timing
-    use m_amr_xchg_audit  ! per-call-site accounting of every AMR p2p transfer (s_xa_rec + XA_* site ids)
     use m_amr_state
     use m_amr_distribution
 

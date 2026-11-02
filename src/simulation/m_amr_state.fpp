@@ -23,7 +23,6 @@ module m_amr_state
     use m_mpi_common, only: s_mpi_allreduce_array_max
     use m_amr_registers, only: s_amr_parent_foot
     use m_phase_timing
-    use m_amr_xchg_audit  ! per-call-site accounting of every AMR p2p transfer (s_xa_rec + XA_* site ids)
     use m_bubbles_EL, only: s_lag_cloud_bbox_local
 
     implicit none
