@@ -52,11 +52,7 @@ else
 fi
 
 # Format Fortran files with ffmt (single-pass, idempotent).
-# ffmt reports structure it cannot match (e.g. "unmatched FortranBlockClose") as a WARNING on stderr
-# and still exits 0. Discarding stderr therefore hid malformed Fortran -- an unbalanced end do /
-# end block formatted and linted clean, and the failure only surfaced at the compiler. Capture
-# stderr, always show it, and treat the structural warnings as fatal: they mean the source will not
-# compile. A clean tree emits none of these, so this cannot fire on well-formed code.
+# ffmt prints unmatched-structure warnings to stderr yet exits 0: show stderr and treat them as fatal.
 FFMT_ERR="$(mktemp)"
 trap 'rm -f "$FFMT_ERR"' EXIT
 ffmt -j ${JOBS:-1} $FORTRAN_DIRS 2>"$FFMT_ERR"
@@ -66,8 +62,7 @@ if [ $FFMT_RC -ne 0 ]; then
     error "Formatting Fortran files failed: ffmt."
     exit 1
 fi
-# the structural warnings name the construct ("unmatched FortranBlockClose"): match that, not the bare word, which
-# any future diagnostic (or a path) could carry
+# match the construct name, not the bare word, which a diagnostic or path could carry
 if grep -q "unmatched Fortran" "$FFMT_ERR"; then
     error "ffmt reported unmatched Fortran block structure: the source will not compile."
     exit 1

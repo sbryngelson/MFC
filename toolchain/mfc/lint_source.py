@@ -210,11 +210,9 @@ def check_raw_directives(repo_root: Path) -> list[str]:
 
 
 def check_stage_guards(repo_root: Path) -> list[str]:
-    """Flag the per-executable preprocessor guards (MFC_PRE_PROCESS, MFC_SIMULATION, MFC_POST_PROCESS) in source.
+    """Flag per-executable preprocessor guards (MFC_PRE_PROCESS, MFC_SIMULATION, MFC_POST_PROCESS) in source.
 
-    src/common/ carries no stage-specific code paths: stage-varying behaviour is passed in as an argument or an
-    initialization policy, and stage-only code lives in that stage's directory. The defines still exist as CMake
-    target selectors, which is why the guard compiles; the lint is what keeps it out.
+    Stage-varying behaviour is passed as an argument; stage-only code lives in that stage's directory.
     """
     errors: list[str] = []
     src_dir = repo_root / SRC_DIR

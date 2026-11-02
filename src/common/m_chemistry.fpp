@@ -310,9 +310,7 @@ contains
     subroutine s_compute_chemistry_diffusion_flux(idir, q_prim_qp, flux_src_flat, irx, iry, irz, q_T_sf)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_prim_qp
-        !> Flat (x, y, z, var) source-flux buffer. m_chemistry lives in src/common, which carries no per-target guards and so cannot
-        !! `use m_riemann_state` -- hence a plain-array dummy rather than reading the module array directly. Still far cheaper per
-        !! launch than the scalar_field dummy it replaces.
+        !> Flat (x, y, z, var) source-flux buffer; a plain-array dummy because src/common cannot `use m_riemann_state`.
         real(wp), dimension(-1:,-1:,-1:,1:), intent(inout) :: flux_src_flat
         type(int_bounds_info), intent(in) :: irx, iry, irz
         integer, intent(in) :: idir

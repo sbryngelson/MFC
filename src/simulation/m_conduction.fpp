@@ -10,9 +10,7 @@
 module m_conduction
 
     use m_global_parameters
-    !> This branch assembles the source fluxes in the reshaped m_riemann_state buffer rather than in flux_src_n (which it allocates
-    !! only for hypo_nc_mode_dual_pass), so the conduction flux is accumulated there too -- see s_compute_additional_physics_rhs,
-    !! which reads it back.
+    !> Conduction flux accumulates in the reshaped m_riemann_state buffer (flux_src_n exists only for hypo_nc_mode_dual_pass).
     use m_riemann_state, only: flux_src_rsx_vf
 
     implicit none

@@ -38,8 +38,7 @@ contains
         integer, intent(in)               :: norm_dir
         type(int_bounds_info), intent(in) :: ix, iy, iz
 
-        ! Case optimization compiles this kernel only when the case selects this solver. Besides saving
-        ! build time, it keeps the compiler from having to codegen a kernel the case can never call.
+        ! Compiled only when case optimization selects this solver
 
         #:if not MFC_CASE_OPTIMIZATION or riemann_solver in (-1, 1)
             #:if not MFC_CASE_OPTIMIZATION and USING_AMD

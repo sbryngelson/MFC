@@ -28,16 +28,10 @@
             #:elif MFC_COMPILER == CCE_COMPILER_ID
                 #:set default_val = 'defaultmap(tofrom:aggregate) defaultmap(present:allocatable) defaultmap(present:pointer) '
             #:elif MFC_COMPILER == AMD_COMPILER_ID
-                #! Opt-in per source file (`#:set MFC_OMP_PRESENT_ALLOCATABLE = True` before the macros include): emit
-                #! present:allocatable as CCE does. Without it amdflang maps every allocatable array of derived type a
-                #! kernel touches (e.g. a derived-type field array) on every launch, walking and re-attaching each component, a cost
-                #! linear in the component count, and the per-element mapper it generates for the type then taxes every
-                #! kernel in that compilation unit.
-                #! Not the default: a kernel naming a module allocatable array that is unallocated at launch (fine under
-                #! the implicit map, which maps 0 bytes) aborts under `present`, declare-target or not; null allocatable
-                #! or pointer components are fine. m_variables_conversion's conversion kernel names the bubbles-only
-                #! weight/R0, so a file opts in only once every kernel that names a conditionally allocated array is
-                #! shown to launch only under that same condition.
+                #! Opt-in per file (`#:set MFC_OMP_PRESENT_ALLOCATABLE = True` before the include): emit present:allocatable
+                #! as CCE does. Without it amdflang re-maps every derived-type allocatable each launch, and its per-element
+                #! mapper taxes every kernel in the unit. Not the default: a kernel naming a module allocatable that is
+                #! unallocated at launch aborts under `present`; opt in only once none does.
                 #:if getvar('MFC_OMP_PRESENT_ALLOCATABLE', False)
                     #:set default_val = 'defaultmap(present:allocatable) '
                 #:else
@@ -86,7 +80,7 @@
     #! NOT equivalent to no_create on most targets -- OMP_DEFAULT_STR emits nothing unless
     #! the caller passes default='present', and even then only CCE maps allocatables and
     #! pointers as present; NVHPC/PGI and the fallback map them tofrom, which copies rather
-    #! than reuses, and LLVMFlang emits nothing unless the file opts in (MFC_OMP_PRESENT_ALLOCATABLE).
+    #! than reuses; LLVMFlang needs MFC_OMP_PRESENT_ALLOCATABLE.
     #! Do NOT #:stop here: GPU_DATA expands both backends before #if selects one, so
     #! aborting would break OpenACC builds, where no_create is supported natively.
     #:set no_create_val = ''
@@ -185,7 +179,7 @@
     #:set collapse_val = GEN_COLLAPSE_STR(collapse)
     #:set parallelism_val = OMP_PARALLELISM_STR(parallelism)
     #:set default_val = OMP_DEFAULT_STR(default)
-    #! amdflang maps a private local array tofrom on every launch (a blocking copy each way); alloc skips both copies
+    #! amdflang maps private local arrays tofrom each launch; alloc skips both copies
     #:if MFC_COMPILER == AMD_COMPILER_ID
         #:set default_val = default_val.strip('\n') + OMP_MAP_STR('alloc', privateArrays).strip('\n')
     #:endif
@@ -329,9 +323,8 @@
     #! to do, which is what GPU_DATA's own #else branch already does when neither backend
     #! is enabled. A #:stop is not an option here, for the reason in OMP_NOCREATE_STR.
     #! Only no_create earns that silence. If the caller asked for some other clause and
-    #! the backend produced nothing for it -- default='present' on LLVMFlang without the
-    #! file opt-in, where OMP_DEFAULT_STR returns an empty string -- keep emitting the bare directive so the
-    #! build fails loudly rather than silently discarding a region that was asked for.
+    #! the backend emitted nothing (e.g. default='present' on LLVMFlang without the file opt-in), emit the bare
+    #! directive so the build fails loudly rather than silently dropping the region.
     #:set other_clause_requested = copy is not None or copyin is not None or &
         & copyinReadOnly is not None or copyout is not None or create is not None or &
         & present is not None or deviceptr is not None or attach is not None or &

@@ -1939,8 +1939,7 @@ contains
 
     end subroutine s_write_restart_lag_bubbles
 
-    !> Physical-space bounding box of this rank's Lagrangian bubbles (committed step positions, register 1). Rank-local: the caller
-    !! allreduces if it needs the global cloud. Returns pmin > pmax when the rank holds no bubbles.
+    !> Rank-local bounding box of Lagrangian bubble positions; pmin > pmax when the rank holds none.
     impure subroutine s_lag_cloud_bbox_local(pmin, pmax)
 
         real(wp), dimension(3), intent(out) :: pmin, pmax

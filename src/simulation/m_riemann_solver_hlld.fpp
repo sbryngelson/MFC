@@ -30,8 +30,7 @@ contains
         integer, intent(in)                                          :: norm_dir
         type(int_bounds_info), intent(in)                            :: ix, iy, iz
 
-        ! Case optimization compiles this kernel only when the case selects this solver. Besides saving
-        ! build time, it keeps the compiler from having to codegen a kernel the case can never call.
+        ! Compiled only when case optimization selects this solver
 
         #:if not MFC_CASE_OPTIMIZATION or riemann_solver in (-1, 4)
             ! Local variables:
@@ -125,9 +124,9 @@ contains
                                     end if
                                 end if
 
-                                ! Mixture coefficients inline: with the EOS flag folded at compile time amdflang miscompiles this
-                                ! kernel's two direct calls into s_compute_mixture_coefficients. mhd pins num_fluids = 1 with a
-                                ! stiffened-gas EOS, so this is that routine's fast path (bubbles_euler is prohibited with mhd).
+                                ! Inline mixture coefficients: with the EOS flag folded at compile time amdflang miscompiles direct
+                                ! calls to s_compute_mixture_coefficients. mhd pins num_fluids = 1 stiffened gas, i.e. that
+                                ! routine's fast path.
                                 rho%L = 0._wp; gamma%L = 0._wp; pi_inf%L = 0._wp; qv%L = 0._wp
                                 rho%R = 0._wp; gamma%R = 0._wp; pi_inf%R = 0._wp; qv%R = 0._wp
                                 $:GPU_LOOP(parallelism='[seq]')

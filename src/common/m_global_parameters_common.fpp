@@ -37,11 +37,10 @@ module m_global_parameters_common
     !> @name Chemistry modeling (Fypp compile-time constant; same value in all targets)
     !> @{
     logical, parameter :: chemistry = .${chemistry}$.
-    !> Some fluid's EOS coefficients vary with density (Mie-Gruneisen, JWL, Vinet): a Fypp compile-time constant, so the
-    !! state-dependent chain is dead code in a stiffened-gas build (see toolchain case.py).
+    !> Some fluid's EOS is density-dependent (Mie-Gruneisen, JWL, Vinet); Fypp constant, so the chain is dead code in stiffened-gas
+    !! builds.
     logical, parameter :: any_state_dependent_eos = .${eos_state_dependent}$.
-    !> Runtime copy for the CFL kernel in s_write_run_time_information only (NVHPC OpenMP offload reads an invalid q_prim_vf address
-    !! there with the branch compiled out).
+    !> Runtime copy for the CFL kernel only: NVHPC OpenMP offload reads an invalid q_prim_vf address with the branch compiled out.
     logical :: any_state_dependent_eos_rt
     $:GPU_DECLARE(create='[any_state_dependent_eos_rt]')
     !> @}

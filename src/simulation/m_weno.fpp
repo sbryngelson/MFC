@@ -3,11 +3,8 @@
 !! @brief Contains module m_weno
 #:include 'case.fpp'
 #! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR).
-#! This is safe because v_rs_weno and the x/y/z coefficient tables exist whenever their kernels
-#! launch (weno_order /= 1; the y/z tables under n > 0 / p > 0, and s_weno is called with
-#! recon_dir <= num_dims). Without it every launch re-maps the descriptor of each named
-#! allocatable. A kernel naming an unallocated array aborts under present, so keep that invariant
-#! when adding kernels.
+#! Safe because each conditionally allocated array a kernel names launches only under its allocation's condition;
+#! keep that invariant when adding kernels.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 
@@ -904,8 +901,8 @@ contains
         type(int_bounds_info), intent(in)                                                      :: is1_weno_d, is2_weno_d, is3_weno_d
         logical, optional, intent(in)                                                          :: packed  !< v_rs_weno holds v_vf
 
-        ! Non-case-optimized amdflang: weno_num_stencils is not a compile constant, so these are sized to 0:4; whole-array
-        ! assignments must slice the target to 0:weno_num_stencils or amdflang's runtime shape check aborts
+        ! Non-case-optimized amdflang: these are sized 0:4 (weno_num_stencils is not constant), so whole-array
+        ! assignments must slice to 0:weno_num_stencils or its runtime shape check aborts
 
         #:if not MFC_CASE_OPTIMIZATION and USING_AMD
             real(wp), dimension(-3:2) :: dvd
