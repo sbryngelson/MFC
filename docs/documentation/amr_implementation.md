@@ -26,12 +26,11 @@ here is greppable in `src/simulation/m_amr*.fpp` (see the module map below),
 | `src/simulation/m_amr_frame.fpp` | The grid-state swap (`s_amr_swap_to_fine`/`s_amr_restore_coarse`) and the 6-equation fine relaxation |
 | `src/simulation/m_amr_transfer.fpp` | Prolongation, restriction, reflux and the restrict/reflux/freg waves |
 | `src/simulation/m_amr_advance.fpp` | Fine stage advance (fused and batched), IB/Lagrange fine services |
-| `src/simulation/m_amr_l0.fpp` | Level-0 tiling (`s_l0_*`) |
 | `src/simulation/m_amr_cluster.fpp` | Berger-Rigoutsos clustering: signatures, bisection, Morton order, min-separation merge |
 | `src/simulation/m_amr_regrid.fpp` | Tagging, box shaping, nesting, slot rebuild |
 | `src/simulation/m_amr_registers.fpp` | Flux registers (capture and application) |
 | `src/simulation/m_amr_restart.fpp` | Checkpoint of the hierarchy |
-| `src/simulation/m_amr_stage.fpp` | The RK-stage hooks: stage-top halo, fine stage, L0-tile update, end-of-step fold |
+| `src/simulation/m_amr_stage.fpp` | The RK-stage hooks: stage-top halo, fine stage, end-of-step fold |
 | `src/simulation/m_time_steppers.fpp` | The driver: calls the four `m_amr_stage` hooks around the coarse RHS and RK update |
 
 The eight `m_amr_*` modules form a chain (each may `use` only the ones listed above it); `m_amr_exchange.fpp` is the
@@ -56,15 +55,7 @@ amr_region_lo_all(:,k)  amr_region_hi_all(:,k)
 amr_isect_lo_all(:,k)   amr_isect_hi_all(:,k)   amr_owns_all(k)
 ```
 
-The pool is **tiles-prefix partitioned**:
-
-```
-[1 : l0_slot_off]                              level-0 L0 tiles
-[l0_slot_off+1 : l0_slot_off+amr_max_fine]     regrid-managed fine blocks
-```
-
-With the L0-tile path disabled (`l0_ntile = 0`, the common configuration) `l0_slot_off = 0` and
-`amr_max_fine = amr_max_blocks`.
+Fine blocks occupy slots `1 : amr_num_blocks` of the pool (capacity `amr_max_blocks`).
 
 `amr_cur` is the *working* slot. `s_amr_select_slot(islot)` sets `amr_cur = islot` and copies that
 slot's region/intersection/ownership into the scalar working mirrors (`amr_region_lo`,
@@ -93,10 +84,10 @@ handed out by a counter with a recycle stack, **not derived from the live set**;
 > same block through different subscripts. Passing one where the other is expected compiles
 > cleanly and silently reads another block's data.
 
-### 2.3 Box index: `k` within a regrid, `ks = f_l0_slot(k)`
+### 2.3 Box index: `k` within a regrid
 
 During `s_amr_regrid_*`, freshly clustered boxes are numbered `1 : nboxes`. This is a *third*
-space, mapped to global slots by `f_l0_slot(k)`. The regrid code holds **old** and **new** box sets
+space, equal to the global slot index. The regrid code holds **old** and **new** box sets
 simultaneously (`old_np`, `old_ilo`, `old_ext`, `old_level`, `old_owns` describe the pre-regrid
 set), and both are indexed in this space. Reading `old_*` with a new box index, or vice versa, is
 the classic regrid bug.
@@ -188,16 +179,12 @@ Six routines, in `m_amr_store.fpp`:
 | `s_amr_alloc_slot_stash(islot)` | **Stash-only slot**: dense index + `amr_slot_live` only, no geometry or field arrays. Used for migration replicas, which only ever touch their `amr_stor_st` half. |
 | `s_amr_free_slot(islot)` | Idempotent, handles both flavors (each array family's teardown guarded on its own `allocated`; the full-vs-stash discriminator is `allocated(x_cb)`). Pushes the index onto `amr_loc_free`. |
 | `s_amr_st_reserve(nloc)` | Grows the store, increments capped at 16 slots. Never shrinks the allocation. |
-| `s_amr_scr_init()` | Allocates the **pooled `q_prim`/`rhs` advance scratch** (`amr_scr_prim`/`amr_scr_rhs`), once, on every rank. Called where `mbuf*` are final per mode: module init (pure AMR) or after `s_l0_tiles_init`'s mbuf union (any tiles). |
+| `s_amr_scr_init()` | Allocates the **pooled `q_prim`/`rhs` advance scratch** (`amr_scr_prim`/`amr_scr_rhs`), once, on every rank. Called from module init, where `mbuf*` are final. |
 | `s_amr_compact_store()` | Re-densifies the local index space **in place on the device**, every reconcile. Does NOT realloc. |
 
 **Fine blocks carry NO per-slot `q_prim`/`rhs`.**
 The fused advance (`s_amr_fine_stage_advance_batched`: rhs then rk on one slab) leaves no
-cross-block lifetime, so all fine blocks share one slot-shaped scratch pair; the stage routines
-take the target arrays as dummies and the caller chooses (fine: scratch; L0 tiles: per-slot,
-because all owned tiles' rhs coexist across the MPI reflux point, and a tile's `q_prim` is read
-in the RK pass after other tiles' RHS work; allocated per-slot exactly when the `m_rhs`
-copy-out gate writes it: `run_time_info|probe_wrt|ib|bubbles_lagrange`). Sharing the scratch
+cross-block lifetime, so all fine blocks share one slot-shaped scratch pair. Sharing the scratch
 keeps the per-slot footprint to its share of the flat store and avoids per-slot alloc/free
 churn on the device allocator. Per-slot device cost is the slot's share of the flat
 store (`amr_cons_st` + `amr_stor_st`).
@@ -262,7 +249,7 @@ f(live local boxes)), and wall time cannot see it. `cap - live` is the transient
 Within each RK stage `s`, `s_tvd_rk` (`m_time_steppers.fpp`) calls the `m_amr_stage` hooks:
 
 ```
-            s_amr_stage_begin          ! coexist L0 refresh; cons halo hoisted ahead of the coarse RHS
+            s_amr_stage_begin          ! cons halo hoisted ahead of the coarse RHS
 PH_COARSE   s_compute_rhs on the coarse (level-0) grid                          [1 per stage]
 
             s_amr_stage_fine:
@@ -274,8 +261,6 @@ PH_COARSE   s_compute_rhs on the coarse (level-0) grid                          
   PH_RHS/RK   s_amr_fine_stage_advance_batched                                  [1 per BATCH]
   PH_REFLUX   s_amr_reflux_faces_wave   ! all L1 faces as one wave              [1 per stage]
               s_amr_apply_reflux
-
-            s_amr_l0_stage_update      ! tiles: in place of the monolithic RK update
 ```
 
 Then after the stage loop, `s_amr_step_fold` (per-level waves at np>1; in reverse slot order at np=1):
@@ -317,7 +302,7 @@ ships each old block's fine state to the ranks whose new boxes overlap it.
 
 ### 8.1 Inventory
 
-The `m_amr_*` modules (mostly `m_amr_exchange.fpp`, `m_amr_transfer.fpp` and `m_amr_l0.fpp`) mix blocking `MPI_SEND`/`MPI_RECV` sites with `MPI_ISEND`/`MPI_IRECV`/`MPI_WAITALL`
+The `m_amr_*` modules (mostly `m_amr_exchange.fpp` and `m_amr_transfer.fpp`) mix blocking `MPI_SEND`/`MPI_RECV` sites with `MPI_ISEND`/`MPI_IRECV`/`MPI_WAITALL`
 waves and a few `MPI_ALLREDUCE`s; `m_amr_regrid.fpp` adds the regrid collectives
 (`MPI_ALLREDUCE`, `MPI_ALLGATHER(V)`).
 
@@ -382,12 +367,12 @@ owner changed, sets the new `amr_num_blocks`, and calls `s_amr_assign_block_owne
 
 ```fortran
 do k = 1, nboxes
-    ks = f_l0_slot(k)
+    ks = k
     ...
     if (amr_block_owner(ks) == proc_rank) call s_amr_alloc_slot(ks)
     ...
     amr_cons_st(fi,fj,fk,i, amr_loc_of(ks)) = amr_stor_st(ofi,ofj,ofk,i, amr_loc_of(kks))
-    !                       ^^ NEW slot                                  ^^ OLD slot, kks = f_l0_slot(kk)
+    !                       ^^ NEW slot                                  ^^ OLD slot, kks = kk
 ```
 
 **This line is why old slots cannot be freed wholesale before the rebuild.** The stash is read at
@@ -471,7 +456,7 @@ diagnostic quantity when block counts differ between runs.
    carry one case each and only at a single rank: the 6-equation model, hypoelasticity (with
    continuum damage), acoustic sources, 1D MHD/RMHD, body forces, `amr_ref_ratio = 4` and every
    `num_fluids > 1` case are np=1 only. Chemistry (reactions, advection and species diffusion),
-   immersed boundaries, L0-tile coexist and the multi-level hierarchy do have np>1 cases. Since
+   immersed boundaries and the multi-level hierarchy do have np>1 cases. Since
    the coarse/fine seam and whole-block ownership are where the defects have been, a new test is
    worth more as a multi-rank physics coupling than as another regrid variant.
 

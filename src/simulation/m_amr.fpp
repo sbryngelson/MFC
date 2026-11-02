@@ -32,7 +32,6 @@ module m_amr
     use m_amr_frame
     use m_amr_transfer
     use m_amr_advance
-    use m_amr_l0
 
     implicit none
 
@@ -44,16 +43,9 @@ contains
     !! (sys_size/buff_size set). Per-slot fine arrays allocated lazily (s_amr_reconcile_slots) - only the blocks a rank owns.
     impure subroutine s_initialize_amr_module()
 
-        ! shared-pool layout: tiles are a fixed level-0 prefix; fine blocks follow. Both this init and s_l0_tiles_init read this, so
-        ! it runs before the amr early-return below (this routine always executes first, per m_start_up.fpp).
         amr_dim = [.true., n_glb > 0, p_glb > 0]
         amr_sidx = 0; amr_sidx(1:num_dims) = start_idx
         amr_ext = merge([m, n, p], 0, amr_dim)
-        if (l0_ntile > 0) then
-            l0_nt = merge(l0_ntile, 1, amr_dim)
-            l0_ntiles_tot = num_procs*l0_nt(1)*l0_nt(2)*l0_nt(3)
-            l0_slot_off = l0_ntiles_tot
-        end if
 
         if (.not. amr) return
 
@@ -62,22 +54,17 @@ contains
 #endif
         amr_br_batch = amr_bat_lim
 
-        ! Fine-block cap = the case amr_max_blocks; the shared pool adds the L0 tile prefix (l0_slot_off, 0 when l0_ntile=0)
-        ! ahead of it, so both AMR fine blocks and any L0 tiles draw from one amr_slots allocation.
-        amr_max_fine = amr_max_blocks
-        amr_max_blocks = l0_slot_off + amr_max_fine
         call s_amr_alloc_pool()
         amr_block_level = 1  ! init default (level-1); regrid re-tags each block's level for nesting
         amr_num_levels = 1
-        amr_num_blocks = f_l0_slot(1)
-        amr_cur = f_l0_slot(1)
+        amr_num_blocks = 1
+        amr_cur = 1
         amr_seam_pairs_dirty = .true.; amr_seam_pairs_nblk = -1  ! force a seam-list build on the first fine-fine halo
         amr_mesh_epoch = amr_mesh_epoch + 1
 
         call s_amr_init_extents()
         call s_amr_init_report()
-        ! with tiles, s_l0_tiles_init's mbuf union may still enlarge the extents; the scratch waits for it (see s_amr_scr_init)
-        if (l0_ntile == 0) call s_amr_scr_init()
+        call s_amr_scr_init()
         call s_amr_init_swap_buffers()
         call s_amr_build_global_cb(0)  ! the fine-distribution owner rebuilds whole-block fine coordinates from these
         call s_amr_init_coarse_patch()
@@ -176,7 +163,7 @@ contains
             & ' [amr] NOTE: the grid''s cell spacing is not bitwise uniform: stacked blocks reuse the batch leader''s ' &
             & // 'coordinate arrays, so members after the first see the leader''s spacing'
         ! the SFC map spreads whole blocks, so with fewer blocks than ranks some ranks own no fine work
-        if (num_procs > amr_max_fine) print '(A,I0,A,I0,A)', ' [amr] WARNING: amr_max_blocks (', amr_max_blocks, &
+        if (num_procs > amr_max_blocks) print '(A,I0,A,I0,A)', ' [amr] WARNING: amr_max_blocks (', amr_max_blocks, &
             & ') < num_procs (', num_procs, &
             & '): the fine level can occupy at most amr_max_blocks ranks - raise amr_max_blocks for better fine-level balance'
         ! Every fine block advances at the coarse dt, but a level-l cell is amr_ref_ratio**l smaller, so its CFL limit is
@@ -258,22 +245,22 @@ contains
         if (ib) then
             nt = 1; tiled(1)%lo = blk_lo; tiled(1)%hi = blk_hi
         else
-            call s_amr_tile_box(blk_lo, blk_hi, tiled, nt, amr_max_fine, capt)
+            call s_amr_tile_box(blk_lo, blk_hi, tiled, nt, amr_max_blocks, capt)
         end if
-        amr_num_blocks = f_l0_slot(nt)  ! fine blocks occupy [l0_slot_off+1 .. l0_slot_off+nt] in the shared pool
+        amr_num_blocks = nt
         ! set block regions first so the owner assignment (reads amr_region_*_all) runs before the owner-dependent geometry -
         ! else s_set_amr_fine_geometry would size the whole-block owner from a stale (default) amr_block_owner
         do kk = 1, nt
-            amr_region_lo_all(:,f_l0_slot(kk)) = tiled(kk)%lo; amr_region_hi_all(:,f_l0_slot(kk)) = tiled(kk)%hi
+            amr_region_lo_all(:,kk) = tiled(kk)%lo; amr_region_hi_all(:,kk) = tiled(kk)%hi
         end do
         call s_amr_assign_block_owners()
         call s_amr_reconcile_slots()  ! allocate this rank's owned initial blocks (owner-guarded geometry writes below)
         do kk = 1, nt
-            amr_cur = f_l0_slot(kk)
+            amr_cur = kk
             call s_set_amr_fine_geometry(tiled(kk)%lo, tiled(kk)%hi)
         end do
         call s_amr_reduce_xchg_flag()
-        call s_amr_select_slot(f_l0_slot(1))  ! refresh the per-block mirrors (geometry loop left them on the last tile)
+        call s_amr_select_slot(1)  ! refresh the per-block mirrors (geometry loop left them on the last tile)
         deallocate (tiled)
 
     end subroutine s_amr_init_first_blocks
@@ -323,8 +310,7 @@ contains
 
         integer :: i, islot
 
-        ! before the amr early-return: the report's conservation allreduce is collective, and the L0 tile
-        ! families can fire with amr = F. All ranks take the same path either way.
+        ! before the amr early-return: the report's conservation allreduce is collective
 
         call s_xa_report()
         call s_amr_cad_report()

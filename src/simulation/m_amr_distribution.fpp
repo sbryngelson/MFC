@@ -243,8 +243,7 @@ contains
     !> Cost-weighted SFC partition of n items into num_procs contiguous Morton-key ranges. Sorts item indices by ascending Morton
     !! key (stable merge sort), walks them accumulating wt, and advances the owner rank when the running weight crosses the next
     !! even share of the total. Writes owner(1:n) (rank per item) and cut(0:num_procs-1) (running Morton upper bound per rank; ranks
-    !! that receive no item inherit the predecessor's bound so cut is non-decreasing, its top the global max key). Shared by the
-    !! fine-block anchor split and the L0-tile split so the two owner maps cannot drift.
+    !! that receive no item inherit the predecessor's bound so cut is non-decreasing, its top the global max key).
     subroutine s_amr_sfc_cut(keys, wt, n, cut, owner)
 
         integer, intent(in)          :: n
@@ -502,7 +501,7 @@ contains
             end do
             return
         end if
-        do j = l0_slot_off + 1, amr_num_blocks
+        do j = 1, amr_num_blocks
             if (amr_block_level(j) /= amr_block_level(k) - 1) cycle
             call s_amr_box_isect(lo, hi, amr_region_lo_all(:,j), amr_region_hi_all(:,j), ol, oh)
             if (any(ol > oh)) cycle
@@ -609,14 +608,11 @@ contains
         ! Per-level distribution: one cut per level, each block on its own weight, so a deep tower does not pin its subtree to
         ! one rank (parent<->child paths are P2P, so a split tower costs messages, not correctness). Not one mixed cut: same-level
         ! boxes are disjoint and so have distinct Morton keys, which f_amr_owner's cut search needs, while a level-2 block sharing
-        ! its parent's region_lo would collide with it. amr_fine_cut(:, lev) holds each level's cut; amr_owner_cut mirrors level 1
-        ! only without tiles (under coexist it holds the tile cut s_l0_tiles_init built, which a regrid must not clobber). The
-        ! L0 tile prefix [1, l0_slot_off] is excluded: at init it is still uninitialized (Morton key 0), and a phantom key-0 block
-        ! on a higher rank would make s_amr_validate_owner abort.
-        maxlev = maxval(amr_block_level(l0_slot_off + 1:amr_num_blocks))
+        ! its parent's region_lo would collide with it. amr_fine_cut(:, lev) holds each level's cut.
+        maxlev = maxval(amr_block_level(1:amr_num_blocks))
         do lev = 1, maxlev
             na = 0
-            do k = l0_slot_off + 1, amr_num_blocks
+            do k = 1, amr_num_blocks
                 if (amr_block_level(k) /= lev) cycle
                 na = na + 1
                 akey(na) = key(k); awt(na) = wt(k); aidx(na) = k
@@ -627,7 +623,6 @@ contains
             do a = 1, na
                 amr_block_owner(aidx(a)) = aown(a); amr_myblk_dirty = .true.
             end do
-            if (lev == 1 .and. l0_slot_off == 0) amr_owner_cut = amr_fine_cut(:,1)
         end do
 
         call s_amr_validate_owner()
@@ -647,10 +642,10 @@ contains
         integer             :: k, r, lev, maxlev
         integer(kind=8)     :: key
 
-        maxlev = maxval(amr_block_level(l0_slot_off + 1:amr_num_blocks))
+        maxlev = maxval(amr_block_level(1:amr_num_blocks))
         do lev = 1, maxlev
             amr_fine_cut(:,lev) = -1_8
-            do k = l0_slot_off + 1, amr_num_blocks
+            do k = 1, amr_num_blocks
                 if (amr_block_level(k) /= lev) cycle
                 key = f_morton(amr_region_lo_all(1, k), amr_region_lo_all(2, k), amr_region_lo_all(3, k))
                 amr_fine_cut(own(k), lev) = max(amr_fine_cut(own(k), lev), key)
@@ -659,7 +654,6 @@ contains
             do r = 1, num_procs - 1
                 if (amr_fine_cut(r, lev) < amr_fine_cut(r - 1, lev)) amr_fine_cut(r, lev) = amr_fine_cut(r - 1, lev)
             end do
-            if (lev == 1 .and. l0_slot_off == 0) amr_owner_cut = amr_fine_cut(:,1)
         end do
         call s_amr_validate_owner()
 
@@ -681,7 +675,7 @@ contains
         if (proc_rank /= 0) return
 
         ! heap, not automatic: these are num_procs long, and automatic arrays would put O(num_procs) on the stack (the module
-        ! puts amr_owner_cut / amr_fine_cut on the heap for the same reason)
+        ! puts amr_fine_cut on the heap for the same reason)
         allocate (rw(0:num_procs - 1), tw(0:num_procs - 1), rc(0:num_procs - 1))
         tw = 0._wp
         do lev = 1, maxlev
@@ -725,23 +719,16 @@ contains
     end subroutine s_amr_report_balance
 
     !> Owner rank of block k from the O(num_procs) SFC cut-points: binary-search k's own Morton key in the owning authority's cut. A
-    !! level-0 tile resolves against amr_owner_cut (the tile cut in tiled modes); a fine block (level>=1) resolves against its own
-    !! level's cut amr_fine_cut(:, level) (level 1's == amr_owner_cut in no-tile AMR). Under per-level distribution a block's owner
-    !! depends on its own key and level alone. Reproduces s_amr_assign_block_owners' / the tile split's cost-weighted SFC assignment
-    !! exactly.
+    !! block resolves against its own level's cut amr_fine_cut(:, level), so its owner depends on its own key and level alone.
+    !! Reproduces s_amr_assign_block_owners' cost-weighted SFC assignment exactly.
     pure integer function f_amr_owner(k) result(r)
 
         integer, intent(in) :: k
         integer(kind=8)     :: mk, cut(0:num_procs - 1)
-        integer             :: a, lo, hi, mid
+        integer             :: lo, hi, mid
 
-        a = k
-        if (amr_block_level(k) == 0) then
-            cut = amr_owner_cut  ! tile: own Morton key vs the tile cut
-        else
-            cut = amr_fine_cut(:,amr_block_level(k))
-        end if
-        mk = f_morton(amr_region_lo_all(1, a), amr_region_lo_all(2, a), amr_region_lo_all(3, a))
+        cut = amr_fine_cut(:,amr_block_level(k))
+        mk = f_morton(amr_region_lo_all(1, k), amr_region_lo_all(2, k), amr_region_lo_all(3, k))
         lo = 0; hi = num_procs - 1
         do while (lo < hi)
             mid = (lo + hi)/2
@@ -761,14 +748,7 @@ contains
         integer :: k
 
         do k = 1, amr_num_blocks
-            ! Skip the L0 tile prefix when its cut has not been built yet (amr_owner_cut still -1): those
-            ! slots are uninitialized at assigner time and carry a stale level with Morton key 0. The
-            ! tile-init call site populates both cuts and validates them there.
-            if (k <= l0_slot_off .and. amr_owner_cut(num_procs - 1) < 0_8) cycle
             if (amr_place_owner .and. amr_block_level(k) >= 1) cycle  ! placed owners are not SFC-contiguous
-            ! every block resolves: tiles (level 0) via amr_owner_cut (tile cut), fine blocks (level>=1) via amr_fine_cut. The
-            ! caller guarantees the relevant cut is populated for the blocks present at each call site (assigner: fine cut; tile
-            ! init: both).
             if (f_amr_owner(k) /= amr_block_owner(k)) &
                 & call s_mpi_abort('SFC cut-point owner disagrees with amr_block_owner - cut capture or search is wrong')
         end do

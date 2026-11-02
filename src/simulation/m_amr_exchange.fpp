@@ -31,10 +31,10 @@ module m_amr_exchange
 
     private
     public :: f_amr_seam, f_amr_seam_dim, s_amr_build_seam_pairs, s_amr_exchange_coarse_cons_halo, s_amr_fine_fine_drain, &
-        & s_amr_fine_fine_halo, s_amr_fine_fine_post, s_amr_fill_wave_done, s_amr_l1_fill_exchange, s_amr_l1_fill_consume, &
-        & s_amr_parent_fill_exchange, s_amr_parent_fill_consume, s_amr_parent_fill_wave, s_amr_stage_fill_wave, &
-        & s_l0_pack_unpack_block_sf, s_l0_pack_unpack_block_st, s_amr_slab_add, s_amr_unpack_rows, s_amr_restrict_rows_sf, &
-        & s_amr_restrict_rows_wire, s_amr_l1_pool_gather, s_amr_l1_pool_fill
+        & s_amr_fine_fine_post, s_amr_fill_wave_done, s_amr_l1_fill_exchange, s_amr_l1_fill_consume, s_amr_parent_fill_exchange, &
+        & s_amr_parent_fill_consume, s_amr_parent_fill_wave, s_amr_stage_fill_wave, s_amr_pack_unpack_block_sf, &
+        & s_amr_pack_unpack_block_st, s_amr_slab_add, s_amr_unpack_rows, s_amr_restrict_rows_sf, s_amr_restrict_rows_wire, &
+        & s_amr_l1_pool_gather, s_amr_l1_pool_fill
 
 contains
 
@@ -483,35 +483,15 @@ contains
 
     end subroutine s_amr_exchange_coarse_cons_halo
 
-    !> True iff dim d is globally periodic. Uses l0_periodic (periodic_bc allreduced to all ranks in s_l0_tiles_init); periodic_bc
-    !! itself is captured from the original bc before MFC folds periodicity into the MPI-cart topology, but only on rank 0, so the
-    !! allreduced copy is the one that is consistent on every rank (required since f_amr_seam builds a replicated seam list).
-    pure logical function f_l0_dim_periodic(d) result(per)
-
-        integer, intent(in) :: d
-
-        per = l0_periodic(d)
-
-    end function f_l0_dim_periodic
-
     !> True iff sub-block yb sits immediately above sub-block xb on xb's high face in dim d: yb's low coarse face is xb's high face
     !! + 1, and (tiling produces a regular grid) they share the transverse coarse extents exactly. Each fine-fine seam is exactly
-    !! one such ordered (xb, yb) pair (the lower block is xb). For an L0-tile periodic dim there is also a wrap-seam: xb at the
-    !! domain high face (region_hi == gcell) and yb at the domain low face (region_lo == 0) with matching transverse; the fine-fine
-    !! halo then fills xb's high ghost from yb's low interior and vice versa, exactly the periodic connection. Gated on l0_ntile>0
-    !! so the AMR fine-block path (blocks never touch the domain edge) is unaffected.
+    !! one such ordered (xb, yb) pair (the lower block is xb).
     pure logical function f_amr_seam(xb, yb, d) result(seam)
 
         integer, intent(in) :: xb, yb, d
-        integer             :: t, gc
-        logical             :: adj
+        integer             :: t
 
-        adj = amr_region_lo_all(d, yb) == amr_region_hi_all(d, xb) + 1
-        if (l0_ntile > 0 .and. f_l0_dim_periodic(d)) then
-            gc = merge(m_glb, merge(n_glb, p_glb, d == 2), d == 1)
-            adj = adj .or. (amr_region_hi_all(d, xb) == gc .and. amr_region_lo_all(d, yb) == 0)
-        end if
-        seam = adj
+        seam = amr_region_lo_all(d, yb) == amr_region_hi_all(d, xb) + 1
         do t = 1, 3
             if (t /= d) seam = seam .and. amr_region_lo_all(t, xb) == amr_region_lo_all(t, yb) .and. amr_region_hi_all(t, &
                 & xb) == amr_region_hi_all(t, yb)
@@ -669,7 +649,7 @@ contains
 
         integer                      :: xb, d, np, k, mx, pass, nm, im, jm, tb, td, nb
         integer                      :: plo(3), phi(3), rlo(3), rhi(3)
-        integer                      :: mb(3), md(3), clo(3), gc
+        integer                      :: mb(3), md(3), clo(3)
         integer(kind=8), allocatable :: mkey(:)
         integer, allocatable         :: ord(:)
 
@@ -699,16 +679,6 @@ contains
                     clo = amr_region_lo_all(:,xb)
                     clo(d) = amr_region_hi_all(d, xb) + 1
                     call s_amr_seam_probe(xb, d, clo, mkey, ord, amr_num_blocks, mb, md, nm)
-                    ! periodic wrap (l0 tiling only): xb on the domain high face pairs with lo(d) = 0
-                    if (l0_ntile > 0) then
-                        if (f_l0_dim_periodic(d)) then
-                            gc = merge(m_glb, merge(n_glb, p_glb, d == 2), d == 1)
-                            if (amr_region_hi_all(d, xb) == gc) then
-                                clo(d) = 0
-                                call s_amr_seam_probe(xb, d, clo, mkey, ord, amr_num_blocks, mb, md, nm)
-                            end if
-                        end if
-                    end if
                 end do
                 ! ascending yb within xb (nm <= 3)
                 do im = 2, nm
@@ -769,7 +739,7 @@ contains
         integer :: r, sblk, sdlo, sdhi, ublk, udlo, udhi, eblk, edlo, edhi
 
         amr_sw_nsame = 0; amr_pc_nsame = 0
-        if (.not. amr .and. l0_ntile == 0) return
+        if (.not. amr) return
         if (amr_num_blocks < 2) return
 
         if (amr_seam_pairs_dirty .or. amr_seam_pairs_nblk /= amr_num_blocks) call s_amr_build_seam_pairs()
@@ -850,14 +820,6 @@ contains
         call s_amr_select_slot(1)
 
     end subroutine s_amr_fine_fine_drain
-
-    !> The seam exchange as one call (post + drain), for the L0 tile stage.
-    impure subroutine s_amr_fine_fine_halo()
-
-        call s_amr_fine_fine_post()
-        call s_amr_fine_fine_drain()
-
-    end subroutine s_amr_fine_fine_halo
 
     !> Flat-index decode shared by the fused exchange kernels (amr_device_pack, the level-1 pieces): binary-search the plan prefix
     !! for the transfer t that owns flat element e, then invert its linear buffer index into (i, g3, g2, g1). One text, so the
@@ -1819,15 +1781,15 @@ contains
     end subroutine s_amr_parent_fill_wave
 
     !> Device pack (to_buf=T) / unpack (F) of a field's interior block [o+0:o+fm] <-> the contiguous MPI buffer buf, for the P2P
-    !! migration + migrated-tile scatter. Follows s_amr_fine_slice: the pack/unpack runs on the device with copyout/copyin moving
-    !! only buf host<->device (no strided %sf section in a map clause; flang miscomputes those). buf index runs j fastest then k,l,i
-    !! so a matching pack/unpack aligns cell-for-cell. wp buffer, cast to/from stp (identity at double), matching the fine-fine
-    !! halo. Two targets, one body: `_st` packs a block out of the flat store (the migration/scatter paths), `_sf` packs the level-0
-    !! monolithic q_cons_vf, which is a real scalar_field array and not in the store.
+    !! migration. Follows s_amr_fine_slice: the pack/unpack runs on the device with copyout/copyin moving only buf host<->device (no
+    !! strided %sf section in a map clause; flang miscomputes those). buf index runs j fastest then k,l,i so a matching pack/unpack
+    !! aligns cell-for-cell. wp buffer, cast to/from stp (identity at double), matching the fine-fine halo. Two targets, one body:
+    !! `_st` packs a block out of the flat store (the migration paths), `_sf` packs the level-0 monolithic q_cons_vf, which is a
+    !! real scalar_field array and not in the store.
     #:for SFX, TGT in [('st', 'amr_cons_st'), ('sf', '')]
         #:set QB = (lambda ix: TGT + '(o1 + j, o2 + k, o3 + l, ' + ix + ', loc)') if TGT else (lambda ix: 'q(' + ix &
                     & + ')%sf(o1 + j, o2 + k, o3 + l)')
-        impure subroutine s_l0_pack_unpack_block_${SFX}$(${'loc' if TGT else 'q'}$, o1, o2, o3, fm1, fm2, fm3, buf, to_buf)
+        impure subroutine s_amr_pack_unpack_block_${SFX}$(${'loc' if TGT else 'q'}$, o1, o2, o3, fm1, fm2, fm3, buf, to_buf)
 
             #:if TGT
                 integer, intent(in) :: loc
@@ -1865,6 +1827,6 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
             end if
 
-        end subroutine s_l0_pack_unpack_block_${SFX}$
+        end subroutine s_amr_pack_unpack_block_${SFX}$
     #:endfor
 end module m_amr_exchange

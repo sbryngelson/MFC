@@ -746,9 +746,6 @@ def _load():
     _r("amr_cluster_eff", REAL)
     _r("amr_blocking_factor", INT)
     _r("amr_ref_ratio", INT)
-    _r("l0_ntile", INT)
-    _r("l0_migrate_step", INT)
-    _r("l0_rebalance_interval", INT)
     _r("partition_tile_size", INT, {"output"})
     for n in [
         "schlieren_wrt",
@@ -1526,9 +1523,6 @@ _nv(
     "amr_cluster_eff",
     "amr_blocking_factor",
     "amr_ref_ratio",
-    "l0_ntile",
-    "l0_migrate_step",
-    "l0_rebalance_interval",
     "alf_factor",
     "num_igr_iters",
     "num_igr_warm_start_iters",

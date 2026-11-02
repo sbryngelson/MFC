@@ -70,8 +70,7 @@ contains
             do k = 1, amr_num_blocks
                 ! per-block header: region box, refinement level (a level-l block's fine extent is amr_ref_ratio**l, not
                 ! amr_ref_ratio, of the region - the reader needs the level to rebuild multi-level geometry), extents
-                ! -1 extents when this rank does not own the slot: that is the reader's data-presence flag, and a slot this
-                ! rank never built (an L0 tile owned elsewhere) has no extents of its own to report.
+                ! -1 extents when this rank does not own the slot: that is the reader's data-presence flag
                 wext = -1
                 if (amr_owns_all(k)) wext = [amr_slots(k)%m, amr_slots(k)%n, amr_slots(k)%p]
                 write (2) amr_region_lo_all(:,k), amr_region_hi_all(:,k), amr_block_level(k), wext
@@ -235,7 +234,7 @@ contains
             call s_amr_assign_block_owners()
         end if
         call s_amr_reconcile_slots()
-        do k = l0_slot_off + 1, amr_num_blocks  ! fine blocks only: an L0 tile is not refined, and s_l0_tiles_init built it
+        do k = 1, amr_num_blocks
             amr_cur = k
             call s_set_amr_fine_geometry(amr_region_lo_all(:,k), amr_region_hi_all(:,k))
         end do
@@ -263,15 +262,6 @@ contains
             call s_amr_restart_check_record(k, reg, lvl)
             had_data(k) = rm >= 0
             if (.not. had_data(k)) cycle
-            ! An L0 tile's record: the tile already exists (s_l0_tiles_init) with this rank's own state, and its data here is a
-            ! copy of the level-0 field the ordinary restart file restores, which s_l0_copy_coarse_to_tiles reseeds the tiles
-            ! from. Consume the record - the stream is positional - and leave the tile alone.
-            if (lvl == 0) then
-                do i = 1, sys_size
-                    read (2) amr_cons_st(0:rm,0:rn,0:rp,i, amr_loc_of(k))
-                end do
-                cycle
-            end if
             ! whole-block owner extents are region-derived per level (a level-l block covers amr_ref_ratio**l fine cells per L0
             ! cell of its region); a stored extent that disagrees is corrupt
             if (rm /= (amr_ref_ratio**lvl)*(reg(4) - reg(1) + 1) - 1 .or. rn /= merge((amr_ref_ratio**lvl)*(reg(5) - reg(2) + 1) &
@@ -335,7 +325,7 @@ contains
             call s_amr_restart_check_record(k, cat%reg(:,k), cat%lvl(k))
         end do
         ! at the writer's rank count, keep the recorded owners (every fine block must carry one)
-        if (abs(ghdr(1)) == num_procs .and. all(cat%own(1,l0_slot_off + 1:amr_num_blocks) > 0)) then
+        if (abs(ghdr(1)) == num_procs .and. all(cat%own(1,1:amr_num_blocks) > 0)) then
             call s_amr_restart_install_blocks(cat%own(1,1:amr_num_blocks) - 1)
         else
             call s_amr_restart_install_blocks()
@@ -406,18 +396,6 @@ contains
         if (reg(1) < 0 .or. reg(4) > m_glb .or. reg(1) > reg(4) .or. (n_glb > 0 .and. (reg(2) < 0 .or. reg(5) > n_glb .or. reg(2) &
             & > reg(5))) .or. (p_glb > 0 .and. (reg(3) < 0 .or. reg(6) > p_glb .or. reg(3) > reg(6)))) then
             call s_mpi_abort('amr restart: corrupt block record (box outside the global domain)')
-        end if
-        ! level 0 is an L0 TILE. Under coexist the tiles are the pool's fixed prefix [1, l0_slot_off] and amr_num_blocks counts
-        ! them, so the writer emits them here; they are rebuilt by s_l0_tiles_init before this read, from the same l0_ntile and
-        ! the same decomposition, so the record must agree with the tile that is already there rather than redefine it. A
-        ! level-0 record outside the prefix, or a tile whose box moved, means the restart does not belong to this case.
-        if (lvl == 0) then
-            if (k > l0_slot_off) call s_mpi_abort('amr restart: corrupt block record (level-0 record outside the L0 tile prefix)')
-            if (any(amr_region_lo_all(:,k) /= reg(1:3)) .or. any(amr_region_hi_all(:,k) /= reg(4:6))) then
-                call s_mpi_abort('amr restart: the L0 tile layout differs from this run''s (identical l0_ntile and rank count ' &
-                                 & // 'required to restart a coexist case)')
-            end if
-            return
         end if
         if (lvl < 1 .or. lvl > amr_max_level) then
             call s_mpi_abort('amr restart: corrupt block record (block level outside 1..amr_max_level)')

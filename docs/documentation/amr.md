@@ -156,12 +156,6 @@ The Cartesian split is fixed after startup, but `s_load_balance_rebalance` runs 
 startup, so a long run rebalances by checkpoint-and-restart: stop, restart with
 `load_balance = T`, and the split planes come from the saved state.
 
-Rebalancing the base grid mid-run is a separate opt-in. `l0_ntile` tiles it into
-`l0_ntile**num_dims` ratio-1 blocks that advance through the same per-block solver as the
-fine overlay, byte-identical to the untiled run; `l0_rebalance_interval > 0` recomputes the
-SFC cut from measured per-tile cost and migrates the tiles whose owner changed. Tiling
-composes with `amr` for static single-level runs only.
-
 ### GPU {#amr-gpu}
 
 The fine-block arrays (`q_cons`, `q_prim`, `rhs`) are device-resident from allocation, and
@@ -232,9 +226,6 @@ For full descriptions, defaults and cross-parameter constraints see @ref case se
 | `amr_ref_ratio` | Integer | 2 | Cell-refinement ratio between adjacent levels; must be 2 or 4. `amr_ref_ratio = 4` is single-level only (no nesting) |
 | `amr_cluster_eff` | Real | 0.7 | Berger-Rigoutsos min tag efficiency a clustered box reaches before splitting stops; must satisfy `0 < amr_cluster_eff <= 1` |
 | `amr_blocking_factor` | Integer | 4 | Minimum box extent in coarse cells the Berger-Rigoutsos bisection may produce; `1` disables the minimum |
-| `l0_ntile` | Integer | 0 | Tiles per dimension per rank the base grid is split into for in-run base-grid rebalancing; `0` = monolithic base grid |
-| `l0_migrate_step` | Integer | 0 | Time step at which a forced test migration moves the last tile to rank 0; `0` = off |
-| `l0_rebalance_interval` | Integer | 0 | Steps between measured-cost rebalance events that migrate tiles; `0` = off |
 
 ---
 

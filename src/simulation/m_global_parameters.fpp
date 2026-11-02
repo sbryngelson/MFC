@@ -359,10 +359,6 @@ module m_global_parameters
     !! the working slot index selecting which slot the per-block machinery (advance/reflux/restrict/regrid/IO) operates on. Read by
     !! m_amr and m_amr_registers (mirrors, no use-cycle).
     integer :: amr_num_blocks = 1, amr_cur = 1
-    !> Unification pool layout (L0 tiles + AMR fine blocks in one amr_slots pool). Tiles-PREFIX: level-0 L0 tiles in slots
-    !! [1:l0_slot_off], regrid-managed fine blocks in [l0_slot_off+1 : l0_slot_off+amr_max_fine]. amr_max_fine = fine-block cap
-    !! (regrid/nesting limit); amr_max_blocks = total pool. Without L0 tiles: l0_slot_off=0, amr_max_fine=amr_max_blocks.
-    integer :: amr_max_fine = 0, l0_slot_off = 0
 
     !> Per-slot mirror storage (allocated 1:amr_max_blocks by the AMR module): the region box, the rank's intersection, and its
     !! ownership flag for every active block. s_set_amr_fine_geometry writes the current slot's entry; s_amr_select_slot copies a
@@ -664,9 +660,6 @@ contains
         ! smallest value that stops the saturation; 8/16 would distort the 128^2-and-smaller test grids.
         amr_blocking_factor = 4
         amr_ref_ratio = 2
-        l0_ntile = 0
-        l0_migrate_step = 0
-        l0_rebalance_interval = 0
         partition_tile_size = 8
         ib_force_wrt = .false.
         ib_force_stride = 1

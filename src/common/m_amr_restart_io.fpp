@@ -36,7 +36,7 @@ module m_amr_restart_io
     type t_amr_restart_catalog
         integer                                    :: nblk = 0
         integer, allocatable                       :: reg(:,:)      !< (6, nblk): region lo(3), hi(3) in global coarse cells
-        integer, allocatable                       :: lvl(:)        !< (nblk): refinement level (0 = an L0 tile, no fine data)
+        integer, allocatable                       :: lvl(:)        !< (nblk): refinement level
         integer, allocatable                       :: own(:,:)      !< (amr_restart_blk_own_ints, nblk): owner + 1, m, n, p
         integer(kind=MPI_OFFSET_KIND), allocatable :: data_disp(:)  !< (nblk): byte offset of the block's data chunk
         integer(kind=MPI_OFFSET_KIND)              :: end_disp = 0  !< byte offset past the last chunk = the file's expected size

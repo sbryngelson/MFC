@@ -757,9 +757,8 @@ contains
                 ! fail-closed: a well-formed header has level >= 1 and a fine x-extent that is an integer
                 ! (>= 2) refinement of the coarse footprint. Reading the level field as an extent (the
                 ! post/writer header-layout drift) makes rr collapse to 0 and trips this.
-                ! level 0 is an L0 TILE (see the parallel_io path): legal, skipped, not corruption
-                if (lvl /= 0 .and. (lvl < 1 .or. rr < 2 .or. mod(fm + 1, &
-                    & cw) /= 0)) &
+                if (lvl < 1 .or. rr < 2 .or. mod(fm + 1, &
+                    & cw) /= 0) &
                     & call s_mpi_abort('amr post: malformed fine-block header (level/extent inconsistent); the AMR restart ' &
                     & // 'writer and reader header layouts have drifted')
                 ! the record is in the stream either way: read it, then keep it only if it is a fine block this rank renders
@@ -813,10 +812,6 @@ contains
                 if (p > 0) owns = owns .and. isect_lo(3) <= isect_hi(3)
                 ! DATA PRESENCE COMES FROM THE FILE, not from geometry: a block with no owner has no chunk.
                 if (cat%own(1, k) <= 0) owns = .false.
-                ! LEVEL 0 = an L0 TILE, not a fine block. With l0_ntile > 0 the tiles occupy slots 1..l0_slot_off of the
-                ! SAME pool and amr_num_blocks counts them, so the writer emits them here. Their data is the base grid
-                ! re-tiled and is already in the level-0 restart file, so the overlay skips them.
-                if (lvl == 0) owns = .false.
                 cw = max(reg(4) - reg(1) + 1, 1)
                 rr = 1
                 if (cat%own(1, k) > 0) rr = (fmf + 1)/cw

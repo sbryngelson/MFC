@@ -2004,14 +2004,9 @@ class CaseValidator:
         self.prohibit(amr_ref_ratio is not None and amr_ref_ratio not in (2, 4), "amr_ref_ratio must be 2 or 4")
         self.prohibit(self.get("amr_prolong", 1) not in (1, 2), "amr_prolong must be 1 (minmod-limited linear) or 2 (quartic)")
         self.prohibit(self.get("amr_prolong", 1) == 2 and amr_ref_ratio not in (None, 2), "amr_prolong = 2 requires amr_ref_ratio = 2")
-        self.prohibit(
-            self.get("amr_place_owner", "F") == "T" and self.get("l0_ntile", 0) not in (0, None),
-            "amr_place_owner does not support L0 tiles (l0_ntile)",
-        )
         if self.get("amr_subcycle", "F") == "T":
             self.prohibit(amr_ref_ratio not in (None, 2), "amr_subcycle requires amr_ref_ratio = 2")
             self.prohibit(amr_max_level is not None and amr_max_level > 2, "amr_subcycle supports up to two refined levels (amr_max_level <= 2)")
-            self.prohibit(self.get("l0_ntile", 0) not in (0, None), "amr_subcycle does not support L0 tiles (l0_ntile)")
             self.prohibit(igr, "amr_subcycle does not support IGR")
             self.prohibit(self.get("chemistry", "F") == "T", "amr_subcycle does not support chemistry")
             self.prohibit(self.get("bubbles_lagrange", "F") == "T", "amr_subcycle does not support Lagrangian bubbles")
@@ -2037,7 +2032,6 @@ class CaseValidator:
             # lattice boxes touch or lie a tile apart; a one-cell gap would give two blocks one outside reflux cell
             self.prohibit((amr_blocking_factor or 4) < 2, "amr_tile_cluster requires amr_blocking_factor >= 2")
             self.prohibit(self.get("ib", "F") == "T", "amr_tile_cluster does not support immersed boundaries yet")
-            self.prohibit(self.get("l0_ntile", 0) not in (0, None), "amr_tile_cluster does not support L0 tiles (l0_ntile)")
             self.prohibit(self.get("acoustic_source", "F") == "T", "amr_tile_cluster does not support acoustic sources")
             self.prohibit(self.get("bubbles_lagrange", "F") == "T", "amr_tile_cluster does not support Lagrangian bubbles")
         self.prohibit(recon_type is not None and recon_type != 1 and not igr, "amr requires WENO reconstruction (recon_type = 1) or the IGR solver")

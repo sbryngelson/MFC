@@ -21,11 +21,9 @@ module m_amr_xchg_audit
 
     implicit none
 
-    ! Exchange families.
-    ! XA_FL0 covers the ten s_l0_* tile-routing sites outside the six families (instrumented
-    ! read-only); XA_F4 is migration.
-    integer, parameter :: XA_F1 = 1, XA_F2 = 2, XA_F4 = 3, XA_F5 = 4, XA_F6 = 5, XA_F7 = 6, XA_FL0 = 7
-    integer, parameter :: XA_NFAM = 7
+    ! Exchange families. XA_F4 is migration.
+    integer, parameter :: XA_F1 = 1, XA_F2 = 2, XA_F4 = 3, XA_F5 = 4, XA_F6 = 5, XA_F7 = 6
+    integer, parameter :: XA_NFAM = 6
 
     ! Call-site registry. One id per physical MPI call site (fypp twins get their own ids where
     ! they carry different payloads). The id constants are the documentation at the call sites.
@@ -35,34 +33,23 @@ module m_amr_xchg_audit
     integer, parameter :: XA_F7A_RCV = 4        !< s_restrict_fine_to_coarse RECV
     integer, parameter :: XA_F7B_SND = 5        !< s_amr_restrict_to_parent SEND
     integer, parameter :: XA_F7B_RCV = 6        !< s_amr_restrict_to_parent RECV
-    integer, parameter :: XA_L0_FILL_SND = 7    !< s_l0_copy_coarse_to_tiles SEND
-    integer, parameter :: XA_L0_FILL_RCV = 8    !< s_l0_copy_coarse_to_tiles RECV
-    integer, parameter :: XA_L0_SCAT_SND = 9    !< s_l0_scatter_tiles_to_coarse SEND
-    integer, parameter :: XA_L0_SCAT_RCV = 10   !< s_l0_scatter_tiles_to_coarse RECV
-    integer, parameter :: XA_L0_RFLX_SND = 11   !< s_l0_add_reflux_to_tiles SEND
-    integer, parameter :: XA_L0_RFLX_RCV = 12   !< s_l0_add_reflux_to_tiles RECV
-    integer, parameter :: XA_L0_REST_SND = 13   !< s_l0_restrict_to_tiles SEND (tag 4400+k)
-    integer, parameter :: XA_L0_REST_RCV = 14   !< s_l0_restrict_to_tiles RECV
-    integer, parameter :: XA_L0_MIGR_SND = 15   !< s_l0_migrate_tile SEND (tag 4300)
-    integer, parameter :: XA_L0_MIGR_RCV = 16   !< s_l0_migrate_tile RECV
-    integer, parameter :: XA_F1W_SND = 17       !< s_amr_stage_fill_wave per-peer aggregated q ISEND
-    integer, parameter :: XA_F1W_RCV = 18       !< s_amr_stage_fill_wave per-peer aggregated q IRECV
-    integer, parameter :: XA_F2W_SND = 19       !< s_amr_parent_fill_wave per-peer aggregated ISEND
-    integer, parameter :: XA_F2W_RCV = 20       !< s_amr_parent_fill_wave per-peer aggregated IRECV
-    integer, parameter :: XA_F6W_SND = 21       !< s_amr_fine_fine_halo per-peer aggregated ISEND
-    integer, parameter :: XA_F6W_RCV = 22       !< s_amr_fine_fine_halo per-peer aggregated IRECV
-    integer, parameter :: XA_F5W_FACE_SND = 23  !< s_amr_reflux_faces_wave ISEND (zero-copy)
-    integer, parameter :: XA_F5W_FACE_RCV = 24  !< s_amr_reflux_faces_wave IRECV
-    integer, parameter :: XA_F5W_FREG_SND = 25  !< freg faces on the restrict-parent wave
-    integer, parameter :: XA_F5W_FREG_RCV = 26  !< freg faces on the restrict-parent wave
-    integer, parameter :: XA_F7W_SND = 27       !< s_amr_restrict_l1_wave per-peer aggregated ISEND
-    integer, parameter :: XA_F7W_RCV = 28       !< s_amr_restrict_l1_wave per-peer aggregated IRECV
-    integer, parameter :: XA_F7BW_SND = 29      !< s_amr_restrict_parent_wave per-peer aggregated ISEND
-    integer, parameter :: XA_F7BW_RCV = 30      !< s_amr_restrict_parent_wave per-peer aggregated IRECV
-    integer, parameter :: XA_NSITE = 30
-    integer, parameter :: xa_fam(XA_NSITE) = [XA_F4, XA_F4, XA_F7, XA_F7, XA_F7, XA_F7, XA_FL0, XA_FL0, XA_FL0, XA_FL0, XA_FL0, &
-                                 & XA_FL0, XA_FL0, XA_FL0, XA_FL0, XA_FL0, XA_F1, XA_F1, XA_F2, XA_F2, XA_F6, XA_F6, XA_F5, &
-                                 & XA_F5, XA_F5, XA_F5, XA_F7, XA_F7, XA_F7, XA_F7]
+    integer, parameter :: XA_F1W_SND = 7        !< s_amr_stage_fill_wave per-peer aggregated q ISEND
+    integer, parameter :: XA_F1W_RCV = 8        !< s_amr_stage_fill_wave per-peer aggregated q IRECV
+    integer, parameter :: XA_F2W_SND = 9        !< s_amr_parent_fill_wave per-peer aggregated ISEND
+    integer, parameter :: XA_F2W_RCV = 10       !< s_amr_parent_fill_wave per-peer aggregated IRECV
+    integer, parameter :: XA_F6W_SND = 11       !< s_amr_fine_fine_post per-peer aggregated ISEND
+    integer, parameter :: XA_F6W_RCV = 12       !< s_amr_fine_fine_post per-peer aggregated IRECV
+    integer, parameter :: XA_F5W_FACE_SND = 13  !< s_amr_reflux_faces_wave ISEND (zero-copy)
+    integer, parameter :: XA_F5W_FACE_RCV = 14  !< s_amr_reflux_faces_wave IRECV
+    integer, parameter :: XA_F5W_FREG_SND = 15  !< freg faces on the restrict-parent wave
+    integer, parameter :: XA_F5W_FREG_RCV = 16  !< freg faces on the restrict-parent wave
+    integer, parameter :: XA_F7W_SND = 17       !< s_amr_restrict_l1_wave per-peer aggregated ISEND
+    integer, parameter :: XA_F7W_RCV = 18       !< s_amr_restrict_l1_wave per-peer aggregated IRECV
+    integer, parameter :: XA_F7BW_SND = 19      !< s_amr_restrict_parent_wave per-peer aggregated ISEND
+    integer, parameter :: XA_F7BW_RCV = 20      !< s_amr_restrict_parent_wave per-peer aggregated IRECV
+    integer, parameter :: XA_NSITE = 20
+    integer, parameter :: xa_fam(XA_NSITE) = [XA_F4, XA_F4, XA_F7, XA_F7, XA_F7, XA_F7, XA_F1, XA_F1, XA_F2, XA_F2, XA_F6, XA_F6, &
+                                 & XA_F5, XA_F5, XA_F5, XA_F5, XA_F7, XA_F7, XA_F7, XA_F7]
 
     ! dir 1 = send, 2 = recv; a SENDRECV site records both.
     integer(8) :: xa_msgs(XA_NSITE, 2) = 0_8
@@ -92,10 +79,8 @@ module m_amr_xchg_audit
 #endif
 
     private; public :: s_xa_rec, s_xa_report, XA_NH, s_xa_hdr_pack, s_xa_hdr_check, XA_F4_SND, XA_F4_RCV, XA_F7A_SND, XA_F7A_RCV, &
-        & XA_F7B_SND, XA_F7B_RCV, XA_L0_FILL_SND, XA_L0_FILL_RCV, XA_L0_SCAT_SND, XA_L0_SCAT_RCV, XA_L0_RFLX_SND, XA_L0_RFLX_RCV, &
-        & XA_L0_REST_SND, XA_L0_REST_RCV, XA_L0_MIGR_SND, XA_L0_MIGR_RCV, XA_F1W_SND, XA_F1W_RCV, XA_F2W_SND, XA_F2W_RCV, &
-        & XA_F6W_SND, XA_F6W_RCV, XA_F5W_FACE_SND, XA_F5W_FACE_RCV, XA_F5W_FREG_SND, XA_F5W_FREG_RCV, XA_F7W_SND, XA_F7W_RCV, &
-        & XA_F7BW_SND, XA_F7BW_RCV
+        & XA_F7B_SND, XA_F7B_RCV, XA_F1W_SND, XA_F1W_RCV, XA_F2W_SND, XA_F2W_RCV, XA_F6W_SND, XA_F6W_RCV, XA_F5W_FACE_SND, &
+        & XA_F5W_FACE_RCV, XA_F5W_FREG_SND, XA_F5W_FREG_RCV, XA_F7W_SND, XA_F7W_RCV, XA_F7BW_SND, XA_F7BW_RCV
 
 contains
 
@@ -170,7 +155,7 @@ contains
         integer(8)                  :: fam_m(XA_NFAM, 2), fam_w(XA_NFAM, 2)
         integer(8)                  :: gm(XA_NFAM, 2), gw(XA_NFAM, 2)
         integer                     :: i, f
-        character(len=3), parameter :: fam_name(XA_NFAM) = ['F1 ', 'F2 ', 'F4 ', 'F5 ', 'F6 ', 'F7 ', 'L0 ']
+        character(len=3), parameter :: fam_name(XA_NFAM) = ['F1 ', 'F2 ', 'F4 ', 'F5 ', 'F6 ', 'F7 ']
 
         fam_m = 0_8; fam_w = 0_8
         do i = 1, XA_NSITE

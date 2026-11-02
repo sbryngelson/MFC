@@ -158,7 +158,7 @@ contains
     !! apply kernels sweep slot = 1..amr_reg_n with the bcap/aint slot gates on the filled subset.
     !!
     !! Contents are preserved across growth, mirroring s_amr_st_reserve: every caller of s_amr_alloc_slot is a between-step
-    !! operation (regrid, restart, slot reconcile, L0 tile build) and stage 1 overwrites the registers, but freg accumulates
+    !! operation (regrid, restart, slot reconcile) and stage 1 overwrites the registers, but freg accumulates
     !! across RK stages, and a silent conservation error is not worth the saving. Growth stages
     !! through a device temporary like the store (the registers are device-authoritative; every host consumer pulls its slot to
     !! the host immediately before reading, so the host mirror coming out of a device-path growth is undefined, the same contract
@@ -397,9 +397,8 @@ contains
 
     !> Parent-fine footprint of block k inside its parent pblk, from replicated metadata only, so every rank computes the same box
     !! (a rank needs it for a block it does not own, whose own amr_isect_lo/hi is the empty non-owner footprint). Mirrors the
-    !! level>=2 branch of s_set_amr_fine_geometry exactly; rr is the global amr_ref_ratio because a level>=2 block's parent is never
-    !! an L0 tile (the only slot with a per-slot ratio of 1). Lives here rather than in m_amr so the child-creg capture below and
-    !! m_amr's P2P gather/restrict/reflux share one copy of the formula ("use m_amr" would cycle).
+    !! level>=2 branch of s_set_amr_fine_geometry exactly; rr is the global amr_ref_ratio. Lives here rather than in m_amr so the
+    !! child-creg capture below and m_amr's P2P gather/restrict/reflux share one copy of the formula ("use m_amr" would cycle).
     pure subroutine s_amr_parent_foot(k, pblk, plo, phi)
 
         integer, intent(in)  :: k, pblk
@@ -561,10 +560,6 @@ contains
         call s_amr_reg_prepare()
         if (igr) return  ! stage-1 IGR coupling is restriction-only: the fused IGR flux kernels do not expose face fluxes to capture
         if (amr_in_fine_advance .and. .not. amr_rank_owns_block) return
-        ! a level-0 L0 tile advancing through the fine path is coarse, not a fine block: skip the freg self-capture and the
-        ! parent-of-level-1 child-creg loop (which would overwrite the real fine block's creg in the tile-swapped frame). Its creg
-        ! comes from the dedicated L0 coarse RHS (amr_in_fine_advance=F). Pure-AMR has no level-0 slots so this never fires.
-        if (amr_in_fine_advance .and. amr_block_level(amr_cur) == 0) return
         ! flux data was just written by device kernels; the face reads below run as device kernels too
         save_cur = amr_cur
         if (amr_in_fine_advance) then

@@ -56,8 +56,7 @@ module m_start_up
     use m_load_weight
     use m_load_balance, only: s_load_balance_rebalance
     use m_sfc_partition
-    use m_amr, only: amr_maxc_fit, s_initialize_amr_module, s_populate_amr_fine, s_finalize_amr_module, s_amr_setup_ib, &
-        & s_l0_tiles_init, s_l0_tiles_finalize, s_l0_scatter_tiles_to_coarse
+    use m_amr, only: amr_maxc_fit, s_initialize_amr_module, s_populate_amr_fine, s_finalize_amr_module, s_amr_setup_ib
     use m_amr_regrid, only: s_amr_regrid
     use m_amr_restart, only: s_write_amr_restart, s_read_amr_restart
     use m_amr_registers, only: s_initialize_amr_registers, s_finalize_amr_registers
@@ -707,11 +706,6 @@ contains
 
         if (amr .and. amr_regrid_int > 0) then
             if (mod(t_step, amr_regrid_int) == 0) then
-                ! Coexist: tiles own the state, and the stage loop refreshes L0 only at the TOP of each stage - so here L0 holds
-                ! the second-to-last stage's tile interiors (plus fine-restricted covered cells), one stage stale. s_amr_regrid
-                ! BOTH tags off L0 and prolongs each new block's seed from it, so a stale L0 moves the boxes and seeds them wrong.
-                ! Same just-in-time refresh s_save_data does before it consumes L0; no-op without tiles.
-                if (l0_ntile > 0) call s_l0_scatter_tiles_to_coarse(q_cons_ts(1)%vf)
                 call s_phase_tic(PH_REGRID)
                 call s_amr_regrid(q_cons_ts(1)%vf)
                 call s_phase_toc(PH_REGRID)
@@ -793,11 +787,6 @@ contains
         integer(kind=8)         :: i, j, k, l
         integer                 :: stor
         integer                 :: save_count
-
-        ! L0 tiles own the state; refresh the L0 I/O staging buffer from them just-in-time for output (MPI-aware for migrated
-        ! tiles). Safe: s_save_data always runs after >=1 s_perform_time_step, so the tiles are already seeded and advanced.
-
-        if (l0_ntile > 0) call s_l0_scatter_tiles_to_coarse(q_cons_ts(1)%vf)
 
         if (down_sample) then
             call s_populate_variables_buffers(bc_type, q_cons_ts(1)%vf, pb_ts(1)%sf, mv_ts(1)%sf, q_T_sf)
@@ -1004,7 +993,6 @@ contains
         if (p > 0) dz_min = minval(dz(-buff_size:p + buff_size))
 
         call s_initialize_amr_module()
-        call s_l0_tiles_init()  ! L0-as-blocks spike (l0_ntile > 0); no-op otherwise
         call s_initialize_amr_registers(amr_maxc_fit)
         ! restarts restore the saved (possibly regridded) box and fine state; otherwise prolong from coarse
         call s_read_amr_restart(amr_restored)
@@ -1227,7 +1215,6 @@ contains
 
         call s_finalize_amr_registers()
         call s_finalize_amr_module()
-        call s_l0_tiles_finalize()  ! L0-as-blocks spike; no-op otherwise
         call s_phase_report()
         call s_finalize_time_steppers_module()
         if (hypoelasticity) call s_finalize_hypoelastic_module()

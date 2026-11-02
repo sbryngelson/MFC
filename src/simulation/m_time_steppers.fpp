@@ -32,7 +32,7 @@ module m_time_steppers
     use m_body_forces
     use m_derived_variables
     use m_constants, only: model_eqns_6eq, time_stepper_rk1, time_stepper_rk2, time_stepper_rk3, dflt_T_guess
-    use m_amr_stage, only: s_amr_stage_begin, s_amr_stage_fine, s_amr_l0_stage_update, s_amr_step_fold, s_amr_subcycle_fine
+    use m_amr_stage, only: s_amr_stage_begin, s_amr_stage_fine, s_amr_step_fold, s_amr_subcycle_fine
 
     implicit none
 
@@ -464,11 +464,10 @@ contains
         real(wp), intent(inout) :: time_avg
         integer, intent(in)     :: nstage
         integer                 :: i, j, k, l, q, s  !< Generic loop iterator
-        logical                 :: rhs_now  !< the coarse RHS runs at the stage top (see s_amr_stage_begin)
         real(wp)                :: start, finish
         integer(kind=8)         :: stage_t0, stage_t1, clock_rate, clock_max
         real(wp)                :: stage_time
-        integer, parameter      :: n_warmup = 2  !< time steps excluded before the timing floor (warmup/JIT/first-touch)
+        integer, parameter      :: n_warmup = 2      !< time steps excluded before the timing floor (warmup/JIT/first-touch)
 
         call cpu_time(start)
         call nvtxStartRange("TIMESTEP")
@@ -482,7 +481,7 @@ contains
             ! mytime is read on the device by the GRCBC inflow ramp, so it has to be current before the RHS that
             ! reads it, not after. Its GPU_DECLARE only creates device storage and never copies the host value, so
             ! without this the first RHS of a run reads uninitialised memory and later stages read a stale time.
-            ! Stage top, ahead of every RHS this stage runs (coarse, deferred coarse, tiles, fine batches).
+            ! Stage top, ahead of every RHS this stage runs (coarse, fine batches).
             $:GPU_UPDATE(device='[mytime]')
             ! Dirichlet inflows ramp too; their ghost fill lives in common code, which cannot read mytime
             if (any([bc_x%vel_in_ramp, bc_y%vel_in_ramp, bc_z%vel_in_ramp] > 0._wp)) then
@@ -491,13 +490,11 @@ contains
                                           & f_vel_ramp(bc_z%vel_in_ramp, bc_z%vel_in_t0, bc_z%vel_in_frac0, mytime)]
                 $:GPU_UPDATE(device='[bc_vel_ramp]')
             end if
-            call s_amr_stage_begin(q_cons_ts(1)%vf, rhs_now)
-            if (rhs_now) then
-                call s_phase_tic(PH_COARSE)
-                call s_compute_rhs(q_cons_ts(1)%vf, q_T_sf, q_prim_vf, bc_type, rhs_vf, pb_ts(1)%sf, rhs_pb, mv_ts(1)%sf, rhs_mv, &
-                                   & t_step, s)
-                call s_phase_toc(PH_COARSE)
-            end if
+            call s_amr_stage_begin(q_cons_ts(1)%vf)
+            call s_phase_tic(PH_COARSE)
+            call s_compute_rhs(q_cons_ts(1)%vf, q_T_sf, q_prim_vf, bc_type, rhs_vf, pb_ts(1)%sf, rhs_pb, mv_ts(1)%sf, rhs_mv, &
+                               & t_step, s)
+            call s_phase_toc(PH_COARSE)
 
             if (s == 1) then
                 if (run_time_info) then
@@ -523,40 +520,35 @@ contains
             end if
 
             ! subcycled: level 0 steps alone; the fine levels follow after its step (s_amr_subcycle_fine)
-            if (.not. amr_sub_on) call s_amr_stage_fine(s, t_step, rk_coef(s,:), q_cons_ts(1)%vf, q_T_sf, q_prim_vf, bc_type, &
-                & rhs_vf, pb_ts(1)%sf, rhs_pb, mv_ts(1)%sf, rhs_mv)
+            if (.not. amr_sub_on) call s_amr_stage_fine(s, t_step, rk_coef(s,:), q_cons_ts(1)%vf, q_T_sf, bc_type, rhs_vf, &
+                & pb_ts(1)%sf, rhs_pb, mv_ts(1)%sf, rhs_mv)
 
             ! TWIN of the AMR fine-block RK update: this coarse rk_coef stage combination (q = (c1*q + c2*q_stor + c3*dt*rhs)/c4)
             ! is mirrored by s_amr_fine_rk_update_batch in m_amr_advance - change the algebra here and it must follow, else fine
             ! blocks integrate a different scheme.
             if (bubbles_lagrange .and. .not. adap_dt) call s_update_lagrange_tdv_rk(q_prim_vf, bc_type, stage=s)
-            if (l0_ntile > 0) then
-                call s_amr_l0_stage_update(s, t_step, rk_coef(s,:), q_cons_ts(1)%vf, q_T_sf, bc_type, rhs_vf, pb_ts(1)%sf, &
-                                           & rhs_pb, mv_ts(1)%sf, rhs_mv)
-            else
-                $:GPU_PARALLEL_LOOP(collapse=4)
-                do i = 1, sys_size
-                    do l = 0, p
-                        do k = 0, n
-                            do j = 0, m
-                                if (s == 1 .and. nstage > 1) then
-                                    q_cons_ts(stor)%vf(i)%sf(j, k, l) = q_cons_ts(1)%vf(i)%sf(j, k, l)
-                                end if
-                                if (igr) then
-                                    q_cons_ts(1)%vf(i)%sf(j, k, l) = (rk_coef(s, 1)*q_cons_ts(1)%vf(i)%sf(j, k, l) + rk_coef(s, &
-                                              & 2)*q_cons_ts(stor)%vf(i)%sf(j, k, l) + rk_coef(s, 3)*rhs_vf(i)%sf(j, k, &
-                                              & l))/rk_coef(s, 4)
-                                else
-                                    q_cons_ts(1)%vf(i)%sf(j, k, l) = (rk_coef(s, 1)*q_cons_ts(1)%vf(i)%sf(j, k, l) + rk_coef(s, &
-                                              & 2)*q_cons_ts(stor)%vf(i)%sf(j, k, l) + rk_coef(s, 3)*dt*rhs_vf(i)%sf(j, k, &
-                                              & l))/rk_coef(s, 4)
-                                end if
-                            end do
+            $:GPU_PARALLEL_LOOP(collapse=4)
+            do i = 1, sys_size
+                do l = 0, p
+                    do k = 0, n
+                        do j = 0, m
+                            if (s == 1 .and. nstage > 1) then
+                                q_cons_ts(stor)%vf(i)%sf(j, k, l) = q_cons_ts(1)%vf(i)%sf(j, k, l)
+                            end if
+                            if (igr) then
+                                q_cons_ts(1)%vf(i)%sf(j, k, l) = (rk_coef(s, 1)*q_cons_ts(1)%vf(i)%sf(j, k, l) + rk_coef(s, &
+                                          & 2)*q_cons_ts(stor)%vf(i)%sf(j, k, l) + rk_coef(s, 3)*rhs_vf(i)%sf(j, k, &
+                                          & l))/rk_coef(s, 4)
+                            else
+                                q_cons_ts(1)%vf(i)%sf(j, k, l) = (rk_coef(s, 1)*q_cons_ts(1)%vf(i)%sf(j, k, l) + rk_coef(s, &
+                                          & 2)*q_cons_ts(stor)%vf(i)%sf(j, k, l) + rk_coef(s, 3)*dt*rhs_vf(i)%sf(j, k, &
+                                          & l))/rk_coef(s, 4)
+                            end if
                         end do
                     end do
                 end do
-                $:END_GPU_PARALLEL_LOOP()
-            end if
+            end do
+            $:END_GPU_PARALLEL_LOOP()
             ! Evolve pb and mv for non-polytropic qbmm
             if (qbmm .and. (.not. polytropic)) then
                 $:GPU_PARALLEL_LOOP(collapse=5)

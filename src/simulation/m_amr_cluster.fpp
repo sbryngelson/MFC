@@ -226,7 +226,7 @@ contains
         if (n_glb > 0) ng = n_glb
         if (p_glb > 0) pg = p_glb
 
-        cap = amr_max_fine
+        cap = amr_max_blocks
         allocate (slo(3, 4*cap + 8), shi(3, 4*cap + 8), alo(3, cap), ahi(3, cap))
         allocate (sts(4*cap + 8), ste(4*cap + 8), wt(3, ntag_in), sdep(4*cap + 8))
         allocate (sig(mg + ng + pg + 3))  ! bound: the three full domain extents; reused by every node
@@ -792,7 +792,7 @@ contains
         integer :: ierr
 #endif
 
-        allocate (boxes(amr_max_fine)); nboxes = 0
+        allocate (boxes(amr_max_blocks)); nboxes = 0
         bf = amr_blocking_factor; gx = [m_glb, n_glb, p_glb]
         nt = merge(gx/bf + 1, 1, amr_dim)
         allocate (mk(0:nt(1) - 1,0:nt(2) - 1,0:nt(3) - 1)); mk = .false.
@@ -826,8 +826,8 @@ contains
                                     b(3) = b(3) + 1
                                 end do
                                 mk(x:b(1),y:b(2),z:b(3)) = .false.
-                                if (nboxes == amr_max_fine) then
-                                    if (proc_rank == 0) print '(A,I0)', ' [amr] WARNING: tile clustering capped at ', amr_max_fine
+                                if (nboxes == amr_max_blocks) then
+                                    if (proc_rank == 0) print '(A,I0)', ' [amr] WARNING: tile clustering capped at ', amr_max_blocks
                                     return
                                 end if
                                 nboxes = nboxes + 1
