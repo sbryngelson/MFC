@@ -22,7 +22,6 @@ module m_amr_exchange
     use m_mpi_common, only: s_mpi_sendrecv_variables_buffers
     use m_amr_registers, only: s_amr_parent_foot
     use m_phase_timing
-    use m_amr_xchg_audit  ! per-call-site accounting of every AMR p2p transfer (s_xa_rec + XA_* site ids)
     use m_amr_state
     use m_amr_wave
     use m_amr_distribution
@@ -746,8 +745,7 @@ contains
                   & amr_sw_pxhi(amr_num_seam_pairs), amr_sw_pfm(3, amr_num_seam_pairs))
         ! Seam wave (plan-based exchange): the cross-rank pairs are one aggregated message per (peer, direction). Every pair
         ! contributes one send and one recv transfer on each of its two owners; both ranks walk the same replicated pair list
-        ! ascending, so the wire layout agrees with no metadata exchange. Wire is wp with the same stp cast on unpack; under
-        ! MFC_DEBUG each slab carries the identity header [site, sending slot, (d, dlo, dhi), (cnt, 0, 0)]. Same-rank pairs
+        ! ascending, so the wire layout agrees with no metadata exchange. Wire is wp with the same stp cast on unpack. Same-rank pairs
         ! use the batched kernel at drain. The wave stays open across the fill waves, so it has its own handle and sides.
         call s_amr_wave_open(amr_wave_seam, 5)
         ! transfer records: blk = the slot the data belongs to, bl = (d, dlo, dhi) its slab, bh = (peer slot, its dlo, dhi)
@@ -785,14 +783,13 @@ contains
         end do
         call s_amr_wave_close(amr_wseam_snd, amr_sw_sq, .false.)
         call s_amr_wave_close(amr_wseam_rcv, amr_sw_rq, .false.)
-        call s_amr_wave_post(amr_wave_seam, amr_wseam_rcv, amr_sw_rq, XA_F6W_RCV, .false.)
+        call s_amr_wave_post(amr_wave_seam, amr_wseam_rcv, amr_sw_rq, .false.)
         do idx = 1, amr_wseam_snd%nx
             call s_amr_wave_slice(amr_wseam_snd, idx, lo, hi)
             call s_amr_fine_slice(amr_wseam_snd%blk(idx), amr_wseam_snd%bl(1, idx), amr_wseam_snd%bl(2, idx), amr_wseam_snd%bl(3, &
                                   & idx), amr_sw_sq(lo:hi), 1)
-            call s_amr_wave_hdr_pack(amr_wseam_snd, amr_sw_sq, idx, XA_F6W_SND)
         end do
-        call s_amr_wave_send(amr_wave_seam, amr_wseam_snd, amr_sw_sq, XA_F6W_SND, .false.)
+        call s_amr_wave_send(amr_wave_seam, amr_wseam_snd, amr_sw_sq, .false.)
 
     end subroutine s_amr_fine_fine_post
 
@@ -804,10 +801,6 @@ contains
         call s_amr_wave_wait(amr_wave_seam)
         do idx = 1, amr_wseam_rcv%nx
             call s_amr_wave_slice(amr_wseam_rcv, idx, lo, hi)
-            ! the header names the SENDER's slot and slab, which this side recorded in bh
-            if (XA_NH > 0) call s_xa_hdr_check(amr_sw_rq(amr_wseam_rcv%off(idx) + 1:amr_wseam_rcv%off(idx) + XA_NH), XA_F6W_SND, &
-                & amr_wseam_rcv%bh(1, idx), [amr_wseam_rcv%bl(1, idx), amr_wseam_rcv%bh(2, idx), amr_wseam_rcv%bh(3, idx)], &
-                & [amr_wseam_rcv%cnt(idx), 0, 0])
             call s_amr_fine_slice(amr_wseam_rcv%blk(idx), amr_wseam_rcv%bl(1, idx), amr_wseam_rcv%bl(2, idx), amr_wseam_rcv%bl(3, &
                                   & idx), amr_sw_rq(lo:hi), -1)
         end do
@@ -957,7 +950,7 @@ contains
         do t = 1, nt
             amr_fx_pl(1:3,t) = w%bl(:,t)
             amr_fx_pl(4:6,t) = w%bh(:,t) - w%bl(:,t) + 1
-            amr_fx_pl(7, t) = w%off(t) + XA_NH
+            amr_fx_pl(7, t) = w%off(t)
             amr_fx_pre(t) = e
             e = e + sys_size*amr_fx_pl(4, t)*amr_fx_pl(5, t)*amr_fx_pl(6, t)
         end do
@@ -976,7 +969,7 @@ contains
         t1 = t0
         do while (t1 < nx)
             if (blk(t1 + 1) /= k) exit
-            if (amr_fx_pl(7, t1 + 1) - XA_NH /= amr_fx_pl(7, t1) + amr_fx_pre(t1 + 1) - amr_fx_pre(t1)) exit
+            if (amr_fx_pl(7, t1 + 1) /= amr_fx_pl(7, t1) + amr_fx_pre(t1 + 1) - amr_fx_pre(t1)) exit
             t1 = t1 + 1
         end do
 
@@ -1106,27 +1099,21 @@ contains
         end do
         call s_amr_wave_close(amr_wrecv, amr_fw_rq, amr_fw_dev)
 
-        ! post all recvs, pack all sends (device kernels into contiguous pool slices), post all sends, one wait. [amr-xa] records
-        ! payload words only, so the family totals are independent of the message aggregation.
-        call s_amr_wave_post(amr_wave, amr_wrecv, amr_fw_rq, XA_F1W_RCV, amr_fw_dev)
+        ! post all recvs, pack all sends (device kernels into contiguous pool slices), post all sends, one wait.
+        call s_amr_wave_post(amr_wave, amr_wrecv, amr_fw_rq, amr_fw_dev)
         if (amr_device_pack .and. amr_wsend%nx > 0) then
-            ! one launch for the whole send list; the debug identity headers are written after it because the fused copyout
-            ! covers the pool prefix (payload and header words). The pool is exactly tiled by the side's words, so every word
-            ! the copyout returns was written; any padding would ship garbage on the wire silently.
+            ! one launch for the whole send list. The pool is exactly tiled by the side's words, so every word the copyout
+            ! returns was written; any padding would ship garbage on the wire silently.
             call s_amr_fx_plan(amr_wsend)
             call s_amr_fx_pack_box(q_cons_coarse, 1, amr_wsend%nx, o1, o2, o3, amr_fx_pl(:,1:amr_wsend%nx), &
                                    & amr_fx_pre(1:amr_wsend%nx + 1), amr_fw_sq(1:amr_wsend%words))
-            do ix = 1, amr_wsend%nx
-                call s_amr_wave_hdr_pack(amr_wsend, amr_fw_sq, ix, XA_F1W_SND)
-            end do
         else
             do ix = 1, amr_wsend%nx
                 call s_amr_wave_slice(amr_wsend, ix, lo, hi)
-                call s_amr_wave_hdr_pack(amr_wsend, amr_fw_sq, ix, XA_F1W_SND)
                 call s_amr_pack_box_device(q_cons_coarse, amr_wsend%bl(:,ix), amr_wsend%bh(:,ix), o1, o2, o3, amr_fw_sq(lo:hi))
             end do
         end if
-        call s_amr_wave_send(amr_wave, amr_wsend, amr_fw_sq, XA_F1W_SND, amr_fw_dev)
+        call s_amr_wave_send(amr_wave, amr_wsend, amr_fw_sq, amr_fw_dev)
         call s_amr_wave_wait(amr_wave)
         if (amr_device_pack .and. amr_wrecv%nx > 0) call s_amr_fx_plan(amr_wrecv)
         call s_phase_toc(PH_GATHER)
@@ -1153,19 +1140,18 @@ contains
     end subroutine s_amr_l1_slice_slabs
 
     !> Drain block k's received transfers at the wave cursor into amr_cg (patch origin off): one fused unpack per contiguous run
-    !! under amr_device_pack, else one unpack per transfer; every identity header is checked against the sender's site.
-    impure subroutine s_amr_fill_drain(k, site, off)
+    !! under amr_device_pack, else one unpack per transfer.
+    impure subroutine s_amr_fill_drain(k, off)
 
-        integer, intent(in) :: k, site, off(3)
+        integer, intent(in) :: k, off(3)
         integer             :: lo, hi, ie, jx, boff
 
         do while (amr_wcur <= amr_wrecv%nx)
             if (amr_wrecv%blk(amr_wcur) /= k) exit
             if (amr_device_pack) then
                 call s_amr_fx_run(k, amr_wrecv%blk, amr_wrecv%nx, amr_wcur, ie)
-                boff = amr_fx_pl(7, amr_wcur) - XA_NH
+                boff = amr_fx_pl(7, amr_wcur)
                 do jx = amr_wcur, ie
-                    call s_amr_wave_hdr_check(amr_wrecv, amr_fw_rq, jx, site)
                     amr_fx_pl(9:11,jx) = off
                 end do
                 call s_amr_fx_unpack(amr_wcur, ie, boff, amr_fx_pl(:,1:amr_wrecv%nx), amr_fx_pre(1:amr_wrecv%nx + 1), &
@@ -1173,7 +1159,6 @@ contains
                 amr_wcur = ie + 1
                 cycle
             end if
-            call s_amr_wave_hdr_check(amr_wrecv, amr_fw_rq, amr_wcur, site)
             call s_amr_wave_slice(amr_wrecv, amr_wcur, lo, hi)
             call s_amr_unpack_box_device(amr_wrecv%bl(:,amr_wcur), amr_wrecv%bh(:,amr_wcur), off, amr_fw_rq(lo:hi))
             amr_wcur = amr_wcur + 1
@@ -1210,7 +1195,7 @@ contains
             end do
             call s_amr_gather_own_rows(q_cons_coarse, amr_cg, o1, o2, o3)
         end if
-        call s_amr_fill_drain(k, XA_F1W_SND, amr_cpat_off)
+        call s_amr_fill_drain(k, amr_cpat_off)
         call s_phase_toc(PH_GATHER)
 
     end subroutine s_amr_l1_fill_consume
@@ -1367,9 +1352,8 @@ contains
         if (amr_wrecv%nx > 0) then
             do t = 1, amr_wrecv%nx
                 k = amr_wrecv%blk(t)
-                call s_amr_wave_hdr_check(amr_wrecv, amr_fw_rq, t, XA_F1W_SND)
                 call s_amr_patch_box(k, plo, phi)
-                call s_amr_slab_add(amr_wrecv%bl(:,t), amr_wrecv%bh(:,t), amr_wrecv%off(t) + XA_NH, plo, plo - [0, 0, amr_cg_pz(k)])
+                call s_amr_slab_add(amr_wrecv%bl(:,t), amr_wrecv%bh(:,t), amr_wrecv%off(t), plo, plo - [0, 0, amr_cg_pz(k)])
             end do
             call s_amr_unpack_rows(amr_fw_rq(1:amr_wrecv%words), amr_cg)
         end if
@@ -1496,9 +1480,8 @@ contains
             call s_amr_wave_add_slabs(amr_wrecv, powner, k, msl, tb, te)
         end do
         call s_amr_wave_close(amr_wrecv, amr_fw_rq, amr_fw_dev)
-        call s_amr_wave_post(amr_wave, amr_wrecv, amr_fw_rq, XA_F2W_RCV, amr_fw_dev)
-        ! packs: one fused launch over the whole send list under amr_device_pack, else one launch per transfer; the debug
-        ! identity headers are written after the fused launch, whose copyout covers the pool prefix
+        call s_amr_wave_post(amr_wave, amr_wrecv, amr_fw_rq, amr_fw_dev)
+        ! packs: one fused launch over the whole send list under amr_device_pack, else one launch per transfer
         if (amr_device_pack .and. amr_wsend%nx > 0) then
             call s_amr_fx_plan(amr_wsend)
             do ix = 1, amr_wsend%nx
@@ -1509,9 +1492,6 @@ contains
             end do
             call s_amr_fx_pack_parent(1, amr_wsend%nx, amr_fx_pl(:,1:amr_wsend%nx), amr_fx_pre(1:amr_wsend%nx + 1), &
                                       & amr_fw_sq(1:amr_wsend%words))
-            do ix = 1, amr_wsend%nx
-                call s_amr_wave_hdr_pack(amr_wsend, amr_fw_sq, ix, XA_F2W_SND)
-            end do
         else
             do ix = 1, amr_wsend%nx
                 k = amr_wsend%blk(ix)
@@ -1519,10 +1499,9 @@ contains
                 call s_amr_wave_slice(amr_wsend, ix, lo, hi)
                 loc_parent_blk_k = amr_loc_of(amr_parent_blk(k))
                 call s_amr_pack_parent_box_device(loc_parent_blk_k, amr_wsend%bl(:,ix), amr_wsend%bh(:,ix), amr_fw_sq(lo:hi))
-                call s_amr_wave_hdr_pack(amr_wsend, amr_fw_sq, ix, XA_F2W_SND)
             end do
         end if
-        call s_amr_wave_send(amr_wave, amr_wsend, amr_fw_sq, XA_F2W_SND, amr_fw_dev)
+        call s_amr_wave_send(amr_wave, amr_wsend, amr_fw_sq, amr_fw_dev)
         call s_amr_wave_wait(amr_wave)
         if (amr_device_pack .and. amr_wrecv%nx > 0) call s_amr_fx_plan(amr_wrecv)
         call s_phase_toc(PH_GATHER)
@@ -1554,7 +1533,7 @@ contains
             end do
         else
             @:ASSERT(amr_wcur <= amr_wrecv%nx .and. amr_wrecv%blk(amr_wcur) == k, "parent-fill wave: missing recv transfer")
-            call s_amr_fill_drain(k, XA_F2W_SND, [0, 0, 0])
+            call s_amr_fill_drain(k, [0, 0, 0])
         end if
         call s_phase_toc(PH_GATHER)
 

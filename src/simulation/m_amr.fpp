@@ -22,7 +22,6 @@ module m_amr
     use m_mpi_proxy, only: s_mpi_abort
     use m_mpi_common, only: s_mpi_allreduce_integer_min, s_mpi_allreduce_integer_max
     use m_phase_timing
-    use m_amr_xchg_audit  ! per-call-site accounting of every AMR p2p transfer (s_xa_rec + XA_* site ids)
     use m_ibm, only: s_ibm_alloc_fine
     use m_amr_state
     use m_amr_distribution
@@ -50,7 +49,7 @@ contains
         if (.not. amr) return
 
 #ifdef MFC_GPU
-        amr_fw_dev = rdma_mpi .and. XA_NH == 0
+        amr_fw_dev = rdma_mpi
 #endif
         amr_br_batch = amr_bat_lim
 
@@ -310,9 +309,6 @@ contains
 
         integer :: i, islot
 
-        ! before the amr early-return: the report's conservation allreduce is collective
-
-        call s_xa_report()
         call s_amr_cad_report()
         if (.not. amr) return
         do islot = 1, amr_max_blocks

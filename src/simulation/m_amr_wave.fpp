@@ -24,7 +24,6 @@ module m_amr_wave
     use m_precision_select
     use m_global_parameters
     use m_mpi_proxy, only: s_mpi_abort
-    use m_amr_xchg_audit
     use m_amr_state, only: amr_fw_dev, s_amr_size_int, s_amr_size_int3, s_amr_size_real
     use m_amr_distribution, only: s_amr_m1_wave_open, f_amr_m1_seq, f_amr_m1_tag
 
@@ -33,15 +32,15 @@ module m_amr_wave
     private
     public :: t_amr_wave_side, t_amr_wave, s_amr_wave_open, s_amr_wave_req, s_amr_wave_req_raw, s_amr_wave_wait, f_amr_wave_nreq, &
         & s_amr_wave_reset, s_amr_wave_add, s_amr_wave_add_slabs, s_amr_wave_close, s_amr_wave_post, s_amr_wave_send, &
-        & s_amr_wave_slice, s_amr_wave_hdr_pack, s_amr_wave_hdr_check
+        & s_amr_wave_slice
 
     !> One side (send or receive) of a pooled wave. Transfers are appended in enumeration order; s_amr_wave_close groups them by
-    !! peer into one contiguous pool run per peer, each transfer preceded by XA_NH header words.
+    !! peer into one contiguous pool run per peer.
     type t_amr_wave_side
         integer :: nx = 0     !< transfers
         integer :: np = 0     !< peers
         integer :: words = 0  !< pool words in use after close
-        !> per transfer (off: pool offset of its header)
+        !> per transfer (off: pool offset)
         integer, allocatable :: blk(:), bl(:,:), bh(:,:), cnt(:), peer(:), pi(:), off(:)
         integer, allocatable :: prank(:), pwords(:), pbase(:), pnx(:)  !< per peer: rank, message words, pool base, transfers
     end type t_amr_wave_side
@@ -81,22 +80,16 @@ contains
 
     end function f_amr_wave_nreq
 
-    !> Post one request of n words between buf (device-resident when dev) and peer: dir = 1 sends, 2 receives (the s_xa_rec
-    !! direction code). Recorded at audit site with key.
-    impure subroutine s_amr_wave_req(w, dir, buf, n, peer, site, key, dev, rec, nrec)
+    !> Post one request of n words between buf (device-resident when dev) and peer: dir = 1 sends, 2 receives.
+    impure subroutine s_amr_wave_req(w, dir, buf, n, peer, dev)
 
         type(t_amr_wave), intent(inout)     :: w
-        integer, intent(in)                 :: dir, n, peer, site, key
+        integer, intent(in)                 :: dir, n, peer
         real(wp), intent(inout), contiguous :: buf(:)
         logical, intent(in)                 :: dev
-        logical, intent(in), optional       :: rec   !< record in the exchange audit (default; false for header-only messages)
-        integer, intent(in), optional       :: nrec  !< payload words to record (default n; a pooled message also carries headers)
-        integer                             :: ierr, tq, nr
-        logical                             :: do_rec
+        integer                             :: ierr, tq
 
-        do_rec = .true.; if (present(rec)) do_rec = rec
-        nr = n; if (present(nrec)) nr = nrec
-        tq = f_amr_wave_tag(w, dir, peer, site, key, nr, do_rec)
+        tq = f_amr_wave_tag(w, dir, peer)
         w%reqw(w%nreq) = merge(n, -1, dir == 2)
 #ifdef MFC_MPI
         if (dev) then
@@ -118,14 +111,14 @@ contains
 
     !> Host-array variant for the zero-copy waves, which move register sections (any rank) directly: sequence association on an
     !! assumed-size dummy, no device address.
-    impure subroutine s_amr_wave_req_raw(w, dir, buf, n, peer, site, key)
+    impure subroutine s_amr_wave_req_raw(w, dir, buf, n, peer)
 
         type(t_amr_wave), intent(inout) :: w
-        integer, intent(in)             :: dir, n, peer, site, key
+        integer, intent(in)             :: dir, n, peer
         real(wp), intent(inout)         :: buf(*)
         integer                         :: ierr, tq
 
-        tq = f_amr_wave_tag(w, dir, peer, site, key, n, .true.)
+        tq = f_amr_wave_tag(w, dir, peer)
         w%reqw(w%nreq) = merge(n, -1, dir == 2)
 #ifdef MFC_MPI
         if (dir == 2) then
@@ -137,17 +130,15 @@ contains
 
     end subroutine s_amr_wave_req_raw
 
-    !> Keyed tag of the wave's next request to peer in direction dir, recorded in the audit (nr payload words) when rec; grows the
-    !! request list by one (w%nreq is the new request's index).
-    impure integer function f_amr_wave_tag(w, dir, peer, site, key, nr, rec) result(tq)
+    !> Keyed tag of the wave's next request to peer in direction dir; grows the request list by one (w%nreq is the new request's
+    !! index).
+    impure integer function f_amr_wave_tag(w, dir, peer) result(tq)
 
         type(t_amr_wave), intent(inout) :: w
-        integer, intent(in)             :: dir, peer, site, key, nr
-        logical, intent(in)             :: rec
+        integer, intent(in)             :: dir, peer
         integer                         :: sq
 
         sq = f_amr_m1_seq(peer, dir); tq = f_amr_m1_tag(w%band, sq)
-        if (rec) call s_xa_rec(site, dir, nr, tq, peer=peer, key=key, seq=sq)
         w%nreq = w%nreq + 1
         call s_amr_size_int(w%req, w%nreq); call s_amr_size_int(w%reqw, w%nreq)
 
@@ -216,8 +207,7 @@ contains
 
     end subroutine s_amr_wave_add_slabs
 
-    !> Lay the side out in its pool: peers in first-appearance order, each peer's transfers contiguous in appended order with XA_NH
-    !! header words in front of every transfer; grows pool (device-resident when dev) to the words in use.
+    !> Lay the side out in its pool: peers in first-appearance order, each peer's transfers contiguous in appended order; grows pool (device-resident when dev) to the words in use.
     impure subroutine s_amr_wave_close(s, pool, dev)
 
         type(t_amr_wave_side), intent(inout) :: s
@@ -239,7 +229,7 @@ contains
                 bmap(r) = s%np; s%prank(s%np) = r
             end if
             s%pi(t) = bmap(r)
-            s%off(t) = bwords(r) + bnx(r)*XA_NH  ! relative to the peer's base
+            s%off(t) = bwords(r)  ! relative to the peer's base
             bwords(r) = bwords(r) + s%cnt(t)
             bnx(r) = bnx(r) + 1
         end do
@@ -247,7 +237,7 @@ contains
         do ip = 1, s%np
             r = s%prank(ip)
             s%pnx(ip) = bnx(r)
-            s%pwords(ip) = bwords(r) + bnx(r)*XA_NH
+            s%pwords(ip) = bwords(r)
             s%pbase(ip) = base; base = base + s%pwords(ip)
             bmap(r) = 0; bnx(r) = 0; bwords(r) = 0
         end do
@@ -259,68 +249,43 @@ contains
 
     end subroutine s_amr_wave_close
 
-    !> Pool bounds [lo, hi] of transfer t's payload (its XA_NH header words sit at off+1:off+XA_NH).
+    !> Pool bounds [lo, hi] of transfer t's payload.
     pure subroutine s_amr_wave_slice(s, t, lo, hi)
 
         type(t_amr_wave_side), intent(in) :: s
         integer, intent(in)               :: t
         integer, intent(out)              :: lo, hi
 
-        lo = s%off(t) + XA_NH + 1; hi = s%off(t) + XA_NH + s%cnt(t)
+        lo = s%off(t) + 1; hi = s%off(t) + s%cnt(t)
 
     end subroutine s_amr_wave_slice
 
-    !> Debug identity header of transfer t (no-op when the audit is off).
-    impure subroutine s_amr_wave_hdr_pack(s, pool, t, site)
-
-        type(t_amr_wave_side), intent(in) :: s
-        real(wp), intent(inout)           :: pool(:)
-        integer, intent(in)               :: t, site
-
-        if (XA_NH > 0) call s_xa_hdr_pack(pool(s%off(t) + 1:s%off(t) + XA_NH), site, s%blk(t), s%bl(:,t), s%bh(:,t))
-
-    end subroutine s_amr_wave_hdr_pack
-
-    impure subroutine s_amr_wave_hdr_check(s, pool, t, site)
-
-        type(t_amr_wave_side), intent(in) :: s
-        real(wp), intent(in)              :: pool(:)
-        integer, intent(in)               :: t, site
-
-        if (XA_NH > 0) call s_xa_hdr_check(pool(s%off(t) + 1:s%off(t) + XA_NH), site, s%blk(t), s%bl(:,t), s%bh(:,t))
-
-    end subroutine s_amr_wave_hdr_check
-
     !> One receive per peer into the side's pool runs.
-    impure subroutine s_amr_wave_post(w, s, pool, site, dev)
+    impure subroutine s_amr_wave_post(w, s, pool, dev)
 
         type(t_amr_wave), intent(inout)     :: w
         type(t_amr_wave_side), intent(in)   :: s
         real(wp), intent(inout), contiguous :: pool(:)
-        integer, intent(in)                 :: site
         logical, intent(in)                 :: dev
         integer                             :: ip
 
         do ip = 1, s%np
-            call s_amr_wave_req(w, 2, pool(s%pbase(ip) + 1:s%pbase(ip) + s%pwords(ip)), s%pwords(ip), s%prank(ip), site, &
-                                & s%pnx(ip), dev, nrec=s%pwords(ip) - s%pnx(ip)*XA_NH)
+            call s_amr_wave_req(w, 2, pool(s%pbase(ip) + 1:s%pbase(ip) + s%pwords(ip)), s%pwords(ip), s%prank(ip), dev)
         end do
 
     end subroutine s_amr_wave_post
 
     !> One send per peer from the side's pool runs (the caller has packed every transfer's slice and header).
-    impure subroutine s_amr_wave_send(w, s, pool, site, dev)
+    impure subroutine s_amr_wave_send(w, s, pool, dev)
 
         type(t_amr_wave), intent(inout)     :: w
         type(t_amr_wave_side), intent(in)   :: s
         real(wp), intent(inout), contiguous :: pool(:)
-        integer, intent(in)                 :: site
         logical, intent(in)                 :: dev
         integer                             :: ip
 
         do ip = 1, s%np
-            call s_amr_wave_req(w, 1, pool(s%pbase(ip) + 1:s%pbase(ip) + s%pwords(ip)), s%pwords(ip), s%prank(ip), site, &
-                                & s%pnx(ip), dev, nrec=s%pwords(ip) - s%pnx(ip)*XA_NH)
+            call s_amr_wave_req(w, 1, pool(s%pbase(ip) + 1:s%pbase(ip) + s%pwords(ip)), s%pwords(ip), s%prank(ip), dev)
         end do
 
     end subroutine s_amr_wave_send

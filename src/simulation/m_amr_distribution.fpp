@@ -21,7 +21,6 @@ module m_amr_distribution
     use m_constants, only: K_ib
     use m_mpi_proxy, only: s_mpi_abort
     use m_phase_timing
-    use m_amr_xchg_audit  ! per-call-site accounting of every AMR p2p transfer (s_xa_rec + XA_* site ids)
     use m_ibm, only: ib_markers
     use m_amr_state
 

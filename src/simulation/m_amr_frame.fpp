@@ -20,7 +20,6 @@ module m_amr_frame
     use m_mpi_proxy, only: s_mpi_abort  ! @:ASSERT expands to it
     use m_pressure_relaxation, only: s_pressure_relaxation_procedure
     use m_phase_timing
-    use m_amr_xchg_audit  ! per-call-site accounting of every AMR p2p transfer (s_xa_rec + XA_* site ids)
     use m_hypoelastic, only: s_hypoelastic_update_fd_coeffs, s_enforce_cont_damage_bounds
     use m_body_forces, only: s_apply_bodyforces
     use m_igr, only: jac, jac_old

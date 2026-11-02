@@ -31,7 +31,6 @@ module m_amr_regrid
         & amr_cad_tot, amr_cad_esc, amr_cad_armed, s_amr_ranks_overlapping, f_amr_overlap_count, f_amr_rank_overlaps, &
         & s_amr_l1_fill_exchange, s_amr_l1_fill_consume, s_amr_parent_fill_exchange, s_amr_parent_fill_consume, &
         & s_amr_fill_wave_done, amr_fw_sq, amr_fw_rq, amr_fw_dev
-    use m_amr_xchg_audit, only: XA_F4_SND, XA_F4_RCV
     use m_acoustic_src, only: acoustic_supp_lo, acoustic_supp_hi
     use m_bubbles_EL, only: s_lag_cloud_bbox_local
 
@@ -1624,20 +1623,18 @@ contains
             deallocate (wlo, whi)
             call s_amr_wave_close(amr_wsend, amr_mig_sq, amr_fw_dev)
             call s_amr_wave_close(amr_wrecv, amr_mig_rq, amr_fw_dev)
-            call s_amr_wave_post(amr_wave, amr_wrecv, amr_mig_rq, XA_F4_RCV, amr_fw_dev)
+            call s_amr_wave_post(amr_wave, amr_wrecv, amr_mig_rq, amr_fw_dev)
             do ix = 1, amr_wsend%nx
                 kk = amr_wsend%blk(ix)
                 call s_amr_wave_slice(amr_wsend, ix, lo, hi)
                 call s_amr_mig_window(amr_wsend%bl(:,ix), amr_wsend%bh(:,ix), old_ilo(:,kk), flo, fhi)
                 call s_amr_mig_pack_device(amr_loc_of(kk), flo(1), flo(2), flo(3), fhi(1), fhi(2), fhi(3), amr_mig_sq(lo:hi))
-                call s_amr_wave_hdr_pack(amr_wsend, amr_mig_sq, ix, XA_F4_SND)
             end do
-            call s_amr_wave_send(amr_wave, amr_wsend, amr_mig_sq, XA_F4_SND, amr_fw_dev)
+            call s_amr_wave_send(amr_wave, amr_wsend, amr_mig_sq, amr_fw_dev)
             call s_amr_wave_wait(amr_wave)
             call s_amr_mig_free(amr_mig_sq)
             do ix = 1, amr_wrecv%nx
                 kk = amr_wrecv%blk(ix)
-                call s_amr_wave_hdr_check(amr_wrecv, amr_mig_rq, ix, XA_F4_SND)
                 call s_amr_wave_slice(amr_wrecv, ix, lo, hi)
                 call s_amr_mig_window(amr_wrecv%bl(:,ix), amr_wrecv%bh(:,ix), old_ilo(:,kk), flo, fhi)
                 amr_mig_win(:,kk) = [lo, flo, fhi]
