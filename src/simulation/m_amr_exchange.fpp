@@ -343,8 +343,61 @@ contains
         ! multi-fluid volume-fraction ghosts: per-cell closure mirroring s_prolong_alphas_closure (own routine: nvfortran
         ! 25.x crashes on two target regions sharing this routine's privates)
         if (multi) call s_amr_fill_fine_ghosts_alphas(q_coarse, nsl, stot, advb, adve)
+        if (quart) call s_amr_guard_fine_ghosts(q_coarse, nsl, stot, multi, advb, adve)
 
     end subroutine s_amr_fill_ghost_rows
+
+    !> Quartic safety net for the ghost shell: a ghost cell whose state is inadmissible (@:AMR_CONS_OK) is refilled with
+    !! minmod-limited linear in every variable (volume fractions of multi-fluid runs keep their closure values).
+    impure subroutine s_amr_guard_fine_ghosts(q_coarse, nsl, stot, multi, advb, adve)
+
+        type(scalar_field), dimension(sys_size), intent(in) :: q_coarse
+        integer, intent(in)                                 :: nsl, stot, advb, adve
+        logical, intent(in)                                 :: multi
+        integer                                             :: i, fi, fj, fk, ci, cj, ck, ox, oy, oz, loc
+        integer                                             :: rr, lo1, lo2, lo3, s, g, r, n1, n2, lo, hi, md
+        integer                                             :: amr_v
+        logical                                             :: d2, d3, ok
+        real(wp)                                            :: u0, sx, sy, sz, xix, xiy, xiz, amr_rho, amr_ke
+
+        d2 = n_glb > 0; d3 = p_glb > 0
+        rr = amr_ref_ratio
+        $:GPU_PARALLEL_LOOP(private='[s, lo, hi, md, r, n1, n2, fi, fj, fk, i, ci, cj, ck, xix, xiy, xiz, u0, sx, sy, sz, ox, oy, &
+                            & oz, lo1, lo2, lo3, loc, ok, amr_v, amr_rho, amr_ke]')
+        do g = 0, stot - 1
+            @:SLAB_DECODE(fi, fj, fk)
+            loc = amr_slab_tab(9, s)
+            @:AMR_CONS_OK(ok, fi, fj, fk, loc)
+            if (ok) cycle
+            lo1 = amr_slab_tab(10, s); lo2 = amr_slab_tab(11, s); lo3 = amr_slab_tab(12, s)
+            ox = amr_slab_tab(13, s); oy = amr_slab_tab(14, s); oz = amr_slab_tab(15, s)
+            ck = -oz; xiz = 0._wp
+            if (d3) then
+                ck = lo3 + floor(real(fk, wp)/real(rr, wp)) - oz
+                xiz = (real(modulo(fk, rr), wp) - real(rr - 1, wp)*0.5_wp)/real(rr, wp)
+            end if
+            cj = 0; xiy = 0._wp
+            if (d2) then
+                cj = lo2 + floor(real(fj, wp)/real(rr, wp)) - oy
+                xiy = (real(modulo(fj, rr), wp) - real(rr - 1, wp)*0.5_wp)/real(rr, wp)
+            end if
+            ci = lo1 + floor(real(fi, wp)/real(rr, wp)) - ox
+            xix = (real(modulo(fi, rr), wp) - real(rr - 1, wp)*0.5_wp)/real(rr, wp)
+            $:GPU_LOOP(parallelism='[seq]')
+            do i = 1, sys_size
+                if (multi .and. i >= advb .and. i <= adve) cycle
+                u0 = real(q_coarse(i)%sf(ci, cj, ck), wp)
+                sx = minmod(real(q_coarse(i)%sf(ci + 1, cj, ck), wp) - u0, u0 - real(q_coarse(i)%sf(ci - 1, cj, ck), wp))
+                sy = 0._wp
+                if (d2) sy = minmod(real(q_coarse(i)%sf(ci, cj + 1, ck), wp) - u0, u0 - real(q_coarse(i)%sf(ci, cj - 1, ck), wp))
+                sz = 0._wp
+                if (d3) sz = minmod(real(q_coarse(i)%sf(ci, cj, ck + 1), wp) - u0, u0 - real(q_coarse(i)%sf(ci, cj, ck - 1), wp))
+                amr_cons_st(fi, fj, fk, i, loc) = u0 + sx*xix + sy*xiy + sz*xiz
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_amr_guard_fine_ghosts
 
     !> Volume-fraction ghosts for the fill above: shared limiter switch over all fluids; interpolate + clamp fluids advb..adve-1;
     !! alpha_n = 1 - sum. Same flat-index fusion over the same disjoint slabs (amr_slab_tab, already on device).

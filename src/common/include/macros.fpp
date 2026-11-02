@@ -176,3 +176,20 @@
     end if
 #:enddef
 ! New line at end of file is required for FYPP
+
+#:def AMR_CONS_OK(ok, fi, fj, fk, loc)
+    !> ${ok}$ = fine state admissible: positive total density and (with an energy equation) positive internal energy; NaN fails
+    amr_rho = 0._wp; amr_ke = 0._wp
+    $:GPU_LOOP(parallelism='[seq]')
+    do amr_v = eqn_idx%cont%beg, eqn_idx%cont%end
+        amr_rho = amr_rho + real(amr_cons_st(${fi}$, ${fj}$, ${fk}$, amr_v, ${loc}$), wp)
+    end do
+    ${ok}$ = amr_rho > 0._wp
+    if (${ok}$ .and. model_eqns /= 4) then
+        $:GPU_LOOP(parallelism='[seq]')
+        do amr_v = eqn_idx%mom%beg, eqn_idx%mom%end
+            amr_ke = amr_ke + real(amr_cons_st(${fi}$, ${fj}$, ${fk}$, amr_v, ${loc}$), wp)**2
+        end do
+        ${ok}$ = real(amr_cons_st(${fi}$, ${fj}$, ${fk}$, eqn_idx%E, ${loc}$), wp) - 0.5_wp*amr_ke/amr_rho > 0._wp
+    end if
+#:enddef

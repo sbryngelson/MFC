@@ -489,6 +489,78 @@ contains
 
     end subroutine s_prolong_one_var
 
+    !> Quartic safety net (amr_prolong = 2): a coarse parent whose children leave the admissible state (@:AMR_CONS_OK) is
+    !! re-prolonged with minmod-limited linear in every variable, so its children still average to the coarse value.
+    impure subroutine s_prolong_guard(qc, loc)
+
+        type(scalar_field), dimension(sys_size), intent(in) :: qc
+        integer, intent(in)                                 :: loc
+        integer                                             :: i, pi, pj, pk, a, b, c, fi, fj, fk, ci, cj, ck, rrat, ry, rz
+        integer                                             :: ox, oy, oz, il1, il2, il3, nx, ny, nz, advb, adve, spb, spe
+        real(wp)                                            :: u0, sx, sy, sz, xix, xiy, xiz
+        integer                                             :: amr_v
+        real(wp)                                            :: amr_rho, amr_ke
+        logical                                             :: d2, d3, bad, ok, skip_alpha
+
+        ox = amr_cpat_off(1); oy = amr_cpat_off(2); oz = amr_cpat_off(3)
+        rrat = amr_slots(amr_cur)%amr_ref_ratio
+        il1 = amr_isect_lo(1); il2 = amr_isect_lo(2); il3 = amr_isect_lo(3)
+        d2 = n_glb > 0; d3 = p_glb > 0
+        ry = merge(rrat, 1, d2); rz = merge(rrat, 1, d3)
+        nx = (amr_slots(amr_cur)%m + 1)/rrat; ny = (amr_slots(amr_cur)%n + 1)/ry; nz = (amr_slots(amr_cur)%p + 1)/rz
+        skip_alpha = num_fluids > 1 .and. (.not. bubbles_lagrange)
+        advb = eqn_idx%adv%beg; adve = eqn_idx%adv%end; spb = eqn_idx%species%beg; spe = eqn_idx%species%end
+        $:GPU_PARALLEL_LOOP(collapse=3, private='[i, a, b, c, fi, fj, fk, ci, cj, ck, xix, xiy, xiz, u0, sx, sy, sz, bad, ok, &
+                            & amr_v, amr_rho, amr_ke]')
+        do pk = 0, nz - 1
+            do pj = 0, ny - 1
+                do pi = 0, nx - 1
+                    bad = .false.
+                    do c = 0, rz - 1
+                        do b = 0, ry - 1
+                            do a = 0, rrat - 1
+                                @:AMR_CONS_OK(ok, pi*rrat + a, pj*ry + b, pk*rz + c, loc)
+                                if (.not. ok) bad = .true.
+                            end do
+                        end do
+                    end do
+                    if (bad) then
+                        ci = il1 + pi - ox; cj = 0; ck = 0
+                        if (d2) cj = il2 + pj - oy
+                        if (d3) ck = il3 + pk - oz
+                        do c = 0, rz - 1
+                            do b = 0, ry - 1
+                                do a = 0, rrat - 1
+                                    fi = pi*rrat + a; fj = pj*ry + b; fk = pk*rz + c
+                                    xix = (real(a, wp) - real(rrat - 1, wp)*0.5_wp)/real(rrat, wp)
+                                    xiy = 0._wp; if (d2) xiy = (real(b, wp) - real(rrat - 1, wp)*0.5_wp)/real(rrat, wp)
+                                    xiz = 0._wp; if (d3) xiz = (real(c, wp) - real(rrat - 1, wp)*0.5_wp)/real(rrat, wp)
+                                    $:GPU_LOOP(parallelism='[seq]')
+                                    do i = 1, sys_size
+                                        if (skip_alpha .and. i >= advb .and. i <= adve) cycle
+                                        if (chemistry .and. i >= spb .and. i <= spe) cycle
+                                        u0 = real(qc(i)%sf(ci, cj, ck), wp)
+                                        sx = minmod(real(qc(i)%sf(ci + 1, cj, ck), wp) - u0, u0 - real(qc(i)%sf(ci - 1, cj, ck), &
+                                                    & wp))
+                                        sy = 0._wp
+                                        if (d2) sy = minmod(real(qc(i)%sf(ci, cj + 1, ck), wp) - u0, u0 - real(qc(i)%sf(ci, &
+                                            & cj - 1, ck), wp))
+                                        sz = 0._wp
+                                        if (d3) sz = minmod(real(qc(i)%sf(ci, cj, ck + 1), wp) - u0, u0 - real(qc(i)%sf(ci, cj, &
+                                            & ck - 1), wp))
+                                        amr_cons_st(fi, fj, fk, i, loc) = u0 + sx*xix + sy*xiy + sz*xiz
+                                    end do
+                                end do
+                            end do
+                        end do
+                    end if
+                end do
+            end do
+        end do
+        $:END_GPU_PARALLEL_LOOP()
+
+    end subroutine s_prolong_guard
+
     !> Conservative prolongation: fill amr_fine interior from coarse (minmod-limited linear, or quartic with amr_prolong = 2).
     !! Symmetric child offsets (+/-1/4 of a coarse cell) => the amr_ref_ratio^d children average to the coarse value. Multi-fluid
     !! volume fractions take the sum-preserving closure path instead (single-fluid runs never branch, so their prolongation is
@@ -513,6 +585,7 @@ contains
         if (num_fluids > 1 .and. (.not. bubbles_lagrange)) call s_prolong_alphas_closure(amr_cg, loc_cur)
         loc_cur = amr_loc_of(amr_cur)
         if (chemistry) call s_prolong_species_closure(amr_cg, loc_cur)
+        if (amr_prolong == 2) call s_prolong_guard(amr_cg, loc_cur)
 
     end subroutine s_interpolate_coarse_to_fine
 
