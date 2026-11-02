@@ -4,9 +4,7 @@
 
 !> @brief HLLC Riemann solver with contact restoration, Toro et al. Shock Waves (1994)
 #:include 'case.fpp'
-#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR).
-#! Safe because arrays named in physics branches are always allocated (degenerate placeholders when viscous/cyl_coord/qbmm
-#! are off); keep that invariant when adding kernels.
+#! AMD OpenMP: assume allocatables present (see OMP_DEFAULT_STR); name a conditional array only under its condition.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 

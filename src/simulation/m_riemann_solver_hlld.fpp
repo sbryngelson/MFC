@@ -124,9 +124,7 @@ contains
                                     end if
                                 end if
 
-                                ! Inline mixture coefficients: with the EOS flag folded at compile time amdflang miscompiles direct
-                                ! calls to s_compute_mixture_coefficients. mhd pins num_fluids = 1 stiffened gas, i.e. that
-                                ! routine's fast path.
+                                ! inlined: amdflang miscompiles s_compute_mixture_coefficients here (MHD is 1-fluid stiffened gas)
                                 rho%L = 0._wp; gamma%L = 0._wp; pi_inf%L = 0._wp; qv%L = 0._wp
                                 rho%R = 0._wp; gamma%R = 0._wp; pi_inf%R = 0._wp; qv%R = 0._wp
                                 $:GPU_LOOP(parallelism='[seq]')

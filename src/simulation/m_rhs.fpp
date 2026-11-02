@@ -3,9 +3,7 @@
 !! @brief Contains module m_rhs
 
 #:include 'case.fpp'
-#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR).
-#! Safe because each conditionally allocated array a kernel names launches only under its allocation's condition;
-#! keep that invariant when adding kernels.
+#! AMD OpenMP: assume allocatables present (see OMP_DEFAULT_STR); name a conditional array only under its condition.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 

@@ -28,10 +28,8 @@
             #:elif MFC_COMPILER == CCE_COMPILER_ID
                 #:set default_val = 'defaultmap(tofrom:aggregate) defaultmap(present:allocatable) defaultmap(present:pointer) '
             #:elif MFC_COMPILER == AMD_COMPILER_ID
-                #! Opt-in per file (`#:set MFC_OMP_PRESENT_ALLOCATABLE = True` before the include): emit present:allocatable
-                #! as CCE does. Without it amdflang re-maps every derived-type allocatable each launch, and its per-element
-                #! mapper taxes every kernel in the unit. Not the default: a kernel naming a module allocatable that is
-                #! unallocated at launch aborts under `present`; opt in only once none does.
+                #! Per-file opt-in (MFC_OMP_PRESENT_ALLOCATABLE): present:allocatable, as CCE. Avoids amdflang re-mapping
+                #! derived-type allocatables every launch; a kernel naming an unallocated array then aborts.
                 #:if getvar('MFC_OMP_PRESENT_ALLOCATABLE', False)
                     #:set default_val = 'defaultmap(present:allocatable) '
                 #:else
