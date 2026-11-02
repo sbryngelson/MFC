@@ -21,12 +21,36 @@ module m_amr_nest
     implicit none
 
     private
-    public :: s_amr_regrid_nest_children, f_amr_rho_tot_sf, f_amr_tag_ind
+    public :: s_amr_regrid_nest_children, s_amr_nest_window, f_amr_rho_tot_sf, f_amr_tag_ind
 
     !> Nested children were dropped for lack of block capacity (warn once per regrid)
     logical :: amr_child_dropped = .false.
 
 contains
+
+    !> Grow the pack buffers sidx/skb geometrically to hold nloc+extra entries, preserving the first nloc.
+    impure subroutine s_amr_grow_pack(sidx, skb, nloc, extra)
+
+        integer(8), allocatable, intent(inout) :: sidx(:)
+        integer, allocatable, intent(inout)    :: skb(:)
+        integer, intent(in)                    :: nloc, extra
+        integer                                :: cap, newcap
+        integer(8), allocatable                :: t8(:)
+        integer, allocatable                   :: ti(:)
+
+        cap = 0
+        if (allocated(sidx)) cap = size(sidx)
+        if (nloc + extra <= cap) return
+        newcap = max(2*cap, max(nloc + extra, 1024))
+        allocate (t8(newcap), ti(newcap))
+        if (nloc > 0) then
+            t8(1:nloc) = sidx(1:nloc)
+            ti(1:nloc) = skb(1:nloc)
+        end if
+        call move_alloc(t8, sidx)
+        call move_alloc(ti, skb)
+
+    end subroutine s_amr_grow_pack
 
     !> Append this rank's tagged cells of child window [mlo:mhi] as (int8 linear index, parent kb) pairs; the encode matches the
     !! s_amr_nest_window_tags decode. gwin is not modified.

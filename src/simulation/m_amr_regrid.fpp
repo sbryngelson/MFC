@@ -20,7 +20,7 @@ module m_amr_regrid
     use m_amr_wave
     use m_phase_timing
     use m_amr_cluster, only: s_amr_cluster
-    use m_amr_nest, only: s_amr_regrid_nest_children, f_amr_rho_tot_sf, f_amr_tag_ind
+    use m_amr_nest, only: s_amr_regrid_nest_children, s_amr_nest_window, f_amr_rho_tot_sf, f_amr_tag_ind
     use m_amr_distribution, only: s_amr_sort_by_key
     use m_amr, only: amr_slots, amr_cons_st, amr_stor_st, amr_loc_of, amr_slot_live, amr_my_blk, amr_n_my, &
         & s_amr_refresh_my_blocks, amr_maxc_fit, amr_seam_pairs_dirty, amr_mesh_epoch, amr_cpat_mar, s_amr_alloc_slot, &
@@ -274,30 +274,6 @@ contains
         end do; end do; end do
 
     end subroutine s_amr_local_tags
-
-    !> Grow the pack buffers sidx/skb geometrically to hold nloc+extra entries, preserving the first nloc.
-    impure subroutine s_amr_grow_pack(sidx, skb, nloc, extra)
-
-        integer(8), allocatable, intent(inout) :: sidx(:)
-        integer, allocatable, intent(inout)    :: skb(:)
-        integer, intent(in)                    :: nloc, extra
-        integer                                :: cap, newcap
-        integer(8), allocatable                :: t8(:)
-        integer, allocatable                   :: ti(:)
-
-        cap = 0
-        if (allocated(sidx)) cap = size(sidx)
-        if (nloc + extra <= cap) return
-        newcap = max(2*cap, max(nloc + extra, 1024))
-        allocate (t8(newcap), ti(newcap))
-        if (nloc > 0) then
-            t8(1:nloc) = sidx(1:nloc)
-            ti(1:nloc) = skb(1:nloc)
-        end if
-        call move_alloc(t8, sidx)
-        call move_alloc(ti, skb)
-
-    end subroutine s_amr_grow_pack
 
     !> Diagnostic (rank_time_wrt): free device memory at a named regrid point (AMD only).
     impure subroutine s_amr_report_mem(tag)
