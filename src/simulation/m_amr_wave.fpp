@@ -4,18 +4,9 @@
 
 #:include 'macros.fpp'
 
-!> @brief The one place the AMR exchange waves talk to MPI. A wave is a set of point-to-point transfers posted together: all
-!! receives, then the packs, then all sends, then one wait. Two layers:
-!!
-!! - the request layer (s_amr_wave_open / irecv / isend / wait): keyed tags, the exchange audit record per message, the request
-!!   list and the debug check that every receive arrived with exactly the planned length. The zero-copy waves (reflux faces, freg)
-!!   use it directly on their register arrays.
-!! - the plan layer (t_amr_wave_side): the pooled waves (fills, seams, restricts) list their transfers as (peer, block, box, words)
-!!   on a send side and a receive side; s_amr_wave_close lays every peer's transfers out contiguously in a pool with a debug
-!!   header slot in front of each, and s_amr_wave_post / s_amr_wave_send issue one message per peer. Both ranks of a pair enumerate
-!!   the same transfers in the same order from replicated metadata, so the layout agrees with no metadata exchange.
-!!
-!! Pools are module arrays owned by the caller (device-resident under rdma_mpi: MPI reads and writes them by device address).
+!> @brief MPI point-to-point waves for AMR exchange: post all receives, pack, post all sends, wait once. Pooled waves list transfers
+!! on a send/receive side and s_amr_wave_close lays them out contiguously per peer; both ranks enumerate the same transfers in the
+!! same order, so no metadata is exchanged. Pools are caller-owned (device-resident under rdma_mpi).
 module m_amr_wave
 
 #ifdef MFC_MPI
@@ -23,8 +14,7 @@ module m_amr_wave
 #endif
     use m_precision_select
     use m_global_parameters
-    use m_mpi_proxy, only: s_mpi_abort
-    use m_amr_state, only: amr_fw_dev, s_amr_size_int, s_amr_size_int3, s_amr_size_real
+    use m_amr_state, only: s_amr_size_int, s_amr_size_int3, s_amr_size_real
     use m_amr_distribution, only: s_amr_m1_wave_open, f_amr_m1_seq, f_amr_m1_tag
 
     implicit none
@@ -34,8 +24,7 @@ module m_amr_wave
         & s_amr_wave_reset, s_amr_wave_add, s_amr_wave_add_slabs, s_amr_wave_close, s_amr_wave_post, s_amr_wave_send, &
         & s_amr_wave_slice
 
-    !> One side (send or receive) of a pooled wave. Transfers are appended in enumeration order; s_amr_wave_close groups them by
-    !! peer into one contiguous pool run per peer.
+    !> One side (send or receive) of a pooled wave.
     type t_amr_wave_side
         integer :: nx = 0     !< transfers
         integer :: np = 0     !< peers
@@ -45,23 +34,21 @@ module m_amr_wave
         integer, allocatable :: prank(:), pwords(:), pbase(:), pnx(:)  !< per peer: rank, message words, pool base, transfers
     end type t_amr_wave_side
 
-    !> the pooled waves' send/receive sides. The fill and restrict waves run one at a time and share amr_wsend/amr_wrecv (and the
-    !! amr_fw_sq/rq pools); the seam wave is posted before the fills and drained after them, so it keeps its own pair.
+    !> Fill and restrict waves share amr_wsend/amr_wrecv; the seam wave stays open across the fills, so it has its own pair.
     type(t_amr_wave_side), public :: amr_wsend, amr_wrecv, amr_wseam_snd, amr_wseam_rcv
 
-    !> An open wave: its tag band and request list; sends carry -1 in reqw, receives their planned word count (checked after the
-    !! wait under MFC_DEBUG). The seam wave stays open across the fill waves, so it is a second instance.
+    !> An open wave: tag band and requests; reqw is -1 for sends, the planned word count for receives.
     type t_amr_wave
         integer              :: band = 0, nreq = 0
         integer, allocatable :: req(:), reqw(:)
     end type t_amr_wave
     type(t_amr_wave), public, target :: amr_wave, amr_wave_seam
-    !> rank-indexed build scratch for s_amr_wave_close (touched entries re-zeroed, so it stays all-zero between builds)
+    !> Rank-indexed scratch for s_amr_wave_close; all-zero between calls.
     integer, allocatable :: bmap(:), bnx(:), bwords(:)
 
 contains
 
-    !> Open a wave on tag band b: bumps the band generation, clears the keyed-tag seq counters and the request list.
+    !> Open a wave on tag band b.
     impure subroutine s_amr_wave_open(w, b)
 
         type(t_amr_wave), intent(inout) :: w
@@ -109,8 +96,7 @@ contains
 
     end subroutine s_amr_wave_req
 
-    !> Host-array variant for the zero-copy waves, which move register sections (any rank) directly: sequence association on an
-    !! assumed-size dummy, no device address.
+    !> Host-array variant of s_amr_wave_req (assumed-size, any-rank sections, no device address).
     impure subroutine s_amr_wave_req_raw(w, dir, buf, n, peer)
 
         type(t_amr_wave), intent(inout) :: w
@@ -130,8 +116,7 @@ contains
 
     end subroutine s_amr_wave_req_raw
 
-    !> Keyed tag of the wave's next request to peer in direction dir; grows the request list by one (w%nreq is the new request's
-    !! index).
+    !> Keyed tag of the next request to peer; grows the request list (w%nreq becomes the new request's index).
     impure integer function f_amr_wave_tag(w, dir, peer) result(tq)
 
         type(t_amr_wave), intent(inout) :: w
@@ -144,8 +129,7 @@ contains
 
     end function f_amr_wave_tag
 
-    !> Wait for every request of the open wave; under MFC_DEBUG every receive's length must equal its plan (a short message means
-    !! the two sides enumerated different transfers).
+    !> Wait for all requests; under MFC_DEBUG each receive length must equal its plan.
     impure subroutine s_amr_wave_wait(w)
 
         type(t_amr_wave), intent(inout) :: w
@@ -207,8 +191,8 @@ contains
 
     end subroutine s_amr_wave_add_slabs
 
-    !> Lay the side out in its pool: peers in first-appearance order, each peer's transfers contiguous in appended order; grows pool
-    !! (device-resident when dev) to the words in use.
+    !> Lay the side out in its pool (peers in first-appearance order, transfers contiguous per peer); grows pool to the words in
+    !! use.
     impure subroutine s_amr_wave_close(s, pool, dev)
 
         type(t_amr_wave_side), intent(inout) :: s
@@ -261,6 +245,22 @@ contains
 
     end subroutine s_amr_wave_slice
 
+    !> One message per peer (dir = 1 sends, 2 receives) over the side's pool runs.
+    impure subroutine s_amr_wave_peers(w, dir, s, pool, dev)
+
+        type(t_amr_wave), intent(inout)     :: w
+        integer, intent(in)                 :: dir
+        type(t_amr_wave_side), intent(in)   :: s
+        real(wp), intent(inout), contiguous :: pool(:)
+        logical, intent(in)                 :: dev
+        integer                             :: ip
+
+        do ip = 1, s%np
+            call s_amr_wave_req(w, dir, pool(s%pbase(ip) + 1:s%pbase(ip) + s%pwords(ip)), s%pwords(ip), s%prank(ip), dev)
+        end do
+
+    end subroutine s_amr_wave_peers
+
     !> One receive per peer into the side's pool runs.
     impure subroutine s_amr_wave_post(w, s, pool, dev)
 
@@ -268,26 +268,20 @@ contains
         type(t_amr_wave_side), intent(in)   :: s
         real(wp), intent(inout), contiguous :: pool(:)
         logical, intent(in)                 :: dev
-        integer                             :: ip
 
-        do ip = 1, s%np
-            call s_amr_wave_req(w, 2, pool(s%pbase(ip) + 1:s%pbase(ip) + s%pwords(ip)), s%pwords(ip), s%prank(ip), dev)
-        end do
+        call s_amr_wave_peers(w, 2, s, pool, dev)
 
     end subroutine s_amr_wave_post
 
-    !> One send per peer from the side's pool runs (the caller has packed every transfer's slice and header).
+    !> One send per peer (the caller has packed every slice).
     impure subroutine s_amr_wave_send(w, s, pool, dev)
 
         type(t_amr_wave), intent(inout)     :: w
         type(t_amr_wave_side), intent(in)   :: s
         real(wp), intent(inout), contiguous :: pool(:)
         logical, intent(in)                 :: dev
-        integer                             :: ip
 
-        do ip = 1, s%np
-            call s_amr_wave_req(w, 1, pool(s%pbase(ip) + 1:s%pbase(ip) + s%pwords(ip)), s%pwords(ip), s%prank(ip), dev)
-        end do
+        call s_amr_wave_peers(w, 1, s, pool, dev)
 
     end subroutine s_amr_wave_send
 

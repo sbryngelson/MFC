@@ -2,20 +2,15 @@
 !!@file
 !!@brief Contains module m_amr_exchange
 
-#! AMD OpenMP lane: assert allocatables present on every kernel here (see OMP_DEFAULT_STR). A conditionally allocated module
-#! array a kernel names launches only under its allocation's own condition (sw_jac/jac: igr); a kernel naming an unallocated
-#! array aborts. Keep it so.
+#! AMD OpenMP: assert allocatables present on every kernel (see OMP_DEFAULT_STR); a kernel may name only module arrays allocated
+#! under its own launch condition.
 #:set MFC_OMP_PRESENT_ALLOCATABLE = True
 #:include 'macros.fpp'
 
 !> @brief Parent/child and fine-fine data exchange: gather plans, pack/unpack, seams, ghost fills and the fill waves.
 module m_amr_exchange
 
-#ifdef MFC_MPI
-    use mpi  !< MPI-IO for the parallel_io AMR restart file
-#endif
-
-    use m_derived_types  ! scalar_field, t_box, int_bounds_info
+    use m_derived_types
     use m_box, only: f_morton
     use m_global_parameters
     use m_mpi_proxy, only: s_mpi_abort  ! @:ASSERT expands to it
@@ -37,7 +32,7 @@ module m_amr_exchange
 
 contains
 
-    !> Parent value for a level >= 2 ghost fill: the current state, or (subcycling, th < 1) its blend with the substep-start backup.
+    !> Parent value for a level >= 2 ghost fill: the current state, or its blend with the substep-start backup when th < 1.
     pure real(wp) function f_amr_par_val(g1, g2, g3, i, qp, th) result(v)
         $:GPU_ROUTINE(parallelism='[seq]')
         integer, intent(in)  :: g1, g2, g3, i, qp
@@ -51,9 +46,8 @@ contains
 
     end function f_amr_par_val
 
-    !> Sub-box variants of the parent-patch pack/copy for the ring-clipped parent-fill wave (the wave ships q_cons). Bounds are
-    !! patch-local cell ranges; the buffer holds the sub-box in the same (g1 fastest, sys_size outermost) layout as the full-patch
-    !! kernels, so both wire sides agree by construction.
+    !> Sub-box variants of the parent-patch pack/copy for the ring-clipped parent-fill wave; bl:bh are patch-local, the buffer
+    !! layout matches the full-patch kernels.
     impure subroutine s_amr_pack_parent_box_device(qp, bl, bh, buf)
 
         integer, intent(in)                 :: qp  !< parent's flat-store slot
@@ -105,10 +99,8 @@ contains
 
     end subroutine s_amr_copy_parent_box
 
-    !> Runtime device pack of the overlap box [bl:bh] global from q_coarse (device) into the contiguous wire buffer buf (host, via
-    !! copyout); only the box crosses PCIe, not the full field. Explicit-loop linear buf indexing (g1 fastest, then g2, g3, i) and
-    !! the wp cast match the host pack in s_amr_gather_coarse_patch element-for-element, so the receiver's unpack is layout- and
-    !! byte-identical (same discipline as s_amr_fine_slice: no array-section syntax near the device map).
+    !> Pack the global box [bl:bh] of q_coarse into the wire buffer buf; same element order and wp cast as the host pack in
+    !! s_amr_gather_coarse_patch.
     impure subroutine s_amr_pack_box_device(q_coarse, bl, bh, o1, o2, o3, buf)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_coarse
@@ -133,9 +125,7 @@ contains
 
     end subroutine s_amr_pack_box_device
 
-    !> Runtime device unpack of a received box [bl:bh] from the contiguous wire buffer buf (host, via copyin) into amr_cg (device)
-    !! at patch-local index g - off; only the box crosses PCIe. Same linear order (g1 fastest, then g2, g3, i) as the packs, stp
-    !! cast.
+    !> Unpack the wire buffer buf for box [bl:bh] into amr_cg at patch-local index g - off; same order as the packs, stp cast.
     impure subroutine s_amr_unpack_box_device(bl, bh, off, buf)
 
         integer, intent(in)              :: bl(3), bh(3), off(3)
@@ -160,10 +150,8 @@ contains
 
     end subroutine s_amr_unpack_box_device
 
-    !> Decompose the current fine block's ghost shell (buffered extent minus interior) into ns disjoint face slabs whose union is
-    !! exactly the non-interior cells, so the ghost-fill kernels do O(surface) work instead of masking the full buffered volume. x
-    !! slabs span the full transverse extent; y slabs restrict x to the interior; z slabs restrict x and y. Collapsed dims
-    !! contribute no slabs.
+    !> Split the fine block's ghost shell into ns disjoint face slabs: x spans the full transverse extent, y is restricted to the
+    !! interior in x, z in x and y.
     pure subroutine s_amr_build_ghost_slabs(ns, sb, se)
 
         integer, intent(out) :: ns, sb(3, 6), se(3, 6)
@@ -181,9 +169,8 @@ contains
 
     end subroutine s_amr_build_ghost_slabs
 
-    !> Append slab [lo, hi] to the slab table (amr_slab_tab rows: 1:3 lo, 4:6 hi, 7 flat offset, 8 cells, 9 store column, 10:12 the
-    !! block's coarse origin, 13:15 its patch frame, the patch index being cell - frame). The fused flat-index kernels walk every
-    !! row of the table, so one launch serves one block's slabs or every block's.
+    !> Append slab [lo, hi] to amr_slab_tab (rows: 1:3 lo, 4:6 hi, 7 flat offset, 8 cells, 9 store column, 10:12 coarse origin,
+    !! 13:15 patch frame).
     impure subroutine s_amr_slab_add(lo, hi, loc, ilo, coff)
 
         integer, intent(in)  :: lo(3), hi(3), loc, ilo(3), coff(3)
@@ -220,7 +207,7 @@ contains
 
     end function f_amr_slab_push
 
-    !> Flat-index decode over the slab table: binary-search row 7 for the slab s holding flat cell g, then its cell (a1, a2, a3).
+    !> Flat-index decode: binary-search row 7 of the slab table for the slab holding flat cell g, then its cell (a1, a2, a3).
     #:def SLAB_DECODE(a1, a2, a3)
         lo = 1; hi = nsl
         do while (lo < hi)
@@ -248,11 +235,8 @@ contains
 
     end subroutine s_amr_queue_ghost_slabs
 
-    !> Fill the fine ghost shell by conservative-linear prolongation from q_coarse, the gathered block-local coarse patch amr_cg
-    !! (fine-level distribution; the caller gathers the source first). Device kernel: reads the patch and writes the fine target in
-    !! device memory. floor/modulo mapping is valid for negative fine indices (ghosts). Interior untouched. Multi-fluid volume
-    !! fractions get the same sum-preserving closure as the interior prolongation (s_amr_fill_fine_ghosts_alphas). Writes the
-    !! conserved store at dense local index `loc`.
+    !> Fill the fine ghost shell by conservative-linear prolongation from the gathered coarse patch q_coarse (amr_cg); the interior
+    !! is untouched. Writes the store at local index loc.
     impure subroutine s_amr_fill_fine_ghosts(q_coarse, loc)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_coarse
@@ -263,9 +247,7 @@ contains
 
     end subroutine s_amr_fill_fine_ghosts
 
-    !> The ghost fill over every queued slab (s_amr_queue_ghost_slabs): one kernel for one block or for all of a level's blocks. The
-    !! slabs of a block are disjoint and their union is exactly its ghost shell, so every ghost cell is written once and the result
-    !! does not depend on the flat order. Each row carries its block's store column, coarse origin and patch frame.
+    !> Ghost fill over all queued slabs in one kernel; each row carries its block's store column, coarse origin and patch frame.
     impure subroutine s_amr_fill_ghost_rows(q_coarse)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_coarse
@@ -277,10 +259,9 @@ contains
         logical                                             :: d2, d3, multi, quart
         real(wp)                                            :: u0, sx, sy, sz, xix, xiy, xiz
         integer                                             :: ky, kz, wy, wz
-        real(wp)                                            :: q5(-2:2), pl(-2:2), ln(-2:2)  !< staged x, y, z quartic
+        real(wp)                                            :: q5(-2:2), pl(-2:2), ln(-2:2)  !< staged x, y, z
 
-        ! q_coarse is the gathered coarse patch amr_cg (fine-level distribution); the row's coarse origin (isect lo, global, ==
-        ! region_lo on the owner) + f/rr - its patch frame is the patch-local coarse index. Fine indices are local to the block.
+        ! patch-local coarse index = row coarse origin (global) + f/rr - patch frame; fine indices are block-local
 
         d2 = n_glb > 0; d3 = p_glb > 0
         rr = amr_ref_ratio
@@ -288,7 +269,7 @@ contains
         multi = num_fluids > 1 .and. (.not. bubbles_lagrange)  ! EL alphas sum to beta, not 1: no sum-to-one closure
         advb = eqn_idx%adv%beg; adve = eqn_idx%adv%end
         stot = f_amr_slab_push(nsl)
-        if (stot == 0) return  ! a rank holding no level-1 block may not have the store allocated
+        if (stot == 0) return  ! no level-1 block on this rank: the store may be unallocated
         $:GPU_PARALLEL_LOOP(collapse=2, private='[s, lo, hi, md, r, n1, n2, fi, fj, fk, ci, cj, ck, xix, xiy, xiz, u0, sx, sy, &
                             & sz, ky, kz, q5, pl, ln, ox, oy, oz, lo1, lo2, lo3, loc]')
         do i = 1, sys_size
@@ -297,9 +278,9 @@ contains
                 loc = amr_slab_tab(9, s)
                 lo1 = amr_slab_tab(10, s); lo2 = amr_slab_tab(11, s); lo3 = amr_slab_tab(12, s)
                 ox = amr_slab_tab(13, s); oy = amr_slab_tab(14, s); oz = amr_slab_tab(15, s)
-                ! the slabs cover exactly the ghost shell; multi-fluid, skip the volume fractions (closure kernel below)
+                ! multi-fluid: volume fractions are handled by the closure below
                 if (.not. (multi .and. i >= advb .and. i <= adve)) then
-                    ck = -oz; xiz = 0._wp  ! collapsed z: the patch slot (oz holds minus its offset)
+                    ck = -oz; xiz = 0._wp  ! collapsed z: oz holds minus the patch slot
                     if (d3) then
                         ck = lo3 + floor(real(fk, wp)/real(rr, wp)) - oz
                         xiz = (real(modulo(fk, rr), wp) - real(rr - 1, wp)*0.5_wp)/real(rr, wp)
@@ -339,15 +320,14 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
-        ! multi-fluid volume-fraction ghosts: per-cell closure mirroring s_prolong_alphas_closure (own routine: nvfortran
-        ! 25.x crashes on two target regions sharing this routine's privates)
+        ! own routine: nvfortran 25.x crashes on two target regions sharing this routine's privates
         if (multi) call s_amr_fill_fine_ghosts_alphas(q_coarse, nsl, stot, advb, adve)
         if (quart) call s_amr_guard_fine_ghosts(q_coarse, nsl, stot, multi, advb, adve)
 
     end subroutine s_amr_fill_ghost_rows
 
-    !> Quartic safety net for the ghost shell: a ghost cell whose state is inadmissible (@:AMR_CONS_OK) is refilled with
-    !! minmod-limited linear in every variable (volume fractions of multi-fluid runs keep their closure values).
+    !> Quartic safety net: refill inadmissible (@:AMR_CONS_OK) ghost cells with minmod-limited linear; multi-fluid volume fractions
+    !! keep their closure values.
     impure subroutine s_amr_guard_fine_ghosts(q_coarse, nsl, stot, multi, advb, adve)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_coarse
@@ -398,8 +378,7 @@ contains
 
     end subroutine s_amr_guard_fine_ghosts
 
-    !> Volume-fraction ghosts for the fill above: shared limiter switch over all fluids; interpolate + clamp fluids advb..adve-1;
-    !! alpha_n = 1 - sum. Same flat-index fusion over the same disjoint slabs (amr_slab_tab, already on device).
+    !> Volume-fraction ghosts: shared limiter switch over all fluids, interpolate + clamp advb..adve-1, alpha_n = 1 - sum.
     impure subroutine s_amr_fill_fine_ghosts_alphas(q_coarse, nsl, stot, advb, adve)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_coarse
@@ -465,10 +444,8 @@ contains
 
     end subroutine s_amr_fill_fine_ghosts_alphas
 
-    !> Exchange the coarse conservative ghost layers at internal rank boundaries (physical-boundary ghosts untouched; per direction
-    !! beg then end, mirroring s_populate_variables_buffers' disblock). The solver never fills cons ghosts (only prim), so ranks
-    !! whose fine ghost-fill or prolongation stencil leaves their interior need this first. All ranks must call together (pairwise
-    !! exchange per internal neighbor).
+    !> Exchange coarse conservative ghost layers at internal rank boundaries (beg then end per direction); the solver fills only
+    !! prim ghosts. Collective.
     impure subroutine s_amr_exchange_coarse_cons_halo(q_cons)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons
@@ -482,9 +459,8 @@ contains
 
     end subroutine s_amr_exchange_coarse_cons_halo
 
-    !> True iff sub-block yb sits immediately above sub-block xb on xb's high face in dim d: yb's low coarse face is xb's high face
-    !! + 1, and (tiling produces a regular grid) they share the transverse coarse extents exactly. Each fine-fine seam is exactly
-    !! one such ordered (xb, yb) pair (the lower block is xb).
+    !> True iff yb sits directly above xb on xb's high face in dim d with identical transverse coarse extents (one ordered pair per
+    !! seam).
     pure logical function f_amr_seam(xb, yb, d) result(seam)
 
         integer, intent(in) :: xb, yb, d
@@ -498,13 +474,8 @@ contains
 
     end function f_amr_seam
 
-    !> Same-rank seam exchange for every same-rank seam pair on this rank, both directions in one device kernel: xb's high near-seam
-    !! interior -> yb's low seam ghost, and yb's low interior -> xb's high ghost. Fusing the two directions is safe because all four
-    !! slabs are disjoint (a block's seam ghost lies outside its own interior, and the two reads are from different slots than the
-    !! two writes), so neither direction can observe the other's store. Both blocks of a pair are addressed by their flat-store
-    !! slot, so a runtime pair index is a plain subscript. Index order matches s_amr_fine_slice. The per-pair seam dim varies, so
-    !! the index decode is a runtime select. Threads are launched over the max pair extent and masked, rather than prefix-summed:
-    !! pair sizes are equal under uniform tiling, so the waste is ~0 and it avoids an O(npair) per-thread offset search.
+    !> Same-rank seam exchange, both directions in one kernel: xb high interior -> yb low ghost and yb low interior -> xb high
+    !! ghost. The four slabs are disjoint, so fusing is safe. Threads span the max pair extent and are masked.
     impure subroutine s_amr_fine_seam_exchange(npair, plx, ply, pd, pxhi, pfm, ndep)
 
         integer, intent(in) :: npair
@@ -542,7 +513,7 @@ contains
                     if (g < cnt) then
                         lx = plx(pr); ly = ply(pr); xhi = pxhi(pr)
                         a = mod(g, na); b = mod(g/na, nb); t = g/(na*nb)
-                        ! (a, b) are the transverse indices, t the depth into the seam; place them per the pair's seam dim
+                        ! (a, b) transverse, t depth into the seam, placed per the pair's seam dim
                         if (d == 1) then
                             ix1 = xhi - ndep + 1 + t; ix2 = a; ix3 = b
                             iy1 = -ndep + t; iy2 = a; iy3 = b
@@ -553,9 +524,6 @@ contains
                             ix1 = a; ix2 = b; ix3 = xhi - ndep + 1 + t
                             iy1 = a; iy2 = b; iy3 = -ndep + t
                         end if
-                        ! xb high interior -> yb low ghost, then yb low interior -> xb high ghost. All four slabs are disjoint (a
-                        ! block's seam ghost lies outside its own interior, and the reads are from different slots than the
-                        ! writes), so fusing the two directions cannot let one observe the other's store.
                         amr_cons_st(iy1, iy2, iy3, i, ly) = amr_cons_st(ix1, ix2, ix3, i, lx)
                         if (d == 1) then
                             ix1 = xhi + 1 + t; iy1 = t
@@ -573,9 +541,8 @@ contains
 
     end subroutine s_amr_fine_seam_exchange
 
-    !> Seam dimension of the ordered pair (xb, yb): the dim d in which yb is the immediate high-face neighbour of xb at matched
-    !! resolution (same level), or 0 if not a same-level fine-fine seam. Face adjacency requires transverse overlap, so a pair is
-    !! adjacent in at most one dim, so the last-true assignment is unambiguous.
+    !> Seam dim of the ordered pair (xb, yb): the d in which yb is xb's same-level high-face neighbour, else 0 (adjacent in at most
+    !! one dim).
     pure integer function f_amr_seam_dim(xb, yb) result(d)
 
         integer, intent(in) :: xb, yb
@@ -589,10 +556,8 @@ contains
 
     end function f_amr_seam_dim
 
-    !> Binary-search the Morton-sorted block lo corners (ord/mkey) for the block whose region lo equals clo, verify the full
-    !! same-level seam predicate against xb, and record it in (mb, md, nm). Blocks are disjoint, so at most one block carries a
-    !! given lo corner at a level; f_amr_seam_dim takes the last true dim, so a block already recorded is raised to the higher d
-    !! rather than duplicated.
+    !> Binary-search the Morton-sorted lo corners for the block at clo, verify the seam predicate against xb and record it in (mb,
+    !! md, nm); a block already recorded is raised to the higher d.
     pure subroutine s_amr_seam_probe(xb, d, clo, mkey, ord, nblk, mb, md, nm)
 
         integer, intent(in)         :: xb, d, clo(3), nblk
@@ -613,8 +578,7 @@ contains
                 hi_s = mid_s - 1
             end if
         end do
-        ! lo_s is the first index with key >= ck; scan the equal-key run. f_morton keeps 21 bits/dim, so
-        ! above 2**21 cells/dim a run can hold distinct corners; the explicit lo check rejects those.
+        ! scan the equal-key run: f_morton keeps 21 bits/dim, so the lo check rejects aliased corners
         do i = lo_s, nblk
             if (mkey(ord(i)) /= ck) exit
             yb = ord(i)
@@ -641,9 +605,8 @@ contains
 
     end subroutine s_amr_seam_probe
 
-    !> Rebuild the cached same-level seam-pair list (amr_seam_pairs) once per regrid/restart, in the same (xb, yb) order on all
-    !! ranks so the paired seam transfers stay matched, and the per-block overlap-rank lists (amr_ovl_gather/scatter) by O(overlap)
-    !! inversion of the decomposition (s_amr_ranks_overlapping).
+    !> Rebuild the same-level seam-pair list once per regrid/restart in identical (xb, yb) order on all ranks, and the per-block
+    !! overlap-rank lists (amr_ovl_gather/scatter).
     impure subroutine s_amr_build_seam_pairs()
 
         integer                      :: xb, d, np, k, mx, pass, nm, im, jm, tb, td, nb
@@ -654,12 +617,8 @@ contains
 
         if (allocated(amr_seam_pairs)) deallocate (amr_seam_pairs)
 
-        ! Blocks are disjoint, so (level, region lo) names one uniquely, and the seam predicate fixes the
-        ! neighbour's lo corner: transverse lo equal to xb's, and lo(d) = hi(d, xb) + 1. The all-pairs
-        ! O(nblocks^2) scan is therefore a lookup. Morton-sort the lo corners once, then binary-search the
-        ! single candidate per (block, dim) and verify the predicate on it. Emission order is xb ascending,
-        ! yb ascending within xb, which the paired seam transfers depend on; a reordered list mismatches
-        ! sends to receives and deadlocks.
+        ! Blocks are disjoint and the seam fixes the neighbour's lo corner, so each (block, dim) needs one Morton binary
+        ! search. Emission order (xb, then yb ascending) must match on all ranks or sends and recvs mismatch and deadlock.
         nb = max(amr_num_blocks, 1)
         allocate (mkey(nb), ord(nb))
         do k = 1, amr_num_blocks
@@ -700,12 +659,8 @@ contains
             end if
         end do
         deallocate (mkey, ord)
-        ! per-block P2P overlap-rank lists by O(overlap) inversion (gather: rank coarse range vs the amr_cpat_mar-padded patch box;
-        ! scatter: rank interior vs the region box), rank-ascending so iterating a list gives the same MPI send/recv order as a
-        ! 0..num_procs-1 scan. The clamped interior-frame coord range reproduces both frames (see s_amr_coord_range). Bounded
-        ! first dim = max overlap over all blocks (dealloc-realloc each build, like amr_seam_pairs above), not num_procs: a block
-        ! spans O(1) ranks. Every consumer runs behind a build_seam_pairs guard, so the arrays are always sized before they are
-        ! read.
+        ! per-block overlap-rank lists, rank-ascending (same MPI order as a 0..num_procs-1 scan); the first dim is the max
+        ! overlap, reallocated each build. Consumers run behind a build_seam_pairs guard.
         mx = 1
         do k = 1, amr_num_blocks
             call s_amr_patch_box(k, plo, phi); call s_amr_region_box(k, rlo, rhi)
@@ -724,12 +679,8 @@ contains
 
     end subroutine s_amr_build_seam_pairs
 
-    !> Block-to-block fine-fine halo (max_grid_size tiling): overwrite each sub-block's seam ghost cells (faces shared with an
-    !! adjacent sub-block) with the neighbour's stage-entry fine interior, so the shared fine flux matches on both sides
-    !! (coarse-prolonged seam ghosts would be non-conservative). For each seam pair (xb below, yb above, dim d) the two owners
-    !! exchange the buff_size-deep near-seam interior (a wave message per peer, or a local copy when one rank owns both). Buffer is
-    !! wp, cast to stp on unpack (identity for stp fields). No-op with a single block / no adjacent pairs (any untiled case, any
-    !! np).
+    !> Fine-fine halo between tiled sub-blocks: overwrite seam ghosts with the neighbour's stage-entry interior (cross-rank via the
+    !! seam wave, same-rank by local copy). Wire is wp, cast to stp on unpack.
     impure subroutine s_amr_fine_fine_post()
 
         integer :: xb, yb, d, rX, rY, cnt, xm(3), tsz, fmul, idx, lo, hi
@@ -743,10 +694,8 @@ contains
         if (allocated(amr_sw_plx)) deallocate (amr_sw_plx, amr_sw_ply, amr_sw_pd, amr_sw_pxhi, amr_sw_pfm)
         allocate (amr_sw_plx(amr_num_seam_pairs), amr_sw_ply(amr_num_seam_pairs), amr_sw_pd(amr_num_seam_pairs), &
                   & amr_sw_pxhi(amr_num_seam_pairs), amr_sw_pfm(3, amr_num_seam_pairs))
-        ! Seam wave (plan-based exchange): the cross-rank pairs are one aggregated message per (peer, direction). Every pair
-        ! contributes one send and one recv transfer on each of its two owners; both ranks walk the same replicated pair list
-        ! ascending, so the wire layout agrees with no metadata exchange. Wire is wp with the same stp cast on unpack. Same-rank
-        ! pairs use the batched kernel at drain. The wave stays open across the fill waves, so it has its own handle and sides.
+        ! Seam wave: one aggregated message per peer and direction; both owners walk the same replicated pair list, so the
+        ! layout agrees. The wave stays open across the fill waves (own handle and sides).
         call s_amr_wave_open(amr_wave_seam, 5)
         ! transfer records: blk = the slot the data belongs to, bl = (d, dlo, dhi) its slab, bh = (peer slot, its dlo, dhi)
         call s_amr_wave_reset(amr_wseam_snd); call s_amr_wave_reset(amr_wseam_rcv)
@@ -763,7 +712,7 @@ contains
             if (d /= 2 .and. n_glb > 0) tsz = tsz*(xm(2) + 1)
             if (d /= 3 .and. p_glb > 0) tsz = tsz*(xm(3) + 1)
             cnt = sys_size*buff_size*tsz
-            if (rX == rY) then  ! same rank owns both: defer to the one batched kernel at drain (no host buffer, no per-pair launch)
+            if (rX == rY) then  ! same rank owns both: deferred to the batched kernel at drain
                 amr_sw_nsame = amr_sw_nsame + 1
                 amr_sw_plx(amr_sw_nsame) = amr_loc_of(xb); amr_sw_ply(amr_sw_nsame) = amr_loc_of(yb)
                 amr_sw_pd(amr_sw_nsame) = d; amr_sw_pxhi(amr_sw_nsame) = xm(d); amr_sw_pfm(:,amr_sw_nsame) = xm
@@ -810,9 +759,8 @@ contains
 
     end subroutine s_amr_fine_fine_drain
 
-    !> Flat-index decode shared by the fused exchange kernels (amr_device_pack): binary-search the plan prefix for the transfer t
-    !! that owns flat element e, then invert its linear buffer index into (i, g3, g2, g1). One text, so the kernels cannot drift
-    !! from each other or from the per-transfer index map.
+    !> Flat-index decode shared by the fused kernels: binary-search the plan prefix for the transfer owning flat element e, then
+    !! invert its buffer index into (i, g3, g2, g1).
     #:def FX_DECODE()
         lo = t0; hi = t1
         do while (lo < hi)
@@ -826,12 +774,9 @@ contains
         i = r/(n1*n2*n3) + 1
     #:enddef
 
-    !> Ring clip: decompose the hollow shell of patch [plo:phi] minus its open core [clo:chi] (same integer frame; collapsed dims
-    !! pass plo=phi=clo=chi=0 so they never cut the core) into at most 6 disjoint slabs in a fixed order: x-low/x-high spanning the
-    !! full transverse extent, then y-low/high restricted to the core's x-interval, then z-low/high restricted in x and y. Width<=2
-    !! cores are empty (shell = whole patch, legal); the width-1 double-cover is resolved by clamping the high slab past the low
-    !! one. Both sides of every clipped exchange derive the same list from replicated metadata, so the wire layout needs no
-    !! handshake.
+    !> Ring clip: split the hollow shell of patch [plo:phi] minus open core [clo:chi] into at most 6 disjoint slabs in fixed order
+    !! (x, y within core x, z within core x and y). Collapsed dims pass 0; the width-1 double cover is clamped. Both sides derive
+    !! the list from replicated metadata.
     impure subroutine s_amr_shell_slabs(plo, phi, clo, chi, ns, sb, se, cells)
 
         integer, intent(in)  :: plo(3), phi(3), clo(3), chi(3)
@@ -852,7 +797,7 @@ contains
             sb(:,ns) = cb(:,s); se(:,ns) = ce(:,s)
             words = words + product(int(ce(:,s) - cb(:,s) + 1, 8))
         end do
-        ! the slabs must tile the shell exactly: pairwise disjoint, cells summing to patch - core
+        ! slabs must tile the shell exactly
         do s = 1, ns - 1
             do ss = s + 1, ns
                 @:ASSERT(any(max(sb(:, s), sb(:, ss)) > min(se(:, s), se(:, ss))), "shell slabs: overlap")
@@ -865,8 +810,7 @@ contains
 
     end subroutine s_amr_shell_slabs
 
-    !> Intersect the shell-slab list with box [bl:bh]: the surviving clipped slabs in the same fixed order (each exchange side
-    !! derives an identical list from replicated data, so empties drop symmetrically) plus their total cell count.
+    !> Intersect the shell slabs with box [bl:bh], keeping order; also returns the total cell count.
     impure subroutine s_amr_shell_clip(ns, sb, se, bl, bh, ms, tb, te, cells)
 
         integer, intent(in)  :: ns, sb(3, 6), se(3, 6), bl(3), bh(3)
@@ -884,8 +828,7 @@ contains
 
     end subroutine s_amr_shell_clip
 
-    !> Validation arm (debug builds only): flood the current patch extent of amr_cg with quiet NaN before a clipped gather writes
-    !! its shell, so a consumer read of any unshipped cell (core or a missed shell slab) NaNs the ghost fill within a step.
+    !> Debug only: NaN-flood amr_cg before a clipped gather so any read of an unshipped cell NaNs the ghost fill.
     impure subroutine s_amr_poison_patch_device(w1, w2, w3)
 
         use ieee_arithmetic, only: ieee_value, ieee_quiet_nan
@@ -908,9 +851,8 @@ contains
 
     end subroutine s_amr_poison_patch_device
 
-    !> Ring-clipped runtime own-box copy (device): the owner's shell-slab / own-box intersections, queued as slab rows (global
-    !! cells, patch frame per row), from q_coarse into amr_cg with no host round-trip and one fused kernel over every queued slab
-    !! (one block's or a whole level's). Same index map and direct stp assignment as the host path in s_amr_gather_coarse_patch.
+    !> Ring-clipped own-box copy on device: queue shell-slab/own-box intersections as slab rows and copy q_coarse into amr_cg in one
+    !! fused kernel.
     impure subroutine s_amr_gather_own_rows(q_coarse, cg, o1, o2, o3)
 
         type(scalar_field), dimension(sys_size), intent(in)    :: q_coarse
@@ -919,7 +861,7 @@ contains
         integer                                                :: i, s, g, r, n1, n2, g1, g2, g3, stot, nsl, lo, hi, md
 
         stot = f_amr_slab_push(nsl)
-        if (stot == 0) return  ! a rank holding no level-1 block may not have the store allocated
+        if (stot == 0) return  ! no level-1 block on this rank: the store may be unallocated
         $:GPU_PARALLEL_LOOP(collapse=2, private='[s, lo, hi, md, r, n1, n2, g1, g2, g3]')
         do i = 1, sys_size
             do g = 0, stot - 1
@@ -932,10 +874,8 @@ contains
 
     end subroutine s_amr_gather_own_rows
 
-    !> Fused-pack plan (amr_device_pack) for transfers 1:nt of a wave's send or recv table: the slab corner, its extents, its
-    !! absolute payload offset in the wire pool (the side's transfer offsets), and the exclusive element prefix amr_fx_pre
-    !! (amr_fx_pre(t+1) - amr_fx_pre(t) is transfer t's word count). Rows 8:11 are left to the F2 pack site, the only caller whose
-    !! source varies per transfer.
+    !> Fused-pack plan for transfers 1:nt: slab corner, extents, absolute pool payload offset and exclusive element prefix
+    !! amr_fx_pre. Rows 8:11 are left to the F2 pack site.
     impure subroutine s_amr_fx_plan(w)
 
         type(t_amr_wave_side), intent(in) :: w
@@ -958,9 +898,7 @@ contains
 
     end subroutine s_amr_fx_plan
 
-    !> Longest run t0:t1 of one box's recv transfers that is contiguous in the wire pool, so the run unpacks in one launch from one
-    !! pool slice. Both wave plans lay a box's transfers from one peer back to back, so a box whose contributors span several peers
-    !! fuses per peer and a run of one is a single-transfer launch.
+    !> Longest run t0:t1 of one box's recv transfers that is contiguous in the wire pool (unpacks in one launch).
     pure subroutine s_amr_fx_run(k, blk, nx, t0, t1)
 
         integer, intent(in)  :: k, blk(:), nx, t0
@@ -975,10 +913,8 @@ contains
 
     end subroutine s_amr_fx_run
 
-    !> Fused F1 pack (amr_device_pack): the wave's whole send list in one launch. The flat element index is binary-searched against
-    !! the plan prefix for its transfer, then decoded to (i, g3, g2, g1), the exact inverse of the linear buffer index
-    !! s_amr_pack_box_device writes. Same source expression, same wp cast, same destination word, so the wire bytes are identical to
-    !! the per-transfer packs.
+    !> Fused F1 pack: the wave's whole send list in one launch; inverts the linear index s_amr_pack_box_device writes, so wire bytes
+    !! match the per-transfer packs.
     impure subroutine s_amr_fx_pack_box(q_coarse, t0, t1, o1, o2, o3, pl, pre, buf)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_coarse
@@ -996,9 +932,7 @@ contains
 
     end subroutine s_amr_fx_pack_box
 
-    !> Fused F2 pack (amr_device_pack): as s_amr_fx_pack_box, but the source is the flat store at the per-transfer parent slot
-    !! pl(8,:) in the per-transfer child patch frame pl(9:11,:): the s_amr_pack_parent_box_device body, one launch for the whole
-    !! send list.
+    !> Fused F2 pack: as s_amr_fx_pack_box, with the source the flat store at parent slot pl(8,:) and child frame pl(9:11,:).
     impure subroutine s_amr_fx_pack_parent(t0, t1, pl, pre, buf)
 
         integer, intent(in)                 :: t0, t1
@@ -1017,10 +951,8 @@ contains
 
     end subroutine s_amr_fx_pack_parent
 
-    !> Fused unpack (amr_device_pack) of the transfer run t0:t1 into the single amr_cg patch: the run is one box's transfers that
-    !! are contiguous in the wire pool (the caller checks that), so buf is the pool slice starting at word base+1 and the whole run
-    !! is one launch. Serves F1 (bounds global, frame amr_cpat_off) and F2 (bounds patch-local, frame 0) alike, the frame per
-    !! transfer in plan rows 9:11 (a pooled patch's offset included); the stp cast is the assignment both per-box unpacks perform.
+    !> Fused unpack of the contiguous transfer run t0:t1 into amr_cg in one launch; serves F1 and F2 via the per-transfer frame in
+    !! plan rows 9:11.
     impure subroutine s_amr_fx_unpack(t0, t1, base, pl, pre, buf, cg)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: cg  !< amr_cg, passed so a regrown pool maps as an argument
@@ -1038,13 +970,9 @@ contains
 
     end subroutine s_amr_fx_unpack
 
-    !> The level-1 fill wave, exchange phase: every level-1 box's padded coarse patch (region +/- amr_cpat_mar, the reach of the
-    !! prolongation and ghost-fill stencils) is assembled on its owner from the coarse owners that hold its cells, one aggregated
-    !! message per peer. Send side: for every level-1 box someone else owns, my coarse-range slice of its patch box; receive side:
-    !! for every level-1 box I own, each listed contributor's slice (the own slice is a device copy at consume). Both sides derive
-    !! the transfer list from replicated metadata, so the wire layout needs no handshake. The per-stage ghost fill reads only the
-    !! patch's hollow shell, so by default each slice is ring-clipped to up to 6 shell sub-slabs; full = .true. (init and regrid,
-    !! which prolong the whole block) ships the whole slice. Consume with s_amr_l1_fill_consume per owned level-1 box ascending.
+    !> Level-1 fill wave, exchange phase: each level-1 box's padded coarse patch (region +/- amr_cpat_mar) is assembled on its owner
+    !! from the coarse owners, one message per peer; both sides derive the transfers from replicated metadata. Slices are
+    !! ring-clipped to the hollow shell unless full (init, regrid). Consume with s_amr_l1_fill_consume per owned box ascending.
     impure subroutine s_amr_l1_fill_exchange(q_cons_coarse, full)
 
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_coarse
@@ -1099,11 +1027,10 @@ contains
         end do
         call s_amr_wave_close(amr_wrecv, amr_fw_rq, amr_fw_dev)
 
-        ! post all recvs, pack all sends (device kernels into contiguous pool slices), post all sends, one wait.
+        ! post recvs, pack sends, post sends, one wait
         call s_amr_wave_post(amr_wave, amr_wrecv, amr_fw_rq, amr_fw_dev)
         if (amr_device_pack .and. amr_wsend%nx > 0) then
-            ! one launch for the whole send list. The pool is exactly tiled by the side's words, so every word the copyout
-            ! returns was written; any padding would ship garbage on the wire silently.
+            ! the pool is exactly tiled by the side's words; padding would ship garbage
             call s_amr_fx_plan(amr_wsend)
             call s_amr_fx_pack_box(q_cons_coarse, 1, amr_wsend%nx, o1, o2, o3, amr_fx_pl(:,1:amr_wsend%nx), &
                                    & amr_fx_pre(1:amr_wsend%nx + 1), amr_fw_sq(1:amr_wsend%words))
@@ -1120,8 +1047,7 @@ contains
 
     end subroutine s_amr_l1_fill_exchange
 
-    !> A contributor's slice [bl, bh] of level-1 box k's patch as the wave's transfer slabs: the whole slice (full) or its
-    !! intersection with the patch's hollow shell.
+    !> A contributor's slice [bl, bh] of box k's patch as transfer slabs: the whole slice (full) or its hollow-shell intersection.
     impure subroutine s_amr_l1_slice_slabs(k, plo, phi, bl, bh, full, msl, tb, te)
 
         integer, intent(in)  :: k, plo(3), phi(3), bl(3), bh(3)
@@ -1166,9 +1092,8 @@ contains
 
     end subroutine s_amr_fill_drain
 
-    !> The level-1 fill wave, consume phase for owned box k (the current slot): set the patch frame, device-copy the own slice, then
-    !! unpack k's received transfers. Boxes must be consumed in the order the receive side was planned (owned, ascending): the
-    !! transfers were appended box-major, so k's are the next contiguous run at the cursor.
+    !> Level-1 fill wave, consume for owned box k: set the patch frame, copy the own slice, unpack k's transfers. Consume in
+    !! ascending order: transfers are box-major, so k's are the next run at the cursor.
     impure subroutine s_amr_l1_fill_consume(q_cons_coarse, k, full)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_coarse
@@ -1183,7 +1108,7 @@ contains
         call s_amr_patch_box(k, plo, phi)
         amr_cpat_off = plo
 #ifdef MFC_DEBUG
-        ! NaN-flood the patch before the writes land, so a consumer read of any unshipped cell NaNs within a step
+        ! NaN-flood before the writes land
         call s_amr_poison_patch_device(phi(1) - plo(1), phi(2) - plo(2), phi(3) - plo(3))
 #endif
         call s_amr_rank_coarse_range(proc_rank, crlo, crhi)
@@ -1217,8 +1142,7 @@ contains
 
     end subroutine s_amr_stage_fill_wave
 
-    !> Unpack the queued slab rows (row 9: the transfer's payload offset in buf, wire order cell fastest then variable) into the
-    !! pooled amr_cg patches: every received transfer of a fill wave in one launch.
+    !> Unpack the queued slab rows (row 9: payload offset in buf) into the pooled amr_cg patches: a whole fill wave in one launch.
     impure subroutine s_amr_unpack_rows(buf, cg)
 
         real(wp), intent(in), contiguous                       :: buf(:)
@@ -1226,7 +1150,7 @@ contains
         integer                                                :: i, s, g, r, n1, n2, g1, g2, g3, stot, nsl, lo, hi, md
 
         stot = f_amr_slab_push(nsl)
-        if (stot == 0) return  ! a rank holding no level-1 block may not have the store allocated
+        if (stot == 0) return  ! no level-1 block on this rank: the store may be unallocated
         $:GPU_PARALLEL_LOOP(collapse=2, copyin='[buf]', private='[s, lo, hi, md, r, n1, n2, g1, g2, g3]')
         do i = 1, sys_size
             do g = 0, stot - 1
@@ -1239,9 +1163,8 @@ contains
 
     end subroutine s_amr_unpack_rows
 
-    !> Restriction over the queued slab rows (coarse cells; row 9 the block's store column, 10:12 its region lo, 13 the payload
-    !! offset of a wire row): the fine children's average into the coarse field (sf, local frame o) or into buf in the unpack layout
-    !! of s_amr_unpack_rows (wire). One launch for every block's slab; same arithmetic as s_amr_restrict_device_*.
+    !> Restriction over the queued slab rows (row 9 store column, 10:12 region lo, 13 wire payload offset): children average into
+    !! the coarse field (sf, frame o) or into buf (wire layout of s_amr_unpack_rows).
     #:for SFX in ['sf', 'wire']
         impure subroutine s_amr_restrict_rows_${SFX}$(${'coarse_tgt, o1, o2, o3' if SFX == 'sf' else 'buf'}$)
 
@@ -1288,8 +1211,8 @@ contains
         end subroutine s_amr_restrict_rows_${SFX}$
     #:endfor
 
-    !> Hold np coarse patches in amr_cg, stacked along dim 3 (patch p at offset p*(amr_cpat_hi(3) + 1)); patch 0 is the per-box
-    !! frame every other path uses. Grows only; contents never survive a fill.
+    !> Hold np coarse patches in amr_cg stacked along dim 3 (patch p at p*(amr_cpat_hi(3) + 1)); grows only, contents do not survive
+    !! a fill.
     impure subroutine s_amr_cg_reserve(np)
 
         integer, intent(in) :: np
@@ -1301,15 +1224,13 @@ contains
             @:ACC_TEARDOWN_SFs(amr_cg(i))
             @:DEALLOCATE(amr_cg(i)%sf)
             @:ALLOCATE(amr_cg(i)%sf(0:amr_cpat_hi(1), 0:amr_cpat_hi(2), 0:amr_cg_np*(amr_cpat_hi(3) + 1) - 1))
-            amr_cg(i)%sf = 0._stp  ! as at init: finite padding for the device copy
+            amr_cg(i)%sf = 0._stp  ! finite padding for the device copy
             @:ACC_SETUP_SFs(amr_cg(i))
         end do
 
     end subroutine s_amr_cg_reserve
 
-    !> The level-1 fill consume and ghost fill for all owned level-1 boxes at once: each box's patch sits at its own offset in the
-    !! pooled amr_cg (s_amr_cg_reserve), so the own-slice copy, the received unpack and the ghost fill are one kernel each over
-    !! every box instead of a few launches per box. Same cells, same arithmetic as the per-box consume and fill.
+    !> Level-1 consume and ghost fill for all owned boxes at once: patches pooled in amr_cg (s_amr_cg_reserve), one kernel each.
     impure subroutine s_amr_l1_fill_batched(q_cons_coarse)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_coarse
@@ -1319,8 +1240,7 @@ contains
 
     end subroutine s_amr_l1_fill_batched
 
-    !> Consume the open level-1 fill wave into the pooled amr_cg: owned box k's patch at dim-3 offset amr_cg_pz(k), amr_cg_nuse
-    !! patches in all.
+    !> Consume the open level-1 fill wave into the pooled amr_cg: box k at dim-3 offset amr_cg_pz(k), amr_cg_nuse patches.
     impure subroutine s_amr_l1_pool_gather(q_cons_coarse)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_coarse
@@ -1392,10 +1312,8 @@ contains
 
     end subroutine s_amr_patch_width
 
-    !> The parent-fill transfer list of a child with padded parent patch (w1, w2, w3), in the patch-local frame: the whole patch
-    !! (full) or its hollow shell (the per-stage ghost fill never reads the open interior of the parent footprint,
-    !! f_amr_prolong_reach cells in). Send, receive and consume all derive the list here, so the wire layout cannot drift between
-    !! sides.
+    !> Parent-fill transfer list of a child with padded patch (w1, w2, w3), patch-local: the whole patch (full) or its hollow shell.
+    !! Send, receive and consume share it.
     impure subroutine s_amr_parent_slabs(w1, w2, w3, full, msl, tb, te)
 
         integer, intent(in)  :: w1, w2, w3
@@ -1425,11 +1343,9 @@ contains
 
     end subroutine s_amr_parent_frame
 
-    !> The level-lev parent-fill wave, exchange phase: every level-lev block's parent patch from its parent's fine array, in the
-    !! parent-fine frame. A split child (parent owned elsewhere) is its s_amr_parent_slabs transfer list from the parent's owner to
-    !! its own owner; a co-located parent is a device copy at consume, with no wire transfer. Called per level ascending, so every
-    !! level-(lev-1) parent is complete (ghost-filled per stage; prolonged at init/regrid) before this wave reads its interior.
-    !! Consume with s_amr_parent_fill_consume per owned level-lev box ascending.
+    !> Level-lev parent-fill wave, exchange phase: each block's parent patch from its parent's fine array (parent-fine frame); split
+    !! children ship from the parent's owner, co-located parents copy at consume. Called per level ascending so parents are
+    !! complete. Consume with s_amr_parent_fill_consume per owned box.
     impure subroutine s_amr_parent_fill_exchange(lev, full)
 
         integer, intent(in) :: lev
@@ -1437,7 +1353,7 @@ contains
         integer             :: k, ix, pblk, powner, cowner, lo, hi, kk
         integer             :: w1, w2, w3, plo(3), phi(3), msl
         integer             :: tb(3, 6), te(3, 6)
-        integer             :: loc_parent_blk_k  !< plain scalars for device routines (NVHPC -Minline)
+        integer             :: loc_parent_blk_k  !< plain scalar for device routines (NVHPC -Minline)
 
         amr_wcur = 1
         if (amr_num_blocks <= 0) return
@@ -1517,7 +1433,7 @@ contains
         integer             :: pblk, isl, msl
         integer             :: w1, w2, w3, plo(3), phi(3)
         integer             :: tb(3, 6), te(3, 6)
-        integer             :: loc_pblk  !< plain scalars for device routines (NVHPC -Minline)
+        integer             :: loc_pblk  !< plain scalar for device routines (NVHPC -Minline)
 
         call s_phase_tic(PH_GATHER)
         pblk = amr_parent_blk(k)
@@ -1544,7 +1460,7 @@ contains
 
         integer, intent(in) :: lev
         integer             :: k, kk
-        integer             :: loc_cur  !< plain scalars for device routines (NVHPC -Minline)
+        integer             :: loc_cur  !< plain scalar for device routines (NVHPC -Minline)
 
         call s_amr_parent_fill_exchange(lev, .false.)
         do kk = 1, amr_n_own
@@ -1562,12 +1478,9 @@ contains
 
     end subroutine s_amr_parent_fill_wave
 
-    !> Device pack (to_buf=T) / unpack (F) of a field's interior block [o+0:o+fm] <-> the contiguous MPI buffer buf, for the P2P
-    !! migration. Follows s_amr_fine_slice: the pack/unpack runs on the device with copyout/copyin moving only buf host<->device (no
-    !! strided %sf section in a map clause; flang miscomputes those). buf index runs j fastest then k,l,i so a matching pack/unpack
-    !! aligns cell-for-cell. wp buffer, cast to/from stp (identity at double), matching the fine-fine halo. Two targets, one body:
-    !! `_st` packs a block out of the flat store (the migration paths), `_sf` packs the level-0 monolithic q_cons_vf, which is a
-    !! real scalar_field array and not in the store.
+    !> Device pack (to_buf=T) / unpack (F) of a field's interior block [o+0:o+fm] <-> contiguous MPI buffer buf for P2P migration;
+    !! wp buffer cast to/from stp. Only buf is mapped (flang miscomputes strided %sf sections in map clauses). `_st` takes the flat
+    !! store, `_sf` the level-0 q_cons_vf.
     #:for SFX, TGT in [('st', 'amr_cons_st'), ('sf', '')]
         #:set QB = (lambda ix: TGT + '(o1 + j, o2 + k, o3 + l, ' + ix + ', loc)') if TGT else (lambda ix: 'q(' + ix &
                     & + ')%sf(o1 + j, o2 + k, o3 + l)')
