@@ -75,11 +75,8 @@ module m_amr_xchg_audit
     !! the pair's canonically ordered transfer list from replicated metadata), so no per-peer counter state exists here. Sites pass
     !! peer/key/seq opt-in; sites that do not fold nothing.
     integer(8) :: xa_ord(XA_NSITE, 2) = 0_8
-    integer    :: xa_seed = -1     !< -1 unread, 0 off, 1 = corrupt one fold (canary), 2 = shift one plan seq (order-swap gate)
-    integer    :: xa_seed_fam = 0  !< MFC_XA_SEED_FAM: arm the seed only at this family's first keyed send (0 = any family)
     !> canary latch: fire exactly once (an XOR accumulator can return to zero, so testing it would allow self-cancelling double
     !! fires)
-    logical :: xa_seeded = .false.
     integer :: xa_tag_min(XA_NSITE) = huge(0)
     integer :: xa_tag_max(XA_NSITE) = -huge(0)
 
@@ -109,8 +106,6 @@ contains
         integer, intent(in)           :: isite, idir, nwords, tag
         integer, intent(in), optional :: peer, key, seq
         integer(8)                    :: pid, e
-        integer                       :: sq
-        logical                       :: arm
 
         xa_msgs(isite, idir) = xa_msgs(isite, idir) + 1_8
         xa_words(isite, idir) = xa_words(isite, idir) + int(nwords, 8)
@@ -118,36 +113,8 @@ contains
         xa_tag_max(isite) = max(xa_tag_max(isite), tag)
         if (present(peer) .and. present(key)) then
             @:ASSERT(present(seq), "keyed xa site must pass its plan-derived seq")
-            ! seeded-bug gates: MFC_XA_SEED=1 corrupts exactly one fold on rank 0 (send side, first keyed
-            ! message), proving the end-to-end wiring can fail; MFC_XA_SEED=2 shifts one plan seq on rank 0's
-            ! send side, modelling a sender deriving a different plan order, the failure the keyed tags exist
-            ! to catch. The finalize oracle must abort under either seed.
-            if (xa_seed < 0) then
-                block
-                    character(len=8) :: ev
-                    integer          :: st
-                    call get_environment_variable("MFC_XA_SEED", ev, status=st)
-                    xa_seed = 0
-                    if (st == 0 .and. ev(1:1) == '1') xa_seed = 1
-                    if (st == 0 .and. ev(1:1) == '2') xa_seed = 2
-                    ! the latch fires once per run, so without a family filter only the family that posts first on
-                    ! rank 0 can ever be seeded; MFC_XA_SEED_FAM aims it at one family
-                    call get_environment_variable("MFC_XA_SEED_FAM", ev, status=st)
-                    if (st == 0 .and. ev(1:1) /= ' ') read (ev, *) xa_seed_fam
-                end block
-            end if
-            arm = proc_rank == 0 .and. idir == 1 .and. .not. xa_seeded .and. (xa_seed_fam == 0 .or. xa_fam(isite) == xa_seed_fam)
-            if (xa_seed == 1 .and. arm) then
-                xa_ord(isite, 1) = ieor(xa_ord(isite, 1), 12345_8)  ! the canary corruption
-                xa_seeded = .true.
-            end if
-            sq = seq
-            if (xa_seed == 2 .and. arm) then
-                sq = sq + 1  ! the plan-order divergence
-                xa_seeded = .true.
-            end if
             pid = ior(ishft(int(min(proc_rank, peer), 8), 20), int(max(proc_rank, peer), 8))
-            e = f_xa_mix(ieor(f_xa_mix(ieor(pid, ishft(int(sq, 8), 44))), int(key, 8)))
+            e = f_xa_mix(ieor(f_xa_mix(ieor(pid, ishft(int(seq, 8), 44))), int(key, 8)))
             xa_ord(isite, idir) = ieor(xa_ord(isite, idir), e)
         end if
 

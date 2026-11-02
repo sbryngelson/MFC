@@ -23,7 +23,7 @@ module m_amr_restart
     use m_amr, only: s_amr_reduce_xchg_flag, amr_slots, amr_cons_st, amr_loc_of, amr_seam_pairs_dirty, amr_mesh_epoch, &
         & s_amr_alloc_slot, s_amr_reconcile_slots, s_amr_assign_block_owners, s_set_amr_fine_geometry
     use m_amr_regrid, only: s_amr_check_seam_topology
-    use m_amr_distribution, only: f_amr_static_cut, s_amr_adopt_block_owners
+    use m_amr_distribution, only: s_amr_adopt_block_owners
 
     implicit none
 
@@ -335,7 +335,7 @@ contains
             call s_amr_restart_check_record(k, cat%reg(:,k), cat%lvl(k))
         end do
         ! at the writer's rank count, keep the recorded owners (every fine block must carry one)
-        if (abs(ghdr(1)) == num_procs .and. .not. f_amr_static_cut() .and. all(cat%own(1,l0_slot_off + 1:amr_num_blocks) > 0)) then
+        if (abs(ghdr(1)) == num_procs .and. all(cat%own(1,l0_slot_off + 1:amr_num_blocks) > 0)) then
             call s_amr_restart_install_blocks(cat%own(1,1:amr_num_blocks) - 1)
         else
             call s_amr_restart_install_blocks()
@@ -345,9 +345,6 @@ contains
             if (amr_owns_all(k)) then
                 cnt = sys_size*(amr_slots(k)%m + 1)*(amr_slots(k)%n + 1)*(amr_slots(k)%p + 1)
                 mown = [proc_rank + 1, amr_slots(k)%m, amr_slots(k)%n, amr_slots(k)%p]
-                ! debug static cut (MFC_AMR_STATIC_CUT) re-owns blocks on purpose; their chunks are owner-independent, so only
-                ! extents must match
-                if (f_amr_static_cut()) mown(1) = cat%own(1, k)
                 if (abs(ghdr(1)) == num_procs .and. any(cat%own(:,k) /= mown)) then
                     call s_mpi_abort('amr restart: the per-block owner/extent record in the file does not match ' &
                                      & // 'this run''s decomposition; with the same rank count the ownership and ' &
