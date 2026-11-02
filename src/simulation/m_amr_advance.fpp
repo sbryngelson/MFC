@@ -35,7 +35,7 @@ module m_amr_advance
     implicit none
 
     private
-    public :: s_amr_fine_stage_advance_batched, s_amr_fine_stage_rhs, s_amr_fine_stage_rk, s_amr_setup_ib
+    public :: s_amr_fine_stage_advance_batched, s_amr_setup_ib
 
 contains
 
@@ -76,8 +76,7 @@ contains
     !! restore. amr_cur is set by the caller. No-op unless ib.
     impure subroutine s_amr_ib_correct_fine(q_prim_b, pb_in, mv_in)
 
-        !> the q_prim the block's RHS pass filled (pooled scratch for fine blocks; per-slot for L0 tiles, where other tiles' RHS
-        !! work ran in between - ib is in the copy-out gate, so a tile slot always has its own q_prim when this reads it)
+        !> the q_prim the block's RHS pass filled (pooled scratch)
         type(scalar_field), dimension(1:sys_size), intent(inout) :: q_prim_b
         real(stp), dimension(:,:,:,:,:), intent(inout)           :: pb_in, mv_in  !< unread: amr prohibits qbmm
         integer                                                  :: loc_cur  !< plain scalars for device routines (NVHPC -Minline)
@@ -134,7 +133,7 @@ contains
                 moving_here = .true.
             end do
         end if
-        ! the recompute clears and refills the whole slot for every body, so a block with no moving body over it (a tile of the
+        ! the recompute clears and refills the whole slot for every body, so a block with no moving body over it (a block of the
         ! refined front, or a block holding only static bodies) would pay for the full rebuild three times a step to reproduce
         ! the state it already has
         if (.not. moving_here) return
@@ -145,31 +144,6 @@ contains
         call s_amr_restore_coarse()
 
     end subroutine s_amr_update_mib_fine
-
-    !> Device RK stage update over the fine interior: q = (c1*q + c2*q_stor + c3*dt_in*rhs)/c4 (compute in wp, store stp). Mirrors
-    !! the coarse non-IGR rk_coef form in s_tvd_rk (m_time_steppers): same SSP-RK stage combination; keep the two in lockstep.
-    impure subroutine s_amr_fine_rk_update(loc, q_rhs, c1, c2, c3, c4, dt_in)
-
-        integer, intent(in)                                 :: loc  !< flat-store slot of the updated block
-        type(scalar_field), dimension(sys_size), intent(in) :: q_rhs
-        real(wp), intent(in)                                :: c1, c2, c3, c4, dt_in
-        integer                                             :: i, fi, fj, fk, fm, fn, fp
-
-        fm = amr_slots(amr_cur)%m; fn = amr_slots(amr_cur)%n; fp = amr_slots(amr_cur)%p
-        $:GPU_PARALLEL_LOOP(collapse=4)
-        do i = 1, sys_size
-            do fk = 0, fp
-                do fj = 0, fn
-                    do fi = 0, fm
-                        amr_cons_st(fi, fj, fk, i, loc) = (c1*real(amr_cons_st(fi, fj, fk, i, loc), wp) + c2*real(amr_stor_st(fi, &
-                                    & fj, fk, i, loc), wp) + c3*dt_in*real(q_rhs(i)%sf(fi, fj, fk), wp))/c4
-                    end do
-                end do
-            end do
-        end do
-        $:END_GPU_PARALLEL_LOOP()
-
-    end subroutine s_amr_fine_rk_update
 
     !> Batched fine advance: the owned fine blocks are advanced in batches of up to amr_bat_lim blocks of the same (level, extent),
     !! stacked two ghost shells apart along the last active dimension in the bridge, so one s_compute_rhs call and one RK kernel
@@ -198,7 +172,6 @@ contains
             if (done(i)) cycle
             done(i) = .true.
             g = my(i)
-            if (amr_block_level(g) == 0) cycle  ! L0 tile slots are advanced by s_l0_advance_stage
             if (amr_adv_level > 0 .and. amr_block_level(g) /= amr_adv_level) cycle  ! subcycling: one level at a time
             amr_bat_n = 1; amr_bat_blk(1) = g
             do j = i + 1, amr_n_my
@@ -213,8 +186,7 @@ contains
                 amr_bat_n = amr_bat_n + 1; amr_bat_blk(amr_bat_n) = h; done(j) = .true.
             end do
             ! no fine block left undone -> this batch's restore must push the coarse grid state (the coarse stage reads it)
-            last_batch = .not. any(.not. done .and. amr_block_level(my) /= 0 .and. (amr_adv_level == 0 .or. amr_block_level(my) &
-                                   & == amr_adv_level))
+            last_batch = .not. any(.not. done .and. (amr_adv_level == 0 .or. amr_block_level(my) == amr_adv_level))
             ! the batch frame: leader selected (swap, capture and RK read amr_cur / the slot's extents), members' store columns
             call s_amr_select_slot(g)
             amr_bat_ext = [amr_slots(g)%m, amr_slots(g)%n, amr_slots(g)%p]
@@ -299,86 +271,9 @@ contains
 
     end subroutine s_amr_bat_layout
 
-    !> RHS pass of a fine-block RK stage: step-entry backup, swap grid globals to the block, s_compute_rhs (fills amr_slots%rhs +
-    !! captures the block's freg / its children's creg), restore coarse globals. Leaves the per-slot rhs ready for the RK pass (or,
-    !! under coexist, for the reflux-delta copy-back before the RK pass).
-    impure subroutine s_amr_fine_stage_rhs(s, bc_type, q_T_sf, q_prim_b, rhs_b, pb_in, rhs_pb, mv_in, rhs_mv, t_step)
-
-        integer, intent(in)                                        :: s, t_step
-        type(integer_field), dimension(1:num_dims,1:2), intent(in) :: bc_type
-        type(scalar_field), intent(inout)                          :: q_T_sf
-        !> the block's q_prim/rhs target: the pooled scratch for fine blocks, the slot's own arrays for L0 tiles (whose rhs must
-        !! survive the whole-set RHS pass; the caller chooses - see s_l0_advance_stage_rhs)
-        type(scalar_field), dimension(1:sys_size), intent(inout) :: q_prim_b, rhs_b
-        real(stp), dimension(:,:,:,:,:), intent(inout)           :: pb_in, mv_in
-        real(wp), dimension(:,:,:,:,:), intent(inout)            :: rhs_pb, rhs_mv
-        integer                                                  :: loc_cur  !< plain scalars for device routines (NVHPC -Minline)
-
-        if (.not. amr .and. l0_ntile == 0) return
-        if (.not. amr_rank_owns_block) return
-
-        ! step-entry backup for the SSP-RK combination (device copy over the current buffered extents)
-        if (s == 1) then
-            call s_amr_copy_fine_fields(amr_cur)
-        end if
-
-        amr_in_fine_advance = .true.
-        call s_phase_tic(PH_SWAP)
-        call s_amr_swap_to_fine(widen=.true.)
-        call s_phase_toc(PH_SWAP)
-        call s_phase_tic(PH_RHS)
-        loc_cur = amr_loc_of(amr_cur)
-        call s_amr_br_load(loc_cur)
-        ! the block's own fine markers, for the RHS body-cell zeroing (the grid globals are the block's here)
-        if (ib) call s_ibm_load_fine_markers(1, [amr_cur], reshape([m, n, p], [3, 1]), 1, 0)
-        call s_compute_rhs(amr_cons_br, q_T_sf, q_prim_b, bc_type, rhs_b, pb_in, rhs_pb, mv_in, rhs_mv, t_step, s)
-        loc_cur = amr_loc_of(amr_cur)
-        call s_amr_br_store(loc_cur)
-        call s_phase_toc(PH_RHS)
-        call s_phase_tic(PH_SWAP)
-        call s_amr_restore_coarse()
-        call s_phase_toc(PH_SWAP)
-        amr_in_fine_advance = .false.
-
-    end subroutine s_amr_fine_stage_rhs
-
-    !> RK pass of a fine-block RK stage: SSP-RK combination consuming the per-slot rhs (already reflux-corrected under coexist),
-    !! then per-stage pressure relaxation / moving-IB / IB-state correction. Uses slot bounds (no grid swap needed).
-    impure subroutine s_amr_fine_stage_rk(s, coefs, q_prim_b, rhs_b, pb_in, mv_in)
-
-        integer, intent(in)  :: s
-        real(wp), intent(in) :: coefs(4)
-        !> the same q_prim/rhs pair the RHS pass of this stage filled (pooled scratch for fine blocks, per-slot for L0 tiles)
-        type(scalar_field), dimension(1:sys_size), intent(inout) :: q_prim_b, rhs_b
-        real(stp), dimension(:,:,:,:,:), intent(inout)           :: pb_in, mv_in  !< unread: amr prohibits qbmm
-        integer                                                  :: loc_cur  !< plain scalars for device routines (NVHPC -Minline)
-        real(wp)                                                 :: h_coefs_1, h_coefs_2, h_coefs_3, h_coefs_4, h_merge_1_wp_dt_igr
-
-        if (.not. amr .and. l0_ntile == 0) return
-        if (.not. amr_rank_owns_block) return
-
-        call s_phase_tic(PH_RK)
-        ! RK stage update (device kernel; mirror of the coarse form. Under IGR the rhs already embeds dt, matching the coarse igr
-        ! update, so the dt factor is 1)
-        loc_cur = amr_loc_of(amr_cur)
-        h_coefs_1 = coefs(1)
-        h_coefs_2 = coefs(2)
-        h_coefs_3 = coefs(3)
-        h_coefs_4 = coefs(4)
-        h_merge_1_wp_dt_igr = merge(1._wp, dt, igr)
-        call s_amr_fine_rk_update(loc_cur, rhs_b, h_coefs_1, h_coefs_2, h_coefs_3, h_coefs_4, h_merge_1_wp_dt_igr)
-        ! 6-equation model: per-stage pressure relaxation on the block (before IB correct, coarse order)
-        if (model_eqns == model_eqns_6eq .and. (.not. relax)) call s_amr_pressure_relax_fine()
-        ! moving body: rebuild the fine-block IB state at the current (lockstep-stage) body position before the correct-state
-        if (moving_immersed_boundary_flag) call s_amr_update_mib_fine()
-        ! IB state correction on the fine block (mirrors the coarse per-stage correct-state; no-op unless ib)
-        call s_amr_ib_correct_fine(q_prim_b, pb_in, mv_in)
-        call s_phase_toc(PH_RK)
-
-    end subroutine s_amr_fine_stage_rk
-
-    !> Batched twin of s_amr_fine_rk_update: the same per-cell combination for every member of the batch, reading its rhs at the
-    !! member's slab offset. One kernel per batch instead of one per block.
+    !> Device RK stage update over the batch: q = (c1*q + c2*q_stor + c3*dt_in*rhs)/c4 (compute in wp, store stp) for every member,
+    !! reading its rhs at the member's slab offset. Mirrors the coarse non-IGR rk_coef form in s_tvd_rk (m_time_steppers): same
+    !! SSP-RK stage combination; keep the two in lockstep.
     impure subroutine s_amr_fine_rk_update_batch(nb, q_rhs, c1, c2, c3, c4, dt_in)
 
         integer, intent(in)                                 :: nb

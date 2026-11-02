@@ -44,8 +44,6 @@ module m_amr_state
         real(wp), allocatable :: z_cb(:), z_cc(:), dz(:)
         !> conserved state lives in the flat store amr_cons_st, indexed by this slot's dense local index amr_loc_of - not here.
         !> SSP-RK stage storage lives in the flat store amr_stor_st, indexed by this slot's amr_loc_of.
-        type(scalar_field), allocatable :: q_prim(:)  !< primitive stage (fine advance, same bounds)
-        type(scalar_field), allocatable :: rhs(:)     !< RHS (fine interior only: 0:m, 0:n, 0:p)
     end type t_level
 
     !> Fixed pool of refined-block slots (at init one slot is active; dynamic regrid activates up to amr_max_blocks). The working
@@ -92,7 +90,7 @@ module m_amr_state
     !> Pooled advance scratch: the fused fine advance (rhs then rk on one slab, s_amr_fine_stage_advance_batched) leaves no
     !! cross-block q_prim/rhs lifetime, so every fine block shares this one slot-shaped pair instead of carrying per-slot arrays
     !! (which would multiply the live footprint by the slot count and churn the device allocator). Same shared-scratch pattern as
-    !! amr_cg. L0 tile slots are the exception and keep per-slot arrays (see s_amr_alloc_slot).
+    !! amr_cg.
     type(scalar_field), allocatable :: amr_scr_prim(:), amr_scr_rhs(:)
     !> block-frame primitive scratch for the batched advance's per-member IB correction (allocated only with ib): the slab's prim
     !! holds the members stacked along amr_bat_sd, and s_ibm_correct_state reads a block in its own frame
@@ -111,7 +109,7 @@ module m_amr_state
     !! keeps a rank's fine memory ~1/num_procs of the pool.
     integer              :: max_f(3), mbuf_lo(3), mbuf_hi(3)
     logical, allocatable :: amr_slot_live(:)
-    !! cached same-level adjacent-seam list (3, npairs) = (xb, yb, seam-dim), so s_amr_fine_fine_halo iterates O(#seams) instead of
+    !! cached same-level adjacent-seam list (3, npairs) = (xb, yb, seam-dim), so s_amr_fine_fine_post iterates O(#seams) instead of
     !! rescanning all O(nblocks^2) pairs every RK stage. Block topology changes only at regrid/restart, so the list is rebuilt only
     !! when amr_seam_pairs_dirty is set (or the block count changes - a tripwire).
     integer, allocatable :: amr_seam_pairs(:,:)
@@ -120,8 +118,8 @@ module m_amr_state
     !! amr_mesh_epoch lives in m_global_parameters (m_amr_registers keys its participation-map rebuild on it and cannot use
     !! m_amr); it is use-associated here and re-exported.
     !> Tag base of the clusterer's narrow-node reductions (amr_tag_narrow + mod(epoch, 50)), above the per-box tag space
-    !! [1..amr_max_blocks] the L0 tile routing uses; the waves use the keyed bands below. The init MPI_TAG_UB assert is the scale
-    !! tripwire (Open MPI 2**31 - 1, Cray MPICH 2**29 - 1).
+    !! [1..amr_max_blocks]; the waves use the keyed bands below. The init MPI_TAG_UB assert is the scale tripwire (Open MPI 2**31 -
+    !! 1, Cray MPICH 2**29 - 1).
     integer :: amr_tag_narrow = 0
     !> Keyed wave tags: tag = amr_m1_base + band*65536 + gen*4096 + seq, checked against MPI_TAG_UB at init. band 0 = reflux-faces
     !! wave, 1 = freg wave, 2 = parent-fill wave, 3 = stage-fill wave, 5 = fine-fine halo wave, 6 = level-1 restrict wave, 7 =
@@ -198,15 +196,11 @@ module m_amr_state
     !! worst case is too strict for low-CFL cases). Incremented by m_amr_regrid, reported by s_amr_cad_report.
     integer(8) :: amr_cad_tot = 0, amr_cad_esc = 0
     logical    :: amr_cad_armed = .false.  !< first regrid (hierarchy population) is skipped, see s_amr_cad_count
-    !> (0:num_procs-1) SFC Morton-key upper bound per rank from the cost-weighted split; owner = cut-search (f_amr_owner). O(P)
-    !! storage, where the amr_block_owner table is O(global blocks).
-    integer(kind=8), allocatable :: amr_owner_cut(:)
-    !> (0:num_procs-1, 1:amr_max_level) companion cuts for fine-block (level>=1) owners: one independent cut per level. Each level's
+    !> (0:num_procs-1, 1:amr_max_level) SFC Morton-key upper bound per rank from the cost-weighted split, one independent cut per
+    !! level (owner = cut-search, f_amr_owner). O(P) storage, where the amr_block_owner table is O(global blocks). Each level's
     !! boxes are balanced across all ranks on their own weight, so a deep refinement tower does not pin its whole subtree to one
     !! rank. Per level rather than one mixed cut because same-level boxes are disjoint and so have distinct Morton keys, which the
     !! cut-point binary search requires; a mixed cut would let a child share its parent's region_lo and make the search ambiguous.
-    !! In no-tile AMR level 1's cut also mirrors amr_owner_cut, but in coexist amr_owner_cut is overwritten by the tile cut, so the
-    !! fine cuts are kept here for f_amr_owner (fine blocks straddle tiles and cannot be derived from the tile cut).
     integer(kind=8), allocatable :: amr_fine_cut(:,:)
 
     !> Regrid box size cap per dim (fixed for the run, identical on all ranks; 1 in collapsed dims): a box of at most min-over-ranks
@@ -216,8 +210,8 @@ module m_amr_state
 
     !> Swap contract (s_amr_swap_to_fine / s_amr_restore_coarse). The fine advance runs the shared solver on a fine block by
     !! swapping these coarse-grid globals to the block's values and restoring after: m/n/p, idwint/idwbuff, the nine coordinate
-    !! arrays (sw_x_cb..sw_dz below), acoustic_source; WENO/hypoelastic/IGR spacing coefficients are recomputed for the
-    !! active grid rather than saved. Rule for anyone adding grid-dependent state: any module-level variable derived from
+    !! arrays (sw_x_cb..sw_dz below), acoustic_source; WENO/hypoelastic/IGR spacing coefficients are recomputed for the active grid
+    !! rather than saved. Rule for anyone adding grid-dependent state: any module-level variable derived from
     !! m/n/p/idwint/idwbuff/coords that a kernel reads on the fine grid must be swapped here or refreshed on every fine call at its
     !! use site, and if GPU_DECLARE'd, its device copy too. A stale device copy of coarse bounds reads out of range on the fine grid
     !! under CCE OpenACC (cv_int is refreshed by a per-call GPU_UPDATE in s_compute_rhs for this reason; see m_rhs.fpp).
@@ -277,31 +271,6 @@ module m_amr_state
     !> Subcycling patch cache: the pooled level-1 patches (amr_cg, amr_cg_nuse patches) at the step start (time level 0) then the
     !! step end (1), each flat with g1 fastest, then g2, g3, variable.
     real(stp), allocatable :: amr_pc(:)
-
-    !> Level-0 tiling (l0_ntile > 0, amr off): tile the base grid into l0_ntile**num_dims base-resolution (refinement-ratio-1)
-    !! blocks and advance each through the same swap-based per-block solver the AMR fine overlay uses, with tile-tile same-level
-    !! seam halos (s_amr_fine_fine_halo, fmul=1) at interior faces and the physical BC at domain-edge faces. l0_ntile>0 must be
-    !! byte-identical to l0_ntile=0 (monolithic). Reuses the full amr_slots/region/owner/seam machinery; the tiles are level-1
-    !! blocks with amr_ref_ratio 1. Off (l0_ntile=0) => no effect.
-    integer :: l0_ntiles_tot = 0  !< total tiles = l0_ntile**num_dims (0 when off)
-    integer :: l0_nt(3) = 1       !< tiles per dim (1 in collapsed dims)
-    ! Unification pool layout (amr_max_fine, l0_slot_off) lives in m_global_parameters beside amr_num_blocks/amr_max_blocks, so
-    ! m_amr_regrid (a separate module) sees it too.
-    !> per-dim global periodicity, allreduced from periodic_bc in s_l0_tiles_init (periodic_bc is set on rank 0 only, since
-    !! s_read_input_file is rank-0-guarded, so it must be made consistent for the wrap-seam decision in f_amr_seam /
-    !! s_l0_edge_bc_tile, which every rank must agree on)
-    logical :: l0_periodic(3) = .false.
-    !> tiles are persistent: L0 seeds them once (first timestep); set at init, cleared after fill
-    logical :: l0_tiles_need_fill = .false.
-    !> rank owning each tile's L0 storage cells (fixed = init owner); scatter routes the compute-owner's interior back to this rank
-    !! when a tile has migrated (owner != l0_owner)
-    integer, allocatable :: amr_tile_l0_owner(:)
-    !> accumulated measured compute time per owned tile since the last rebalance (GPU-synced wall time); allreduced to a replicated
-    !! cost vector that drives s_l0_rebalance, then reset
-    real(wp), allocatable :: amr_tile_cost(:)
-    !> per-tile exponential moving average of the (replicated) measured cost, smoothed across rebalance windows so GPU
-    !! launch-latency timing noise does not drive churn
-    real(wp), allocatable :: amr_tile_cost_ema(:)
 
 contains
 
@@ -425,9 +394,7 @@ contains
     !> Assemble the persistent global coarse cell-boundary arrays over (-1-pad : G+pad). Each rank writes the boundaries of the
     !! cells it owns (shared inter-rank faces written identically by both neighbours) into a sentinel-filled global array; an
     !! elementwise MAX allreduce recovers the exact global array on every rank. Grid fixed for the run. Fine blocks stay buff_size
-    !! inside the domain (pad 0); L0 tiles touching the boundary reach into the domain ghost shell (pad buff_size), whose
-    !! coordinates the monolithic x_cb ghost cells already hold, so a tile's ghost coords match the monolithic grid bit-for-bit. A
-    !! rebuild with a larger pad replaces the array with a value-consistent superset.
+    !! inside the domain (pad 0). A rebuild with a larger pad replaces the array with a value-consistent superset.
     impure subroutine s_amr_build_global_cb(pad)
 
         integer, intent(in) :: pad
@@ -608,10 +575,8 @@ contains
     end function f_amr_quartic_half
 
     !> Allocate the pooled q_prim/rhs advance scratch (idempotent). The lockstep driver argument-associates the scratch for every
-    !! block, owned or not, so it must exist on every rank, including one that never allocates a slot. Called from the one point per
-    !! mode where mbuf* are final: end of s_initialize_amr_module when l0_ntile == 0 (pure AMR), and after s_l0_tiles_init's mbuf
-    !! union when tiles exist (pure-L0 and coexist; the union can enlarge mbuf* past the fine-only values, so an earlier allocation
-    !! would undersize the scratch). rhs mirrors the per-slot igr widening.
+    !! block, owned or not, so it must exist on every rank, including one that never allocates a slot. rhs mirrors the per-slot igr
+    !! widening.
     impure subroutine s_amr_scr_init()
 
         integer                         :: i, slo(3), shi(3)
@@ -649,16 +614,6 @@ contains
         end if
 
     end subroutine s_amr_scr_init
-
-    !> Slot index of regrid-managed fine block k in the shared pool: tiles occupy [1..l0_slot_off], fine blocks [l0_slot_off+1..].
-    !! Identity (l0_slot_off=0) until L0 tiles + AMR coexist.
-    pure integer function f_l0_slot(k) result(s)
-
-        integer, intent(in) :: k
-
-        s = l0_slot_off + k
-
-    end function f_l0_slot
 
     !> Grow-on-demand sizing for append-only tables and pools: a grow preserves the entries already appended.
     impure subroutine s_amr_size_int(a, n)

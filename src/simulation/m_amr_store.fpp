@@ -115,9 +115,7 @@ contains
 
     !> Allocate slot islot's per-block field arrays (coords + the device-resident field vectors), sized to the max buffered block.
     !! Idempotent (no-op if already live). The global amr_cg is not per-slot and stays in init/finalize.
-    !> Allocate/reset the dense local-index maps. Called from both pool-allocation sites (s_initialize_amr_module and
-    !! s_l0_tiles_init) because pure-L0 mode (amr = F) returns early from the former yet still calls s_amr_alloc_slot. Idempotent so
-    !! either order is safe.
+    !> Allocate/reset the dense local-index maps. Idempotent.
     !> The block-metadata pool for amr_max_blocks slots: per-slot geometry, ownership and level tables, the SFC cuts and the
     !! per-block overlap-list counts (the 2D rank lists are sized to the computed max overlap in s_amr_build_seam_pairs).
     impure subroutine s_amr_alloc_pool()
@@ -127,7 +125,6 @@ contains
         allocate (amr_region_lo_all(3, amr_max_blocks), amr_region_hi_all(3, amr_max_blocks))
         allocate (amr_isect_lo_all(3, amr_max_blocks), amr_isect_hi_all(3, amr_max_blocks))
         allocate (amr_owns_all(amr_max_blocks), amr_block_owner(amr_max_blocks), amr_block_level(amr_max_blocks))
-        allocate (amr_owner_cut(0:num_procs - 1)); amr_owner_cut = -1_8
         allocate (amr_fine_cut(0:num_procs - 1,1:max(amr_max_level, 1))); amr_fine_cut = -1_8
         allocate (amr_ovl_gather_n(amr_max_blocks), amr_ovl_scatter_n(amr_max_blocks))
         allocate (amr_slot_live(amr_max_blocks)); amr_slot_live = .false.
@@ -161,7 +158,7 @@ contains
         if (allocated(amr_seam_pairs)) deallocate (amr_seam_pairs)
         if (allocated(amr_ovl_gather)) deallocate (amr_ovl_gather)
         if (allocated(amr_ovl_scatter)) deallocate (amr_ovl_scatter)
-        deallocate (amr_ovl_gather_n, amr_ovl_scatter_n, amr_slots, amr_block_owner, amr_block_level, amr_owner_cut, amr_fine_cut)
+        deallocate (amr_ovl_gather_n, amr_ovl_scatter_n, amr_slots, amr_block_owner, amr_block_level, amr_fine_cut)
         deallocate (amr_region_lo_all, amr_region_hi_all, amr_isect_lo_all, amr_isect_hi_all, amr_owns_all)
 
     end subroutine s_amr_free_pool
@@ -238,8 +235,7 @@ contains
         integer, allocatable :: inv(:)
 
         if (amr_st_cap <= 0) return
-        ! invert the map: inv(local index) = global slot, 0 if free. The walk covers the L0 tile prefix too; those slots
-        ! hold store data even though the reconcile walk skips them.
+        ! invert the map: inv(local index) = global slot, 0 if free
         allocate (inv(amr_st_cap)); inv = 0
         do k = 1, amr_max_blocks
             if (amr_loc_of(k) > 0) inv(amr_loc_of(k)) = k
@@ -619,9 +615,8 @@ contains
     impure subroutine s_amr_alloc_slot(islot)
 
         integer, intent(in) :: islot
-        integer             :: i
 
-        ! full-vs-stash discriminator is the grid arrays: every full slot (tile or fine) has x_cb; a stash-only slot has none
+        ! full-vs-stash discriminator is the grid arrays: every full slot has x_cb; a stash-only slot has none
         ! (fine slots do not carry q_prim; see the pooled scratch amr_scr_prim/amr_scr_rhs)
 
         if (amr_slot_live(islot) .and. allocated(amr_slots(islot)%x_cb)) return
@@ -642,31 +637,6 @@ contains
             if (amr_dim(${D}$)) allocate (amr_slots(islot)%${X}$_cb(-1:max_f(${D}$)), amr_slots(islot)%${X}$_cc(0:max_f(${D}$)), &
                 & amr_slots(islot)%d${X}$(0:max_f(${D}$)))
         #:endfor
-        ! pooled scratch: fine blocks advance through the shared scratch (amr_scr_prim/amr_scr_rhs); the fused advance leaves
-        ! no cross-block q_prim/rhs lifetime. L0 tile slots are the exception: all owned tiles' rhs coexist across the
-        ! MPI-synchronized reflux point (s_l0_add_reflux_to_tiles between the whole-set RHS and RK passes), and a tile's q_prim
-        ! written by the RHS pass is read in the later RK pass (IB correction), so tiles keep per-slot rhs always and per-slot
-        ! q_prim exactly when s_compute_rhs's copy-out gate writes it (m_rhs.fpp end-of-rhs gate).
-        if (islot <= l0_slot_off) then
-            @:ALLOCATE(amr_slots(islot)%rhs(1:sys_size))
-            if (run_time_info .or. probe_wrt .or. ib .or. bubbles_lagrange) then
-                @:ALLOCATE(amr_slots(islot)%q_prim(1:sys_size))
-            end if
-            do i = 1, sys_size
-                ! rhs is ghost-inclusive (mbuf); igr widens to -1:+1 per dim including collapsed ones (coarse rhs_vf is -1:m+1 etc.)
-                if (igr) then
-                    @:ALLOCATE(amr_slots(islot)%rhs(i)%sf(mbuf_lo(1):mbuf_hi(1), min(mbuf_lo(2), -1):max(mbuf_hi(2), 1), &
-                               & min(mbuf_lo(3), -1):max(mbuf_hi(3), 1)))
-                else
-                    @:ALLOCATE(amr_slots(islot)%rhs(i)%sf(mbuf_lo(1):mbuf_hi(1), mbuf_lo(2):mbuf_hi(2), mbuf_lo(3):mbuf_hi(3)))
-                end if
-                @:ACC_SETUP_SFs(amr_slots(islot)%rhs(i))
-                if (allocated(amr_slots(islot)%q_prim)) then
-                    @:ALLOCATE(amr_slots(islot)%q_prim(i)%sf(mbuf_lo(1):mbuf_hi(1), mbuf_lo(2):mbuf_hi(2), mbuf_lo(3):mbuf_hi(3)))
-                    @:ACC_SETUP_SFs(amr_slots(islot)%q_prim(i))
-                end if
-            end do
-        end if
         amr_slot_live(islot) = .true.
         call s_amr_st_reserve(amr_loc_n)
 
@@ -676,32 +646,12 @@ contains
     impure subroutine s_amr_free_slot(islot)
 
         integer, intent(in) :: islot
-        integer             :: i
 
         if (.not. amr_slot_live(islot)) return
         if (amr_loc_of(islot) > 0) then
             amr_loc_nfree = amr_loc_nfree + 1
             amr_loc_free(amr_loc_nfree) = amr_loc_of(islot)
             amr_loc_of(islot) = 0
-        end if
-        ! Undo each field's ACC_SETUP_SFs (Cray descriptor + %sf copyin) before the @:DEALLOCATE. Cray 'exit data delete'
-        ! decrements the ref count, so the lone @:DEALLOCATE would leave the descriptor and the ACC_SETUP %sf ref dangling; the
-        ! leaked host address is later reused (e.g. by Gs_rs at restart), tripping a Cray "Error placing / already present"
-        ! present-table crash (gpu-acc). A stash-only slot (s_amr_alloc_slot_stash) has none of these arrays, only the index
-        ! bookkeeping above.
-        if (allocated(amr_slots(islot)%q_prim)) then
-            do i = 1, sys_size
-                @:ACC_TEARDOWN_SFs(amr_slots(islot)%q_prim(i))
-                @:DEALLOCATE(amr_slots(islot)%q_prim(i)%sf)
-            end do
-            @:DEALLOCATE(amr_slots(islot)%q_prim)
-        end if
-        if (allocated(amr_slots(islot)%rhs)) then
-            do i = 1, sys_size
-                @:ACC_TEARDOWN_SFs(amr_slots(islot)%rhs(i))
-                @:DEALLOCATE(amr_slots(islot)%rhs(i)%sf)
-            end do
-            @:DEALLOCATE(amr_slots(islot)%rhs)
         end if
         #:for X in ['x', 'y', 'z']
             if (allocated(amr_slots(islot)%${X}$_cb)) deallocate (amr_slots(islot)%${X}$_cb, amr_slots(islot)%${X}$_cc, &
@@ -722,12 +672,6 @@ contains
 
         nliv = 0; nfr = 0; nal = 0; nfree_in = amr_loc_nfree
         do k = 1, amr_max_blocks
-            ! Skip the L0 tile prefix [1..l0_slot_off]: those slots are owned + sized by s_l0_tiles_init (rr=1 tile geometry), not
-            ! by the AMR fine-block reconcile. Without this, at coexist init the tile-prefix owner defaults to 0, so rank 0 would
-            ! alloc these slots here with the fine mbuf* sizing; s_amr_alloc_slot is idempotent, so s_l0_build_tile_slot could not
-            ! then resize them (a tile-undersizing hazard, benign only while fine mbuf* >= tile). l0_slot_off = 0 with no tiles,
-            ! so this is a no-op for pure AMR.
-            if (k <= l0_slot_off) cycle
             needed = k <= amr_num_blocks
             if (needed) needed = amr_block_owner(k) == proc_rank
             if (needed) then

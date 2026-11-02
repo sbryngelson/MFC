@@ -742,7 +742,7 @@ contains
         end do
         call s_amr_fill_wave_done()
         if (amr_max_level >= 2) call s_amr_build_static_multilevel()
-        call s_amr_select_slot(f_l0_slot(1))
+        call s_amr_select_slot(1)
 
     end subroutine s_populate_amr_fine
 
@@ -760,14 +760,11 @@ contains
         ! the static hierarchy nests exactly one level-2 block; without pool room it would silently refine only to level 1 (an
         ! under-resolved but "successful" run). n1 (the level-1 tile count) is only known here, not at checker time, so abort at the
         ! point of failure. Replicated inputs -> every rank takes the same branch (collective-safe).
-        if (n1 + 1 > l0_slot_off + amr_max_fine) call s_mpi_abort('amr static multi-level (amr_max_level > 1, ' &
+        if (n1 + 1 > amr_max_blocks) call s_mpi_abort('amr static multi-level (amr_max_level > 1, ' &
             & // 'amr_regrid_int = 0): amr_max_blocks is too small to nest the level-2 block (need >= level-1 block count + 1); ' &
             & // 'increase amr_max_blocks')
         L2 = n1 + 1
-        ! parent is the first fine block, f_l0_slot(1), not slot 1, which under coexist is the first level-0 tile. Insetting a
-        ! tile instead would put the level-2 box in the wrong place and size it off the tile (a plausible-looking box that
-        ! silently corrupts the run).
-        par = f_l0_slot(1)
+        par = 1
         inset = merge(max((amr_region_hi_all(:,par) - amr_region_lo_all(:,par) + 1)/4, amr_cpat_mar), 0, amr_dim)
         amr_region_lo_all(:,L2) = amr_region_lo_all(:,par) + inset
         amr_region_hi_all(:,L2) = amr_region_hi_all(:,par) - inset
@@ -800,9 +797,7 @@ contains
             call s_interpolate_coarse_to_fine()
         end if
         call s_amr_fill_wave_done()
-        ! back to the first fine block: f_l0_slot(1), not slot 1, which under coexist is an L0 tile whose geometry would size
-        ! s_initialize_weno_module's device tables off the wrong bounds
-        call s_amr_select_slot(f_l0_slot(1))
+        call s_amr_select_slot(1)
 
     end subroutine s_amr_build_static_multilevel
 
@@ -839,7 +834,7 @@ contains
         o1 = amr_sidx(1); o2 = amr_sidx(2); o3 = amr_sidx(3)
         maxsz = sys_size*product(rhi - rlo + 1)
 
-        ! block set changed: rebuild the cached overlap-rank lists (same lazy trigger as s_amr_fine_fine_halo; local, replicated)
+        ! block set changed: rebuild the cached overlap-rank lists (same lazy trigger as s_amr_fine_fine_post; local, replicated)
         if (amr_seam_pairs_dirty .or. amr_seam_pairs_nblk /= amr_num_blocks) call s_amr_build_seam_pairs()
 
         if (proc_rank == owner) then
@@ -896,9 +891,9 @@ contains
                 ! by AMD flang as size(section) contiguous elements, so only the first row lands on the cells it names and the
                 ! remainder silently overwrites neighbouring cells with stale host data (only at np >= 2 with a block whose owner
                 ! holds none of its covered cells). The wire layout (ci fastest, then cj, ck, i) is exactly
-                ! s_l0_pack_unpack_block's, so it unpacks s_amr_restrict_device_wire's buffer as-is.
-                call s_l0_pack_unpack_block_sf(coarse_tgt, bl(1) - o1, bl(2) - o2, bl(3) - o3, bh(1) - bl(1), bh(2) - bl(2), &
-                                               & bh(3) - bl(3), rbuf, .false.)
+                ! s_amr_pack_unpack_block's, so it unpacks s_amr_restrict_device_wire's buffer as-is.
+                call s_amr_pack_unpack_block_sf(coarse_tgt, bl(1) - o1, bl(2) - o2, bl(3) - o3, bh(1) - bl(1), bh(2) - bl(2), &
+                                                & bh(3) - bl(3), rbuf, .false.)
                 deallocate (rbuf)
             end if
         end if
@@ -949,8 +944,8 @@ contains
             h_plo_1 = plo(1)
             h_plo_2 = plo(2)
             h_plo_3 = plo(3)
-            call s_l0_pack_unpack_block_st(amr_loc_of(pblk), h_plo_1, h_plo_2, h_plo_3, phi(1) - h_plo_1, phi(2) - h_plo_2, &
-                                           & phi(3) - h_plo_3, xbuf, .false.)
+            call s_amr_pack_unpack_block_st(amr_loc_of(pblk), h_plo_1, h_plo_2, h_plo_3, phi(1) - h_plo_1, phi(2) - h_plo_2, &
+                                            & phi(3) - h_plo_3, xbuf, .false.)
         end if
         deallocate (xbuf)
 #endif
@@ -1091,8 +1086,8 @@ contains
             h_bl_1 = bl(1)
             h_bl_2 = bl(2)
             h_bl_3 = bl(3)
-            call s_l0_pack_unpack_block_st(amr_loc_of(amr_parent_blk(amr_wrecv%blk(idx))), h_bl_1, h_bl_2, h_bl_3, &
-                                           & bh(1) - h_bl_1, bh(2) - h_bl_2, bh(3) - h_bl_3, amr_fw_rq(lo:hi), .false.)
+            call s_amr_pack_unpack_block_st(amr_loc_of(amr_parent_blk(amr_wrecv%blk(idx))), h_bl_1, h_bl_2, h_bl_3, &
+                                            & bh(1) - h_bl_1, bh(2) - h_bl_2, bh(3) - h_bl_3, amr_fw_rq(lo:hi), .false.)
         end do
 #endif
 
@@ -1112,7 +1107,7 @@ contains
 
         call s_amr_wave_open(amr_wave, 6)
         o1 = amr_sidx(1); o2 = amr_sidx(2); o3 = amr_sidx(3)
-        ! block set changed: rebuild the cached overlap-rank lists (same lazy trigger as s_amr_fine_fine_halo; local, replicated)
+        ! block set changed: rebuild the cached overlap-rank lists (same lazy trigger as s_amr_fine_fine_post; local, replicated)
         if (amr_seam_pairs_dirty .or. amr_seam_pairs_nblk /= amr_num_blocks) call s_amr_build_seam_pairs()
         call s_amr_rank_interior(proc_rank, milo, mihi)
         ! send side: for every owned level-1 block, its covered slab inside each listed coarse-owner's interior
@@ -1273,7 +1268,7 @@ contains
     !! [bl:bh] global (block region origin rlo, ratio rr), touching only those cells. Child-sum order: ddk, ddj, then ddi; /nchild.
     !! Three destinations, one body, so owner-local, parent-folded and scattered coarse cells match bit-for-bit: the level-0
     !! monolithic field (`_sf`, local origin o), a parent block in the flat store (`_st`), both stp-cast, or the contiguous wire
-    !! buffer buf (`_wire`, host via copyout; packed ci fastest, then cj, ck, i, s_l0_pack_unpack_block's layout, in wp since the
+    !! buffer buf (`_wire`, host via copyout; packed ci fastest, then cj, ck, i, s_amr_pack_unpack_block's layout, in wp since the
     !! receiver casts). No whole-coarse device push: that would clobber the device-advanced non-covered coarse cells.
     #:for SFX in ['sf', 'st', 'wire']
         #:set OARGS = '' if SFX == 'wire' else ', o1, o2, o3'

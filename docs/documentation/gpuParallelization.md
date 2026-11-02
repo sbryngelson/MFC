@@ -967,7 +967,6 @@ answer is wrong, or one backend diverges from all the others.
 - [OpenACC Docs](https://www.openacc.org/sites/default/files/inline-files/OpenACC.2.7.pdf)
 
 
-<div style='text-align:center; font-size:0.75rem; color:#888; padding:16px 0 0;'>Page last updated: 2026-02-04</div>
 
 ## Silent-failure traps (AMD flang)
 
@@ -979,5 +978,5 @@ answer is wrong, or one backend diverges from all the others.
   first: only the leading run lands where it is named and the rest overwrites neighbouring cells with stale data
   — no error, no warning. A leading section (`arr(1:n)`, or a fixed trailing index like `freg(d)%%lo(:,:,:,k)`)
   IS contiguous and safe; anything that strides is not. To move a sub-box, pack/unpack it with a device kernel
-  (`s_l0_pack_unpack_block`, `s_amr_restrict_device_wire`) — that is why those exist. Measured: 10 of 60 covered
+  (`s_amr_pack_unpack_block`, `s_amr_restrict_device_wire`) — that is why those exist. Measured: 10 of 60 covered
   cells delivered in the AMR cross-rank restrict, mass off 1.4e-5 per regrid.

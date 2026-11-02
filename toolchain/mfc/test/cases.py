@@ -359,13 +359,6 @@ AMR_PINNED_CAPS = {
     "AMR -> 1D -> multi-level dynamic regrid np=2": 16,
     "AMR -> 2D -> multi-level static np=2": 16,
     "AMR -> 2D -> dynamic regrid np=2": 16,
-    "AMR + L0 tiles -> 2D -> coexist static single-level np=1": 32,
-    "AMR + L0 tiles -> 2D -> coexist force-migrated np=2": 16,
-    "AMR + L0 tiles -> 2D -> coexist dynamic regrid np=1": 32,
-    "AMR + L0 tiles -> 2D -> coexist dynamic regrid np=2": 16,
-    "AMR + L0 tiles -> 2D -> coexist multi-level -> np=1": 32,
-    "AMR + L0 tiles -> 2D -> coexist multi-level -> np=2": 16,
-    "AMR + L0 tiles -> 2D -> coexist multi-level -> single tile": 32,
     "AMR -> 1D -> multi-level dynamic regrid tiled L2 np=2": 16,
     "AMR -> 1D -> three levels": 128,
     # static immersed bodies (2D 63 x 63, np=1): batched since task30; the 127 x 127 np=2 twin has per-dimension caps 32/64
@@ -5528,107 +5521,6 @@ def list_cases() -> typing.List[TestCaseBuilder]:
         # same churn+growth dynamics as the np=2 twin.
         stack.push("AMR -> 2D -> churn growth np=4", churn_blast)
         cases.append(define_case_d(stack, "", {}, ppn=4, override_tol=1e-11))  # same tag-flip exposure as the np=2 twin
-        stack.pop()
-
-        # L0-as-blocks dynamic load balancer: the base grid is tiled into migratable blocks (l0_ntile), and a FORCED
-        # cross-rank tile migration (l0_migrate_step) at np=2 exercises the device pack/unpack P2P path - the per-block
-        # device (de)allocation / present-table churn that historically breaks across CCE and AMD flang (the ab_int /
-        # lib-4425 class), and which NO other test runs because the l0 path is inert at the l0_ntile=0 default. Output is
-        # decomposition-invariant (migration is byte-preserving), so this golden fails iff a migration corrupts state on
-        # some backend. Reuses the 2D np=2 x-split grid; fixed dt + run_time_info off (l0>0 gates run-time-info/probes).
-        l0_base = {k: v for k, v in amr_2d_base.items() if not k.startswith("amr")}
-        stack.push(
-            "L0 tiles -> 2D -> forced cross-rank migration np=2",
-            {**l0_base, "run_time_info": "F", "l0_ntile": 1, "l0_migrate_step": 3},
-        )
-        cases.append(define_case_d(stack, "", {}, ppn=2))
-        stack.pop()
-        # L0 SFC re-cut rebalancer (l0_rebalance_interval>0, distinct from the forced l0_migrate_step above): the periodic
-        # s_l0_rebalance recomputes the O(num_procs) SFC cut from measured tile costs and migrates tiles whose owner changed. With
-        # 4 tiles (l0_ntile=2) at np=2 the Morton (SFC) partition differs from the initial cartesian owner, so the re-cut migrates -
-        # exercising the re-cut decision AND the byte-preserving migration path. Output is decomposition-invariant, so this golden is
-        # byte-identical to the monolithic (l0_ntile=0) run (verified at generation time).
-        stack.push(
-            "L0 tiles -> 2D -> SFC re-cut rebalance np=2",
-            {**l0_base, "run_time_info": "F", "l0_ntile": 2, "l0_rebalance_interval": 3},
-        )
-        cases.append(define_case_d(stack, "", {}, ppn=2))
-        stack.pop()
-
-        # SQUARE grid (n = m): whether the SFC compute owner agrees with the cartesian L0-STORAGE owner at init depends on how the
-        # cartesian split direction lines up with Morton order, so it is a property of the grid SHAPE. Every other L0 golden uses a
-        # 2:1 grid (n=31), where np=2 splits in y and Morton's low-y-row-first grouping agrees - so none of them exercise the
-        # divergent case. On a square grid np=2 tie-breaks to an x split and diverges, which needs the ROUTED initial fill
-        # (s_l0_copy_coarse_to_tiles: L0-storage owner packs its chunk -> compute owner unpacks) and slot allocation keyed to the
-        # compute owner. Before both, this aborted at startup with "routed initial fill not implemented for this decomposition".
-        # Byte-identical to the monolithic (l0_ntile=0) run, like the other tile goldens.
-        stack.push(
-            "L0 tiles -> 2D -> square grid routed initial fill np=2",
-            {**l0_base, "n": 63, "run_time_info": "F", "l0_ntile": 2},
-        )
-        cases.append(define_case_d(stack, "", {}, ppn=2))
-        stack.pop()
-
-        # AMR + L0 tiles COEXIST (amr = T .and. l0_ntile > 0): the base grid is tiled into migratable L0 tiles AND an AMR fine
-        # overlay runs on top, with the tiles advanced on their (migrated) compute-owner while the Berger-Colella c/f coupling
-        # stays in the fixed L0 decomposition and the reflux/restrict correction is routed L0-owner -> tile compute-owner. These
-        # are the ONLY goldens exercising the coexist path; both are byte-identical to the monolithic-AMR run (l0_ntile = 0) - the
-        # tiles are decomposition-invariant, so the golden fails iff the coexist coupling corrupts state. Reuse amr_2d_base
-        # (static single-level block); run_time_info off (l0 > 0 gates run-time-info/probes).
-        # NP1-G: np=1, one tile spanning L0 - the degenerate (local) coupling; proves the reflux/restrict copy-back assembles.
-        # restart_check: the L0 tiles are the slot pool's fixed prefix and the AMR restart file records them alongside the fine
-        # blocks, so a coexist round trip is the only thing that reads a level-0 record back. Without it the reader rejected the
-        # very first record ("block level outside 1..amr_max_level") and the tile boxes in the file were the slot struct's
-        # uninitialized region (s_set_amr_fine_geometry, the only writer of that field, never runs for a tile).
-        stack.push(
-            "AMR + L0 tiles -> 2D -> coexist static single-level np=1",
-            {**amr_2d_base, "amr_regrid_int": 0, "run_time_info": "F", "l0_ntile": 1},
-        )
-        cases.append(define_case_d(stack, "", {}, ppn=1, restart_check=True))
-        stack.pop()
-        # NP2-MIG: np=2, two tiles, the covering tile FORCE-MIGRATED (l0_migrate_step) so its compute-owner != its L0-storage
-        # owner - the real distributed gate exercising the cross-rank L0-owner -> compute-owner reflux/restrict routing.
-        stack.push(
-            "AMR + L0 tiles -> 2D -> coexist force-migrated np=2",
-            {**amr_2d_base, "amr_regrid_int": 0, "run_time_info": "F", "l0_ntile": 2, "l0_migrate_step": 3},
-        )
-        cases.append(define_case_d(stack, "", {}, ppn=2))
-        stack.pop()
-        # NP1-REGRID: coexist with DYNAMIC regrid. Regrid rebuilds the fine band of the shared slot pool while the level-0 tile
-        # prefix [1..l0_slot_off] must survive untouched, and it allocates NEW fine slots through s_amr_alloc_slot - the two
-        # things no other golden exercises together, since the coexist goldens above are all static and every dynamic-regrid
-        # golden runs without tiles. Byte-identical to the monolithic (l0_ntile = 0) run at 4 regrids over 6 steps.
-        stack.push(
-            "AMR + L0 tiles -> 2D -> coexist dynamic regrid np=1",
-            {**amr_2d_base, "amr_regrid_int": 2, "amr_tag_eps": 0.1, "amr_buf": 2, "run_time_info": "F", "l0_ntile": 2},
-        )
-        cases.append(define_case_d(stack, "", {}, ppn=1))
-        stack.pop()
-        # NP2-REGRID: the same at np=2, where the regrid additionally hands one fine block to a rank holding none of its covered
-        # cells. That composes all three routings in one step - fine-owner -> L0-owner (restrict scatter), L0-owner -> tile
-        # compute-owner (s_l0_restrict_to_tiles), and the reflux delta along the same path - which nothing else covers, since the
-        # np=2 coexist golden above is static and the regrid golden above is np=1.
-        stack.push(
-            "AMR + L0 tiles -> 2D -> coexist dynamic regrid np=2",
-            {**amr_2d_base, "amr_regrid_int": 2, "amr_tag_eps": 0.1, "amr_buf": 2, "run_time_info": "F", "l0_ntile": 2},
-        )
-        cases.append(define_case_d(stack, "", {}, ppn=2))
-        stack.pop()
-
-        # NP1/NP2-MULTILEVEL: coexist with a nested level-2 block. s_amr_build_static_multilevel derives the level-2 box by
-        # insetting its PARENT, and it read slot 1 - which under coexist is the first level-0 TILE, not the level-1 block. That
-        # put the box in the wrong place and sized it off the tile: with l0_ntile = 1 (a tile spanning the base grid) it tripped
-        # the amr_maxc_fit cap, and with l0_ntile = 2 it produced a plausible box that silently corrupted the run. These pin the
-        # f_l0_slot(1) parent lookup at both rank counts.
-        stack.push(
-            "AMR + L0 tiles -> 2D -> coexist multi-level",
-            {**amr_2d_base, "amr_regrid_int": 0, "amr_max_level": 2, "amr_max_blocks": 16, "run_time_info": "F", "l0_ntile": 2},
-        )
-        cases.append(define_case_d(stack, "np=1", {}, ppn=1))
-        cases.append(define_case_d(stack, "np=2", {}, ppn=2))
-        # l0_ntile = 1 is the case the slot-1 confusion actually killed: ONE tile spanning the base grid leaves the grid globals
-        # describing the whole subdomain, so the wrong-slot restore was invisible to every multi-tile configuration.
-        cases.append(define_case_d(stack, "single tile", {"l0_ntile": 1}, ppn=1))
         stack.pop()
 
         # (p) multi-level + dynamic regrid at np=2 with a WIDE level-2 feature that max_grid_size TILES: (m) uses

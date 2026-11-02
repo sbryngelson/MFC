@@ -27,7 +27,7 @@ module m_amr_regrid
         & s_amr_refresh_my_blocks, amr_maxc_fit, amr_seam_pairs_dirty, amr_mesh_epoch, amr_cpat_mar, s_amr_alloc_slot, &
         & s_amr_dev_mem, s_amr_free_slot, s_amr_reduce_xchg_flag, s_amr_reconcile_slots, s_amr_assign_block_owners, &
         & s_amr_exchange_coarse_cons_halo, s_amr_phys_to_cells, s_amr_body_bbox, s_amr_expand_box_over_bodies, s_amr_tile_box, &
-        & f_amr_seam_dim, f_amr_boxes_overlap, s_set_amr_fine_geometry, s_interpolate_coarse_to_fine, s_amr_setup_ib, f_l0_slot, &
+        & f_amr_seam_dim, f_amr_boxes_overlap, s_set_amr_fine_geometry, s_interpolate_coarse_to_fine, s_amr_setup_ib, &
         & amr_cad_tot, amr_cad_esc, amr_cad_armed, s_amr_ranks_overlapping, f_amr_overlap_count, f_amr_rank_overlaps, &
         & s_amr_l1_fill_exchange, s_amr_l1_fill_consume, s_amr_parent_fill_exchange, s_amr_parent_fill_consume, &
         & s_amr_fill_wave_done, amr_fw_sq, amr_fw_rq, amr_fw_dev
@@ -123,7 +123,6 @@ contains
 
         do k = 1, nboxes
             lev = box_level(k)
-            if (lev < 1) cycle  ! level-0 tiles are sized by the tile decomposition, not this cap
             do d = 1, num_dims
                 cap = max(amr_maxc_fit(d)/amr_ref_ratio**(lev - 1), 1)
                 span = boxes(k)%hi(d) - boxes(k)%lo(d) + 1
@@ -401,7 +400,7 @@ contains
 #ifdef MFC_MPI
 #endif
 
-        allocate (box_level(amr_max_fine), old_ilo(3, amr_max_blocks), old_ext(3, amr_max_blocks), old_level(amr_max_blocks), &
+        allocate (box_level(amr_max_blocks), old_ilo(3, amr_max_blocks), old_ext(3, amr_max_blocks), old_level(amr_max_blocks), &
                   & old_owns(amr_max_blocks))
 
         ! valid coarse cons ghosts at internal rank boundaries: the tag sweep reads +/-1 across seams and the rebuild prolongation
@@ -627,7 +626,7 @@ contains
         allocate (snapped(nboxes)); snapped(1:nboxes) = boxes(1:nboxes)
         nsnap = 0
         do k = 1, nboxes
-            do ks = l0_slot_off + 1, amr_num_blocks
+            do ks = 1, amr_num_blocks
                 if (amr_block_level(ks) /= box_level(k)) cycle
                 if (all(abs(amr_region_lo_all(:,ks) - boxes(k)%lo) <= amr_snap) .and. all(abs(amr_region_hi_all(:, &
                     & ks) - boxes(k)%hi) <= amr_snap)) then
@@ -879,13 +878,13 @@ contains
                 pieces(1:nn) = rest(1:nn); npc = nn
             end do
             do p = 1, npc
-                call s_amr_tile_box(pieces(p)%lo, pieces(p)%hi, out, nt, amr_max_fine, capt)
+                call s_amr_tile_box(pieces(p)%lo, pieces(p)%hi, out, nt, amr_max_blocks, capt)
             end do
         end do
 
         do g = 1, ng
             if (.not. hit(g)) cycle
-            if (nt >= amr_max_fine) then
+            if (nt >= amr_max_blocks) then
                 capt = 1
             else
                 nt = nt + 1; out(nt)%lo = glo(:,g); out(nt)%hi = ghi(:,g)
@@ -923,7 +922,7 @@ contains
         if (nboxes == 0) return
 
         ! max_grid_size tiling: split any box larger than amr_maxc_fit into contiguous <= amr_maxc_fit sub-blocks so a whole block
-        ! fits a rank's local solver scratch. Tiles are adjacent; the block-to-block fine-fine halo (s_amr_fine_fine_halo) makes
+        ! fits a rank's local solver scratch. Tiles are adjacent; the block-to-block fine-fine halo (s_amr_fine_fine_post) makes
         ! the seams conservative and the reflux skips fine-fine faces. With IB, each body first takes its own block out of the
         ! boxes that reach it (s_amr_carve_tile_around_bodies), so a body is never split across tiles.
         allocate (tiled(amr_max_blocks))
@@ -932,7 +931,7 @@ contains
             call s_amr_carve_tile_around_bodies(boxes, nboxes, tiled, ntl, capt)
         else
             do kk = 1, nboxes
-                call s_amr_tile_box(boxes(kk)%lo, boxes(kk)%hi, tiled, ntl, amr_max_fine, capt)
+                call s_amr_tile_box(boxes(kk)%lo, boxes(kk)%hi, tiled, ntl, amr_max_blocks, capt)
             end do
         end if
         if (capt == 1 .and. proc_rank == 0) print '(A,I0)', ' [amr] WARNING: tiling capped at amr_max_blocks = ', amr_max_blocks
@@ -972,7 +971,7 @@ contains
     !! rebuilds each owned parent's dense window from the pairs (dedup and (k,j,i) order independent of arrival) and clusters
     !! it into children, emitted without the global cap because a rank cannot see the global count mid-pass; one allgatherv
     !! plus a stable sort by kb replays the children into `boxes` in (kb, emission) order, the order a serial loop over parents
-    !! would produce, so the box list, its truncation at amr_max_fine and box_level are rank-invariant. With IB, nesting is np=1
+    !! would produce, so the box list, its truncation at amr_max_blocks and box_level are rank-invariant. With IB, nesting is np=1
     !! only (m_checker). Regions stay in L0 cell indices.
     impure subroutine s_amr_regrid_nest_children(boxes, nboxes, box_level)
 
@@ -998,7 +997,7 @@ contains
         ! host-refresh the live (old) blocks' conserved state: the fine sensor reads the flat store on the host, but the stash's
         ! GPU_UPDATE(host) runs after this nesting, so the host copy is stale here. np>1: only the owner holds the fine state.
         do ob = 1, amr_num_blocks
-            if (amr_block_level(ob) == 0 .or. .not. amr_owns_all(ob)) cycle
+            if (.not. amr_owns_all(ob)) cycle
             $:GPU_UPDATE(host='[amr_cons_st(:, :, :, :, amr_loc_of(ob))]')
         end do
         call s_amr_refresh_my_blocks()
@@ -1008,7 +1007,7 @@ contains
             if (phi < plo) exit  ! nothing nested at the previous level -> no deeper levels possible
             newlo = nboxes + 1
             allocate (covered(plo:phi), mine(plo:phi), mlo_all(3,plo:phi), mhi_all(3,plo:phi), powner(plo:phi), mych(7, &
-                      & amr_max_fine))
+                      & amr_max_blocks))
             call s_amr_nest_mark_parents(boxes, plo, phi, lev, mine, covered)
             do kb = plo, phi
                 powner(kb) = mod(kb - plo, max(num_procs, 1))
@@ -1033,7 +1032,7 @@ contains
             nmych = 0
             do kb = plo, phi
                 if (powner(kb) /= proc_rank) cycle
-                if (nmych + 1 > amr_max_fine) exit  ! local buffer full (bounded by the same global cap)
+                if (nmych + 1 > amr_max_blocks) exit  ! local buffer full (bounded by the same global cap)
                 mlo = mlo_all(:,kb); mhi = mhi_all(:,kb)
                 if (f_amr_nest_window_empty(mlo, mhi)) cycle
                 call s_amr_nest_window_tags(kb, mlo, mhi, gidx, gkb, ntot_g, ctags, nct)
@@ -1047,14 +1046,14 @@ contains
 
             call s_amr_nest_gather_children(mych, nmych, plo, phi, gch, chord, ntot_ch)
             do jch = 1, ntot_ch
-                if (nboxes + 1 > amr_max_fine) exit  ! pool full: stop nesting (canonical order => same truncation)
+                if (nboxes + 1 > amr_max_blocks) exit  ! pool full: stop nesting (canonical order => same truncation)
                 nboxes = nboxes + 1
                 boxes(nboxes)%lo = gch(1:3,chord(jch)); boxes(nboxes)%hi = gch(4:6,chord(jch)); box_level(nboxes) = lev
             end do
             deallocate (gch, chord, powner, mych, gidx, gkb, covered, mine, mlo_all, mhi_all)
             plo = newlo; phi = nboxes  ! the boxes just appended are the parents for the next level
         end do
-        if (nboxes >= amr_max_fine .and. proc_rank == 0) print '(A)', &
+        if (nboxes >= amr_max_blocks .and. proc_rank == 0) print '(A)', &
             & ' [amr] NOTE: block pool full during multi-level nesting; some boxes were not refined further'
 
     end subroutine s_amr_regrid_nest_children
@@ -1300,7 +1299,7 @@ contains
         nt = 0; capped = 0
         call s_amr_tile_box(clo, chi, tiles, nt, amr_max_blocks, capped, amr_maxc_fit/amr_ref_ratio**(lev - 1))
         do it = 1, nt
-            if (nmych + 1 > amr_max_fine) then
+            if (nmych + 1 > amr_max_blocks) then
                 ! refinement is dropped here, not just limited: say so (the global box count is amr_max_blocks, so a weak-scaling
                 ! run needs it to grow with the rank count)
                 if (.not. amr_child_dropped) then
@@ -1374,14 +1373,11 @@ contains
         logical, intent(out)    :: same
         integer                 :: k, ks
 
-        ! regrid manages only the fine band [l0_slot_off+1 ..] of the shared pool; the level-0 L0-tile prefix (coexist) is not
-        ! part of the box set, so compare against the fine block count and index slots through f_l0_slot.
-
         same = .false.
-        if (nboxes == amr_num_blocks - l0_slot_off) then
+        if (nboxes == amr_num_blocks) then
             same = .true.
             do k = 1, nboxes
-                ks = f_l0_slot(k)
+                ks = k
                 if (any(boxes(k)%lo /= amr_slots(ks)%region%lo) .or. any(boxes(k)%hi /= amr_slots(ks)%region%hi) .or. box_level(k) &
                     & /= amr_block_level(ks)) same = .false.
             end do
@@ -1520,16 +1516,15 @@ contains
 
         ! 5) stash every live slot's fine interior (dead-between-steps q_cons_stor bounce), keeping its old intersection origin
 
-        ! old_* are indexed in the regrid's own dense fine-block space [1..old_np], which maps to shared-pool slot f_l0_slot(k);
-        ! under coexist the level-0 L0-tile prefix [1..l0_slot_off] is not regrid-managed and must not be stashed or migrated.
+        ! old_* are indexed in the dense fine-block space [1..old_np], which maps to slot k
 
         !> plain scalars for device routines (NVHPC -Minline)
-        integer :: loc_f_l0_slot_kk, loc_ks, old_ext1_k, old_ext2_k, old_ext3_k
+        integer :: loc_ks, old_ext1_k, old_ext2_k, old_ext3_k
 
         call s_phase_tic(PH_RG_OWN)
-        old_np = amr_num_blocks - l0_slot_off
+        old_np = amr_num_blocks
         do k = 1, old_np
-            ks = f_l0_slot(k)
+            ks = k
             ! global block origin + extents (replicated, valid on every rank; not the owner-only isect), so the cross-rank
             ! migration below and the overlap-copy's index shift are correct even where this rank did not own the old block
             old_ilo(:,k) = amr_region_lo_all(:,ks)
@@ -1558,11 +1553,9 @@ contains
 
         ! set the regions + assign owners before the migration (P2P needs the new owners) and before the owner-dependent
         ! geometry (else s_set_amr_fine_geometry sizes the whole-block owner from a stale amr_block_owner)
-        ! the fine band ends at f_l0_slot(nboxes); the level-0 tile prefix below it keeps its regions, levels and owners (a plain
-        ! nboxes here would overrun the prefix under coexist)
-        amr_num_blocks = f_l0_slot(nboxes)
+        amr_num_blocks = nboxes
         do k = 1, nboxes
-            ks = f_l0_slot(k)
+            ks = k
             amr_region_lo_all(:,ks) = boxes(k)%lo; amr_region_hi_all(:,ks) = boxes(k)%hi
             ! box_level(k) is the refinement level assigned during the hierarchical nesting above (1 for L0->L1 boxes, l for a
             ! box nested at level l). Setting it every regrid resets a stale level when a slot is reused across levels.
@@ -1610,7 +1603,7 @@ contains
             do kk = 1, old_np
                 if (old_level(kk) /= 1) cycle
                 do k2 = 1, nboxes
-                    rr = amr_block_owner(f_l0_slot(k2))
+                    rr = amr_block_owner(k2)
                     if (box_level(k2) /= 1 .or. rr == old_owner(kk)) cycle
                     if (.not. f_amr_boxes_overlap(boxes(k2)%lo, boxes(k2)%hi, old_ilo(:,kk), old_chi(:,kk))) cycle
                     wlo(:,rr) = min(wlo(:,rr), max(boxes(k2)%lo, old_ilo(:,kk)))
@@ -1636,8 +1629,7 @@ contains
                 kk = amr_wsend%blk(ix)
                 call s_amr_wave_slice(amr_wsend, ix, lo, hi)
                 call s_amr_mig_window(amr_wsend%bl(:,ix), amr_wsend%bh(:,ix), old_ilo(:,kk), flo, fhi)
-                loc_f_l0_slot_kk = amr_loc_of(f_l0_slot(kk))
-                call s_amr_mig_pack_device(loc_f_l0_slot_kk, flo(1), flo(2), flo(3), fhi(1), fhi(2), fhi(3), amr_mig_sq(lo:hi))
+                call s_amr_mig_pack_device(amr_loc_of(kk), flo(1), flo(2), flo(3), fhi(1), fhi(2), fhi(3), amr_mig_sq(lo:hi))
                 call s_amr_wave_hdr_pack(amr_wsend, amr_mig_sq, ix, XA_F4_SND)
             end do
             call s_amr_wave_send(amr_wave, amr_wsend, amr_mig_sq, XA_F4_SND, amr_fw_dev)
@@ -1671,14 +1663,14 @@ contains
         integer, allocatable                                   :: last_use(:), held(:), held_hi(:,:), vpos(:)
 
         ! non-owner geometry for every box: amr_owns_all = F, empty footprint, -1 fine extents, the replicated state every rank
-        ! must agree on (s_amr_select_slot reads it for any block); box k lives in shared-pool slot ks = f_l0_slot(k)
+        ! must agree on (s_amr_select_slot reads it for any block); box k lives in shared-pool slot ks = k
 
         !> plain scalars for device routines (NVHPC -Minline)
         integer :: loc_kks, loc_ks, m_ks, n_ks, old_ext1_kk, old_ext2_kk, old_ext3_kk, p_ks, w1, w2, w3, w4, w5, w6, lo, hi
 
         call s_phase_tic(PH_RG_BUILD)
         do k = 1, nboxes
-            ks = f_l0_slot(k)
+            ks = k
             if (amr_block_owner(ks) == proc_rank) cycle
             amr_cur = ks
             call s_set_amr_fine_geometry(boxes(k)%lo, boxes(k)%hi)
@@ -1687,12 +1679,11 @@ contains
         ! the visit order (owned boxes, level-major, ascending) and each held old block's last reader in it; nlev is replicated,
         ! so every rank enters every level's wave (a rank can be a parent-owner sender without owning a box at that level)
         call s_amr_refresh_my_blocks()
-        nlev = maxval(amr_block_level(f_l0_slot(1):amr_num_blocks))
+        nlev = maxval(amr_block_level(1:amr_num_blocks))
         allocate (vpos(nboxes)); vpos = 0; pos = 0
         do lev = 1, nlev
             do i = 1, amr_n_my
-                k = amr_my_blk(i) - l0_slot_off
-                if (k < 1) cycle  ! L0 tile prefix
+                k = amr_my_blk(i)
                 if (amr_block_level(amr_my_blk(i)) /= lev) cycle
                 pos = pos + 1; vpos(k) = pos
             end do
@@ -1700,13 +1691,12 @@ contains
         allocate (last_use(old_np), held(old_np), held_hi(3, old_np)); last_use = 0
         nh = 0
         do kk = 1, old_np
-            if (.not. amr_slot_live(f_l0_slot(kk))) cycle
+            if (.not. amr_slot_live(kk)) cycle
             nh = nh + 1; held(nh) = kk
             ohi = old_ilo(:,kk) + merge((old_ext(:,kk) + 1)/amr_ref_ratio**old_level(kk) - 1, 0, amr_dim)
             held_hi(:,nh) = ohi
             do i = 1, amr_n_my
-                k = amr_my_blk(i) - l0_slot_off
-                if (k < 1) cycle
+                k = amr_my_blk(i)
                 if (f_amr_boxes_overlap(boxes(k)%lo, boxes(k)%hi, old_ilo(:,kk), ohi)) last_use(kk) = max(last_use(kk), vpos(k))
             end do
         end do
@@ -1719,8 +1709,7 @@ contains
             end if
             do i = 1, amr_n_my
                 ks = amr_my_blk(i)
-                k = ks - l0_slot_off
-                if (k < 1) cycle
+                k = ks
                 if (amr_block_level(ks) /= lev) cycle
                 amr_cur = ks
                 ! free the old-only slots no later box reads (s_amr_free_slot is a no-op once dead); a slot serving as a new
@@ -1728,7 +1717,7 @@ contains
                 do hh = 1, nh
                     kk = held(hh)
                     if (last_use(kk) >= vpos(k)) cycle
-                    kks = f_l0_slot(kk)
+                    kks = kk
                     if (kks <= amr_num_blocks) then
                         if (amr_block_owner(kks) == proc_rank) cycle
                     end if
@@ -1762,8 +1751,8 @@ contains
                         w1 = amr_mig_win(2, kk); w2 = amr_mig_win(3, kk); w3 = amr_mig_win(4, kk)
                         w4 = amr_mig_win(5, kk); w5 = amr_mig_win(6, kk); w6 = amr_mig_win(7, kk)
                         call s_amr_overlap_copy_wire(loc_ks, m_ks, n_ks, p_ks, sh, w1, w2, w3, w4, w5, w6, amr_mig_rq(lo:hi))
-                    else if (amr_slot_live(f_l0_slot(kk))) then
-                        loc_kks = amr_loc_of(f_l0_slot(kk))
+                    else if (amr_slot_live(kk)) then
+                        loc_kks = amr_loc_of(kk)
                         old_ext1_kk = old_ext(1, kk)
                         old_ext2_kk = old_ext(2, kk)
                         old_ext3_kk = old_ext(3, kk)

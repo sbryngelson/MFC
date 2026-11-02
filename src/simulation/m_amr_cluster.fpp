@@ -226,7 +226,7 @@ contains
         if (n_glb > 0) ng = n_glb
         if (p_glb > 0) pg = p_glb
 
-        cap = amr_max_fine
+        cap = amr_max_blocks
         allocate (slo(3, 4*cap + 8), shi(3, 4*cap + 8), alo(3, cap), ahi(3, cap))
         allocate (sts(4*cap + 8), ste(4*cap + 8), wt(3, ntag_in), sdep(4*cap + 8))
         allocate (sig(mg + ng + pg + 3))  ! bound: the three full domain extents; reused by every node
