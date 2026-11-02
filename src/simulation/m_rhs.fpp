@@ -962,11 +962,12 @@ contains
 
         ! END: Additional physics and source terms
 
-        ! run_time_info reads q_prim_vf only after the first stage (m_time_steppers); the hyper_cleaning damping above reads psi
-        ! from the previous stage's copy, so psi is always copied
+        ! q_prim_vf is copied out only for its readers: probes, IB, Lagrangian bubbles and synthetic turbulence (m_time_steppers)
+        ! every stage, run_time_info after the first stage. The hyper_cleaning damping above reads psi from the previous stage's
+        ! copy, so psi is always copied
         copy_beg = 1
         copy_end = sys_size
-        if (.not. (probe_wrt .or. ib .or. bubbles_lagrange .or. (run_time_info .and. stage == 1))) then
+        if (.not. (probe_wrt .or. ib .or. bubbles_lagrange .or. synthetic_turbulence .or. (run_time_info .and. stage == 1))) then
             copy_beg = merge(eqn_idx%psi, 1, hyper_cleaning)
             copy_end = merge(eqn_idx%psi, 0, hyper_cleaning)
         end if
