@@ -32,7 +32,6 @@ module m_time_steppers
     use m_body_forces
     use m_derived_variables
     use m_constants, only: model_eqns_6eq, time_stepper_rk1, time_stepper_rk2, time_stepper_rk3, dflt_T_guess
-    use m_active_box, only: s_grow_active_box, s_check_active_box_envelope, ab_x, ab_y, ab_z, ab_active
     use m_amr_stage, only: s_amr_stage_begin, s_amr_stage_fine, s_amr_l0_stage_update, s_amr_step_fold, s_amr_subcycle_fine
 
     implicit none
@@ -465,7 +464,6 @@ contains
         real(wp), intent(inout) :: time_avg
         integer, intent(in)     :: nstage
         integer                 :: i, j, k, l, q, s  !< Generic loop iterator
-        integer                 :: jlo, jhi, klo, khi, llo, lhi  !< Active-box loop bounds for RK update
         logical                 :: rhs_now  !< the coarse RHS runs at the stage top (see s_amr_stage_begin)
         real(wp)                :: start, finish
         integer(kind=8)         :: stage_t0, stage_t1, clock_rate, clock_max
@@ -474,8 +472,6 @@ contains
 
         call cpu_time(start)
         call nvtxStartRange("TIMESTEP")
-
-        call s_grow_active_box()
 
         ! Adaptive dt: initial stage
         if (adap_dt) call s_adaptive_dt_bubble(1)
@@ -538,18 +534,11 @@ contains
                 call s_amr_l0_stage_update(s, t_step, rk_coef(s,:), q_cons_ts(1)%vf, q_T_sf, bc_type, rhs_vf, pb_ts(1)%sf, &
                                            & rhs_pb, mv_ts(1)%sf, rhs_mv)
             else
-                if (ab_active) then
-                    jlo = ab_x%beg; jhi = ab_x%end
-                    klo = ab_y%beg; khi = ab_y%end
-                    llo = ab_z%beg; lhi = ab_z%end
-                else
-                    jlo = 0; jhi = m; klo = 0; khi = n; llo = 0; lhi = p
-                end if
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, sys_size
-                    do l = llo, lhi
-                        do k = klo, khi
-                            do j = jlo, jhi
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 0, m
                                 if (s == 1 .and. nstage > 1) then
                                     q_cons_ts(stor)%vf(i)%sf(j, k, l) = q_cons_ts(1)%vf(i)%sf(j, k, l)
                                 end if
@@ -657,10 +646,6 @@ contains
             & rhs_pb, mv_ts(1)%sf, rhs_mv, t_step)
         amr_sub_on = .false.
         if (amr) call s_amr_step_fold(q_cons_ts(1)%vf)
-
-#ifdef MFC_DEBUG
-        call s_check_active_box_envelope(q_cons_ts(1)%vf)
-#endif
 
         if (ib) then
             if (moving_immersed_boundary_flag) then

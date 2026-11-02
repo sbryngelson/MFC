@@ -23,7 +23,6 @@ module m_amr_frame
     use m_amr_xchg_audit  ! per-call-site accounting of every AMR p2p transfer (s_xa_rec + XA_* site ids)
     use m_hypoelastic, only: s_hypoelastic_update_fd_coeffs, s_enforce_cont_damage_bounds
     use m_body_forces, only: s_apply_bodyforces
-    use m_active_box, only: ab_active
     use m_igr, only: jac, jac_old
     use m_amr_state
     use m_amr_distribution
@@ -113,12 +112,6 @@ contains
         ! correctly skips the source.
         if (amr_swap_depth == 1) sw_acoustic_source = acoustic_source
         acoustic_source = .false.
-        ! active-box windows are coarse cell indices: applying them on the swapped fine grid would window the wrong cells. Blocks
-        ! are contained in the active window (init check + regrid clamp), so the fine advance legitimately treats its whole block
-        ! as active.
-        if (amr_swap_depth == 1) sw_ab_active = ab_active
-        ab_active = .false.
-        $:GPU_UPDATE(device='[ab_active]')
         m = amr_slots(amr_cur)%m; n = amr_slots(amr_cur)%n; p = amr_slots(amr_cur)%p
         idwint%beg = 0; idwint%end = [m, n, p]
         idwbuff = amr_slots(amr_cur)%idwbuff
@@ -225,8 +218,6 @@ contains
         m = sw_m; n = sw_n; p = sw_p
         idwint = sw_idwint; idwbuff = sw_idwbuff
         acoustic_source = sw_acoustic_source
-        ab_active = sw_ab_active
-        $:GPU_UPDATE(device='[ab_active]')
         ! restore full coarse coords from bounce buffers
         #:for D, X, E in [(1, 'x', 'm'), (2, 'y', 'n'), (3, 'z', 'p')]
             if (amr_dim(${D}$)) then; ${X}$_cb = sw_${X}$_cb; ${X}$_cc = sw_${X}$_cc; d${X}$ = sw_d${X}$; end if

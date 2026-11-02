@@ -13,7 +13,6 @@ module m_amr_stage
     use m_global_parameters
     use m_phase_timing
     use m_rhs, only: s_compute_rhs
-    use m_active_box, only: ab_active
     use m_amr_registers, only: s_amr_apply_reflux
     use m_amr
 
@@ -41,7 +40,7 @@ contains
         if (amr .and. l0_ntile > 0) call s_l0_scatter_tiles_to_coarse(q_cons)
         rhs_now = l0_ntile == 0 .or. (amr .and. chemistry)
         amr_cons_ghosts_valid = rhs_now .and. amr .and. amr_xchg_coarse_ghosts .and. (.not. bubbles_lagrange) &
-            & .and. (.not. chemistry) .and. (.not. igr) .and. (.not. ab_active)
+            & .and. (.not. chemistry) .and. (.not. igr)
         if (.not. amr_cons_ghosts_valid) return
         call s_phase_tic(PH_HALO)
         call s_amr_exchange_coarse_cons_halo(q_cons)

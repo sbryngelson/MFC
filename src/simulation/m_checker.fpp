@@ -35,18 +35,6 @@ contains
             end if
         end if
 
-        if (active_box) then
-            ! Declared limitation rather than a silent runtime downgrade: the active box is a single global region, so under
-            ! decomposition the ranks whose subdomain it misses would idle while the covering ranks do all the work. Making it
-            ! multi-rank is a load-balance problem, not a geometry one, and is deferred. Fail closed so a production multi-rank
-            ! run cannot quietly get full-domain compute plus a warning line.
-            ! lint: runtime-check num_procs is the MPI rank count, not a case-file value
-            @:PROHIBIT(num_procs > 1, &
-                       & "active_box supports a single MPI rank only: a single global active region leaves the " &
-                       & // "ranks it does not cover idle, so multi-rank support needs load balancing and is not yet " &
-                       & // "implemented. Unset active_box or run on one rank.")
-        end if
-
         ! lint: runtime-check num_procs is the MPI rank count, not a case-file value
         @:PROHIBIT(load_balance .and. num_procs == 1, "load_balance requires more than one MPI rank")
 
@@ -101,10 +89,6 @@ contains
             ! overlapping expansions merge, and the fine IB state is rebuilt from the geometry after
             ! every regrid. Between regrids a moving body's containment is guarded per substage
             ! (abort if it reaches the block boundary).
-            ! active_box supported (np=1 by active_box's own gate): blocks must sit strictly inside
-            ! the monotonically-growing active window (init check + regrid clamp; the windowed coarse
-            ! update would drop reflux corrections at faces outside it), and the fine advance disables
-            ! the coarse-indexed windowing on the swapped block grid.
             ! no acoustic_source gate: acoustic sources act on the coarse grid only (spatial support
             ! precomputed as coarse cell indices). A startup check aborts if the support overlaps the
             ! user-placed initial block; dynamic regrid keeps its boxes clear of the support (tags

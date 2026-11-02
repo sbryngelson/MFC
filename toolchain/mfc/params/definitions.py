@@ -867,7 +867,6 @@ def _load():
         "igr_pres_lim",
         "nv_uvm_out_of_core",
         "nv_uvm_pref_gpu",
-        "active_box",
     ]:
         _r(n, LOG)
     _r("int_comp", INT)
@@ -1508,7 +1507,6 @@ _nv(
     "cont_damage_s",
     "alpha_bar",
     "rdma_mpi",
-    "active_box",
     "amr",
     "amr_block_beg",
     "amr_block_end",

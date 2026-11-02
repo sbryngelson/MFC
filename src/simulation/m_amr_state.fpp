@@ -221,17 +221,16 @@ module m_amr_state
 
     !> Swap contract (s_amr_swap_to_fine / s_amr_restore_coarse). The fine advance runs the shared solver on a fine block by
     !! swapping these coarse-grid globals to the block's values and restoring after: m/n/p, idwint/idwbuff, the nine coordinate
-    !! arrays (sw_x_cb..sw_dz below), acoustic_source, ab_active; WENO/hypoelastic/IGR spacing coefficients are recomputed for the
+    !! arrays (sw_x_cb..sw_dz below), acoustic_source; WENO/hypoelastic/IGR spacing coefficients are recomputed for the
     !! active grid rather than saved. Rule for anyone adding grid-dependent state: any module-level variable derived from
     !! m/n/p/idwint/idwbuff/coords that a kernel reads on the fine grid must be swapped here or refreshed on every fine call at its
     !! use site, and if GPU_DECLARE'd, its device copy too. A stale device copy of coarse bounds reads out of range on the fine grid
-    !! under CCE OpenACC (ab_int is refreshed by a per-call GPU_UPDATE in s_compute_rhs for this reason; see m_rhs.fpp and
+    !! under CCE OpenACC (cv_int is refreshed by a per-call GPU_UPDATE in s_compute_rhs for this reason; see m_rhs.fpp and
     !! .claude/rules/common-pitfalls.md). amr_swap_depth makes the swap re-entrant and guards against an unpaired restore.
     !> Saved coarse-level global state for swap/restore
     integer               :: sw_m, sw_n, sw_p
     type(int_bounds_info) :: sw_idwint(3), sw_idwbuff(3)
     logical               :: sw_acoustic_source
-    logical               :: sw_ab_active
 
     !> IGR sigma-state bounce (igr only): the fine solve reuses the module jac/jac_old arrays at fine indices (the extent guard
     !! keeps fine bounds inside), so the coarse contents - jac_old is the Jacobi warm start persisting across steps - are saved here

@@ -343,8 +343,6 @@ _CANARY_TRACES = frozenset(
 # a pinned cap) can reach them. The value is max over the active dimensions of min((glb_ext+1)/ref_ratio, (local_ext+1)/ref_ratio) with the ppn ranks split
 # along x; a pin that changed a box set would fail its golden, which is the gate for every entry here.
 AMR_PINNED_CAPS = {
-    "Kernel -> 2D -> active_box -> AMR": 64,
-    "Kernel -> 2D -> active_box -> AMR -> dynamic regrid": 64,
     "AMR -> 1D -> static block": 32,
     "AMR -> 1D -> static block ref_ratio 4": 16,
     "AMR -> 1D -> dynamic regrid": 32,
@@ -4396,134 +4394,6 @@ def list_cases() -> typing.List[TestCaseBuilder]:
         cases.append(define_case_d(stack, "", {}))
         stack.pop()
 
-        # 3D active_box: localized central blast with a uniform ambient exterior so
-        # the active-box initialization detects a strict subset of the domain
-        # (corner cell (0,0,0) is ambient; blast occupies the central ~12 cells/dim).
-        # The box grows by buff_size=4 cells/side each step, so on a 48^3 grid with
-        # init box ~[14:33] it is still a strict subset after t_step_stop=3 grows
-        # (-> ~[2:45]); the save at step 3 therefore pins a genuinely bounded state.
-        # Requires single rank and the model_eqns=2 / WENO5 / HLLC / direct /
-        # RK3 configuration that gates the optimization (all BASE_CFG defaults).
-        stack.push(
-            "Kernel -> 3D -> active_box",
-            {
-                "m": 47,
-                "n": 47,
-                "p": 47,
-                "dt": 0.005,
-                "t_step_stop": 3,
-                "t_step_save": 3,
-                "x_domain%beg": 0.0,
-                "x_domain%end": 1.0,
-                "y_domain%beg": 0.0,
-                "y_domain%end": 1.0,
-                "z_domain%beg": 0.0,
-                "z_domain%end": 1.0,
-                "bc_x%beg": -3,
-                "bc_x%end": -3,
-                "bc_y%beg": -3,
-                "bc_y%end": -3,
-                "bc_z%beg": -3,
-                "bc_z%end": -3,
-                "num_patches": 2,
-                "num_fluids": 1,
-                # Patch 1: uniform ambient that fills the whole domain.
-                # Corner cell (0,0,0) samples this state as ab_ambient.
-                "patch_icpp(1)%geometry": 9,
-                "patch_icpp(1)%x_centroid": 0.5,
-                "patch_icpp(1)%length_x": 1.0,
-                "patch_icpp(1)%y_centroid": 0.5,
-                "patch_icpp(1)%length_y": 1.0,
-                "patch_icpp(1)%z_centroid": 0.5,
-                "patch_icpp(1)%length_z": 1.0,
-                "patch_icpp(1)%vel(1)": 0.0,
-                "patch_icpp(1)%vel(2)": 0.0,
-                "patch_icpp(1)%vel(3)": 0.0,
-                "patch_icpp(1)%alpha_rho(1)": 0.125,
-                "patch_icpp(1)%pres": 0.1,
-                "patch_icpp(1)%alpha(1)": 1.0,
-                # Patch 2: high-pressure blast at center (~12 cells/dim out of 48).
-                # alter_patch(1)=T overwrites the ambient in the blast region only.
-                "patch_icpp(2)%geometry": 9,
-                "patch_icpp(2)%x_centroid": 0.5,
-                "patch_icpp(2)%length_x": 0.25,
-                "patch_icpp(2)%y_centroid": 0.5,
-                "patch_icpp(2)%length_y": 0.25,
-                "patch_icpp(2)%z_centroid": 0.5,
-                "patch_icpp(2)%length_z": 0.25,
-                "patch_icpp(2)%alter_patch(1)": "T",
-                "patch_icpp(2)%vel(1)": 0.0,
-                "patch_icpp(2)%vel(2)": 0.0,
-                "patch_icpp(2)%vel(3)": 0.0,
-                "patch_icpp(2)%alpha_rho(1)": 1.0,
-                "patch_icpp(2)%pres": 1.0,
-                "patch_icpp(2)%alpha(1)": 1.0,
-                "active_box": "T",
-            },
-        )
-        cases.append(define_case_d(stack, "", {}))
-        stack.pop()
-
-        # active_box + AMR (np=1 by active_box's own MPI gate): a 2D central blast with the
-        # block strictly inside the initial active window. t_step_stop=10 keeps the window
-        # partial for the whole run (it grows buff_size cells/step and self-disables at full
-        # domain), so every step exercises the windowed coarse advance around a live fine
-        # block. ab+AMR and plain AMR agree to round-off, including across the self-disable
-        # transition; the containment abort and the regrid window-clamp are covered by
-        # negative tests rather than this golden.
-        stack.push(
-            "Kernel -> 2D -> active_box -> AMR",
-            {
-                "m": 127,
-                "n": 127,
-                "p": 0,
-                "dt": 5.0e-5,
-                "t_step_stop": 10,
-                "t_step_save": 10,
-                "num_patches": 2,
-                "mixture_err": "F",
-                "mapped_weno": "T",
-                "x_domain%beg": 0.0,
-                "x_domain%end": 1.0,
-                "y_domain%beg": 0.0,
-                "y_domain%end": 1.0,
-                "bc_x%beg": -3,
-                "bc_x%end": -3,
-                "bc_y%beg": -3,
-                "bc_y%end": -3,
-                "patch_icpp(1)%geometry": 3,
-                "patch_icpp(1)%x_centroid": 0.5,
-                "patch_icpp(1)%y_centroid": 0.5,
-                "patch_icpp(1)%length_x": 1.0,
-                "patch_icpp(1)%length_y": 1.0,
-                "patch_icpp(1)%vel(1)": 0.0,
-                "patch_icpp(1)%vel(2)": 0.0,
-                "patch_icpp(1)%pres": 1.0,
-                "patch_icpp(1)%alpha_rho(1)": 1.0,
-                "patch_icpp(1)%alpha(1)": 1.0,
-                "patch_icpp(2)%geometry": 2,
-                "patch_icpp(2)%x_centroid": 0.5,
-                "patch_icpp(2)%y_centroid": 0.5,
-                "patch_icpp(2)%radius": 0.08,
-                "patch_icpp(2)%vel(1)": 0.0,
-                "patch_icpp(2)%vel(2)": 0.0,
-                "patch_icpp(2)%pres": 10.0,
-                "patch_icpp(2)%alpha_rho(1)": 2.0,
-                "patch_icpp(2)%alpha(1)": 1.0,
-                "patch_icpp(2)%alter_patch(1)": "T",
-                "active_box": "T",
-                "amr": "T",
-                "amr_block_beg(1)": 52,
-                "amr_block_beg(2)": 52,
-                "amr_block_end(1)": 75,
-                "amr_block_end(2)": 75,
-                "amr_regrid_int": 0,
-            },
-        )
-        cases.append(define_case_d(stack, "", {}))
-        cases.append(define_case_d(stack, "dynamic regrid", {"amr_regrid_int": 5, "amr_tag_eps": 0.02, "amr_buf": 3}))
-        stack.pop()
-
     kernel_golden_tests()
 
     def amr_golden_tests():
@@ -4533,7 +4403,7 @@ def list_cases() -> typing.List[TestCaseBuilder]:
         subcycling, multi-fluid reflux) to the full matrix: multi-level nesting, np=1/2
         distributed regrid + seam-halo + reflux, restart round-trips (serial and parallel_io),
         and per-physics coverage (viscous, Euler-Euler and QBMM bubbles, chemistry,
-        hypoelastic, immersed boundaries, active_box). Each case carries an inline comment
+        hypoelastic, immersed boundaries). Each case carries an inline comment
         stating exactly what code path it guards and why its parameters are chosen.
 
         Extent guard (per axis): amr_ref_ratio**level * (amr_block_end - amr_block_beg + 1) - 1

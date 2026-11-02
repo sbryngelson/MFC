@@ -53,13 +53,12 @@ module m_start_up
     use m_body_forces
     use m_sim_helpers
     use m_igr
-    use m_active_box
     use m_load_weight
     use m_load_balance, only: s_load_balance_rebalance
     use m_sfc_partition
     use m_amr, only: amr_maxc_fit, s_initialize_amr_module, s_populate_amr_fine, s_finalize_amr_module, s_amr_setup_ib, &
         & s_l0_tiles_init, s_l0_tiles_finalize, s_l0_scatter_tiles_to_coarse
-    use m_amr_regrid, only: s_amr_regrid, s_amr_check_active_box_containment
+    use m_amr_regrid, only: s_amr_regrid
     use m_amr_restart, only: s_write_amr_restart, s_read_amr_restart
     use m_amr_registers, only: s_initialize_amr_registers, s_finalize_amr_registers
     use m_constants, only: model_eqns_6eq, time_stepper_rk1, time_stepper_rk2, time_stepper_rk3, recon_type_weno, recon_type_muscl
@@ -935,7 +934,6 @@ contains
 
         call s_initialize_rhs_module()
 
-        if (active_box) call s_initialize_active_box_module()
         call s_initialize_load_weight_module()
         call s_initialize_sfc_partition_module()
 
@@ -1058,10 +1056,6 @@ contains
         if (bubbles_lagrange) call s_initialize_bubbles_EL_module(q_cons_ts(1)%vf, bc_type)
 
         if (hypoelasticity) call s_initialize_hypoelastic_module()
-
-        if (active_box) call s_initialize_active_box(q_cons_ts(1)%vf)
-        ! AMR blocks must sit strictly inside the active window (named abort otherwise)
-        if (active_box .and. amr) call s_amr_check_active_box_containment()
 
     end subroutine s_initialize_modules
 
@@ -1240,7 +1234,6 @@ contains
         call s_finalize_derived_variables_module()
         call s_finalize_data_output_module()
         call s_finalize_rhs_module()
-        if (active_box) call s_finalize_active_box_module()
         call s_finalize_load_weight_module()
         call s_finalize_sfc_partition_module()
         if (igr) then

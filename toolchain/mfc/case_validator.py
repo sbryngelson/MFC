@@ -273,23 +273,6 @@ PHYSICS_DOCS = {
         "references": ["Papanastasiou87"],
         "docs_section": "sec-non-newtonian",
     },
-    # Active-Box Optimization
-    "check_active_box": {
-        "title": "Active-Box RHS Restriction",
-        "category": "Active-Box Optimization",
-        "explanation": (
-            "Causal-envelope active-box optimization restricts the RHS compute window to the "
-            "causal support of the initial disturbance, assuming a static uniform exterior. "
-            "Requires WENO reconstruction (recon_type = 1) and SSP-RK3 time stepping (time_stepper = 3). "
-            "Incompatible with immersed boundaries, acoustic sources, body forces, "
-            "Euler-Euler bubbles, Lagrangian bubbles, phase change (relax), and the IGR solver. "
-            "Also incompatible with viscous (diffusion has no finite domain of dependence), "
-            "surface_tension (nonlocal curvature coupling), cyl_coord (geometric source terms "
-            "are nonzero for uniform flow, so the exterior is not static), "
-            "hypoelasticity (stress source terms), "
-            "mhd (magnetic field source terms), and chemistry (reactive source terms)."
-        ),
-    },
     # Adaptive Mesh Refinement
     "check_amr": {
         "title": "Adaptive Mesh Refinement (AMR)",
@@ -336,9 +319,6 @@ PHYSICS_DOCS = {
             "cleaning spreads but cannot remove; divergence-preserving B prolongation/reflux is future "
             "work). 1D MHD/RMHD IS supported: div(B) = 0 by construction there (Bx is the uniform Bx0 "
             "parameter; By/Bz reflux and restrict as ordinary conserved scalars). "
-            "active_box is supported (single-rank, per active_box's own MPI gate): blocks must "
-            "sit strictly inside the growing active window (init abort + regrid clamp), and the "
-            "fine advance treats its whole block as active. "
             "Dynamic regrid (amr_regrid_int > 0) requires amr_tag_eps > 0 and amr_buf >= 1; amr_buf < amr_regrid_int "
             "is allowed but advisory-warned (at CFL near 1 a feature can outrun the tag buffer between regrids - the "
             "runtime [amr-cad] report counts tags that escaped the previous coverage; keep it at 0). "
@@ -1925,49 +1905,6 @@ class CaseValidator:
                 self.prohibit(element_polygon_ratio is None, f"acoustic({jstr})%element_polygon_ratio must be specified for support = 11 (3D transducer)")
                 self.prohibit(element_polygon_ratio is not None and element_polygon_ratio <= 0, f"acoustic({jstr})%element_polygon_ratio must be positive for support = 11")
 
-    def check_active_box(self):
-        """Checks active-box optimization compatibility (simulation)"""
-        active_box = self.get("active_box", "F") == "T"
-
-        if not active_box:
-            return
-
-        recon_type = self.get("recon_type")
-        time_stepper = self.get("time_stepper")
-        ib = self.get("ib", "F") == "T"
-        acoustic_source = self.get("acoustic_source", "F") == "T"
-        # mirrors the Fortran derivation (m_start_up.fpp): bf_spatial_support alone also enables it
-        bodyForces = any(self.get(f"bf_{d}", "F") == "T" for d in ["x", "y", "z"]) or self.get("bf_spatial_support", "F") == "T"
-        bubbles_lagrange = self.get("bubbles_lagrange", "F") == "T"
-        relax = self.get("relax", "F") == "T"
-        igr = self.get("igr", "F") == "T"
-        viscous = self.get("viscous", "F") == "T"
-        surface_tension = self.get("surface_tension", "F") == "T"
-        cyl_coord = self.get("cyl_coord", "F") == "T"
-        hypoelasticity = self.get("hypoelasticity", "F") == "T"
-        mhd = self.get("mhd", "F") == "T"
-        chemistry = self.get("chemistry", "F") == "T"
-        bubbles_euler = self.get("bubbles_euler", "F") == "T"
-        synthetic_turbulence = self.get("synthetic_turbulence", "F") == "T"
-
-        self.prohibit(recon_type is not None and recon_type != 1, "active_box requires WENO reconstruction (recon_type = 1)")
-        # unset is a failure too: the Fortran default is the dflt_int sentinel, which is not 3
-        self.prohibit(time_stepper != 3, "active_box requires time_stepper = 3 (SSP-RK3)")
-        self.prohibit(ib, "active_box is incompatible with immersed boundaries")
-        self.prohibit(acoustic_source, "active_box is incompatible with acoustic sources")
-        self.prohibit(bodyForces, "active_box is incompatible with body forces")
-        self.prohibit(bubbles_lagrange, "active_box is incompatible with Lagrangian bubbles")
-        self.prohibit(relax, "active_box is incompatible with phase change")
-        self.prohibit(igr, "active_box is incompatible with the IGR solver")
-        self.prohibit(viscous, "active_box is incompatible with viscous (no finite domain of dependence for the frozen exterior)")
-        self.prohibit(surface_tension, "active_box is incompatible with surface_tension (nonlocal curvature coupling violates the static-uniform-exterior assumption)")
-        self.prohibit(cyl_coord, "active_box is incompatible with cyl_coord (geometric source terms are nonzero for uniform flow; exterior is not static)")
-        self.prohibit(hypoelasticity, "active_box is incompatible with hypoelasticity (stress source terms violate the static-uniform-exterior assumption)")
-        self.prohibit(mhd, "active_box is incompatible with mhd (magnetic field source terms violate the static-uniform-exterior assumption)")
-        self.prohibit(chemistry, "active_box is incompatible with chemistry (reactive source terms violate the static-uniform-exterior assumption)")
-        self.prohibit(bubbles_euler, "active_box is incompatible with bubbles_euler (cell-local bubble sources in a non-equilibrium ambient violate the static-uniform-exterior assumption)")
-        self.prohibit(synthetic_turbulence, "active_box is incompatible with synthetic turbulence (the volumetric forcing writes the whole domain every step, so the exterior is not static)")
-
     def check_load_balance(self):
         """Checks load_balance requirements (simulation)"""
         # PHYSICS_DOCS: load_balance requires parallel_io=T and more than one MPI rank.
@@ -2078,7 +2015,6 @@ class CaseValidator:
             self.prohibit(igr, "amr_subcycle does not support IGR")
             self.prohibit(self.get("chemistry", "F") == "T", "amr_subcycle does not support chemistry")
             self.prohibit(self.get("bubbles_lagrange", "F") == "T", "amr_subcycle does not support Lagrangian bubbles")
-            self.prohibit(self.get("active_box", "F") == "T", "amr_subcycle does not support active_box")
             # store slots are sized for full blocks; tiles exhaust device memory at the first subcycled regrid
             self.prohibit(self.get("amr_tile_cluster", "F") == "T", "amr_subcycle does not support amr_tile_cluster")
             moving = [self.get(f"patch_ib({i})%moving_ibm", 0) for i in range(1, 1001) if self.get(f"patch_ib({i})%moving_ibm") is not None]
@@ -3448,7 +3384,6 @@ class CaseValidator:
         self.check_mhd_simulation()
         self.check_igr_simulation()
         self.check_acoustic_source()
-        self.check_active_box()
         self.check_amr()
         self.check_sfc_partition()
         self.check_load_balance()

@@ -12,7 +12,6 @@ module m_load_weight
     use m_constants, only: K_bub, K_ib, K_pc
     use m_mpi_proxy
     use m_mpi_common
-    use m_active_box, only: ab_active, ab_x, ab_y, ab_z
     use m_bubbles_EL, only: q_beta
     use m_ibm, only: ib_markers
     use m_phase_change, only: pc_iter_count
@@ -45,31 +44,18 @@ contains
 
     end subroutine s_finalize_load_weight_module
 
-    !> Base cost 1 everywhere; cells outside the active box get 0 (frozen).
+    !> Base cost 1 everywhere plus the bubble, IB and phase-change contributors.
     impure subroutine s_compute_load_weight()
 
         integer :: j, k, l
-        integer :: jlo, jhi, klo, khi, llo, lhi
 
         if (.not. load_weight_wrt .and. .not. sfc_partition_wrt) return
-
-        if (ab_active) then
-            jlo = ab_x%beg; jhi = ab_x%end
-            klo = ab_y%beg; khi = ab_y%end
-            llo = ab_z%beg; lhi = ab_z%end
-        else
-            jlo = 0; jhi = m; klo = 0; khi = n; llo = 0; lhi = p
-        end if
 
         $:GPU_PARALLEL_LOOP(collapse=3)
         do l = 0, p
             do k = 0, n
                 do j = 0, m
-                    if (j >= jlo .and. j <= jhi .and. k >= klo .and. k <= khi .and. l >= llo .and. l <= lhi) then
-                        load_weight%sf(j, k, l) = 1._wp
-                    else
-                        load_weight%sf(j, k, l) = 0._wp
-                    end if
+                    load_weight%sf(j, k, l) = 1._wp
                 end do
             end do
         end do
@@ -90,9 +76,7 @@ contains
             do l = 0, p
                 do k = 0, n
                     do j = 0, m
-                        if (j >= jlo .and. j <= jhi .and. k >= klo .and. k <= khi .and. l >= llo .and. l <= lhi) then
-                            load_weight%sf(j, k, l) = load_weight%sf(j, k, l) + K_bub*(1.0_wp - real(q_beta(1)%sf(j, k, l), wp))
-                        end if
+                        load_weight%sf(j, k, l) = load_weight%sf(j, k, l) + K_bub*(1.0_wp - real(q_beta(1)%sf(j, k, l), wp))
                     end do
                 end do
             end do
@@ -105,10 +89,8 @@ contains
             do l = 0, p
                 do k = 0, n
                     do j = 0, m
-                        if (j >= jlo .and. j <= jhi .and. k >= klo .and. k <= khi .and. l >= llo .and. l <= lhi) then
-                            if (ib_markers%sf(j, k, l) /= 0) then
-                                load_weight%sf(j, k, l) = load_weight%sf(j, k, l) + real(K_ib, stp)
-                            end if
+                        if (ib_markers%sf(j, k, l) /= 0) then
+                            load_weight%sf(j, k, l) = load_weight%sf(j, k, l) + real(K_ib, stp)
                         end if
                     end do
                 end do
@@ -122,9 +104,7 @@ contains
             do l = 0, p
                 do k = 0, n
                     do j = 0, m
-                        if (j >= jlo .and. j <= jhi .and. k >= klo .and. k <= khi .and. l >= llo .and. l <= lhi) then
-                            load_weight%sf(j, k, l) = load_weight%sf(j, k, l) + real(K_pc*real(pc_iter_count(j, k, l), wp), stp)
-                        end if
+                        load_weight%sf(j, k, l) = load_weight%sf(j, k, l) + real(K_pc*real(pc_iter_count(j, k, l), wp), stp)
                     end do
                 end do
             end do

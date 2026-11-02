@@ -33,13 +33,12 @@ module m_amr_regrid
         & s_amr_fill_wave_done, amr_fw_sq, amr_fw_rq, amr_fw_dev
     use m_amr_xchg_audit, only: XA_F4_SND, XA_F4_RCV
     use m_acoustic_src, only: acoustic_supp_lo, acoustic_supp_hi
-    use m_active_box, only: ab_x, ab_y, ab_z, ab_active
     use m_bubbles_EL, only: s_lag_cloud_bbox_local
 
     implicit none
 
     private
-    public :: s_amr_regrid, s_amr_check_seam_topology, s_amr_check_active_box_containment
+    public :: s_amr_regrid, s_amr_check_seam_topology
 
     !> Lagrangian bubble-cloud exclusion support: padded global coarse-index bbox (positions + mapCells smearing + stencil headroom
     !! [+ drift margin at regrid]). Blocks and regrid boxes stay clear: a bubble inside a block loses two-way coupling (fine advance
@@ -288,34 +287,6 @@ contains
         end if
 
     end subroutine s_amr_clip_box_from_supp
-
-    !> active_box + AMR containment: every active block must sit strictly inside the active window (one-cell margin). Two reasons:
-    !! the windowed coarse RK update would silently drop a reflux correction at a face cell outside the window (conservation leak),
-    !! and the coarse RHS only computes fluxes inside it. The window only grows (s_grow_active_box monotone, self-disabling at full
-    !! domain), so containment set at init and re-established each regrid holds between. Collective (same window/block metadata on
-    !! all ranks).
-    impure subroutine s_amr_check_active_box_containment()
-
-        integer :: k
-        logical :: ok
-
-        ! ab_active is only true at num_procs == 1 (m_active_box disables itself under MPI), so ab and block indices share
-        ! the same (global == local) index space
-
-        if ((.not. amr) .or. (.not. ab_active)) return
-        do k = 1, amr_num_blocks
-            ! L0 tiles span the base grid by construction; the containment rule is for fine blocks
-            if (amr_block_level(k) == 0) cycle
-            ok = all((amr_region_lo_all(:,k) > [ab_x%beg, ab_y%beg, ab_z%beg] .and. amr_region_hi_all(:,k) < [ab_x%end, ab_y%end, &
-                     & ab_z%end]) .or. .not. amr_dim)
-            if (.not. ok) then
-                call s_mpi_abort('amr with active_box: an AMR block is not strictly inside the active ' &
-                                 & // 'window; place the initial block (with a one-cell margin) inside the ' &
-                                 & // 'initial non-ambient region plus buff_size')
-            end if
-        end do
-
-    end subroutine s_amr_check_active_box_containment
 
     !> This rank's own tagged cells as global level-0 coordinates. Each rank scans only its interior (0:m, 0:n, 0:p), which the
     !! level-0 decomposition makes disjoint, so no global cell is emitted twice and a SUM reduction over these lists counts every
@@ -723,16 +694,6 @@ contains
 
     end subroutine s_amr_regrid_snap_boxes
 
-    !> Clip a box to strictly inside the active window (one-cell margin) in every active dimension.
-    pure subroutine s_amr_clip_to_active_box(lo, hi)
-
-        integer, intent(inout) :: lo(3), hi(3)
-
-        lo = max(lo, merge([ab_x%beg, ab_y%beg, ab_z%beg] + 1, lo, amr_dim))
-        hi = min(hi, merge([ab_x%end, ab_y%end, ab_z%end] - 1, hi, amr_dim))
-
-    end subroutine s_amr_clip_to_active_box
-
     !> Box minus a body block: append to out(n+1:) the pieces of `box` that stay `gap` empty coarse cells clear of [glo:ghi], and
     !! `gap` clear of each other. Per active dimension the pieces beyond the gap-grown block are cut off (spanning the part of `box`
     !! not yet cut), then the remainder is narrowed to the block's own span, so the next dimension's pieces start `gap` cells from
@@ -970,10 +931,6 @@ contains
             ! only shrinks, so boxes stay disjoint; empties drop below
             if (acoustic_source) call s_amr_clip_box_from_sources(lo, hi)
             if (bubbles_lagrange .and. lag_supp_on) call s_amr_clip_box_from_supp(lo, hi, lag_supp_lo, lag_supp_hi)
-            ! active_box: boxes stay strictly inside the active window (the windowed coarse update would drop reflux corrections
-            ! at faces outside it). Tags cannot arise outside (frozen-ambient exterior), so only the amr_buf padding is ever cut,
-            ! and the cut cells are ambient. np=1 only (ab_active is false under MPI).
-            if (ab_active) call s_amr_clip_to_active_box(lo, hi)
             if (any(hi < lo)) cycle  ! confined to the domain margin
             k = k + 1; boxes(k)%lo = lo; boxes(k)%hi = hi
         end do
@@ -1006,7 +963,6 @@ contains
                     lo = boxes(k)%lo; hi = boxes(k)%hi
                     if (acoustic_source) call s_amr_clip_box_from_sources(lo, hi)
                     if (bubbles_lagrange .and. lag_supp_on) call s_amr_clip_box_from_supp(lo, hi, lag_supp_lo, lag_supp_hi)
-                    if (ab_active) call s_amr_clip_to_active_box(lo, hi)
                     if (any(lo /= boxes(k)%lo) .or. any(hi /= boxes(k)%hi)) then
                         call s_mpi_abort('amr regrid: a block must contain an immersed body AND stay ' &
                                          & // 'clear of an acoustic source support / Lagrangian bubble cloud - the ' &
