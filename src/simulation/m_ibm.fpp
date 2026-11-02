@@ -1177,8 +1177,8 @@ contains
         type(ghost_point)            :: gp
         integer                      :: q, i, j, k, ii, jj, kk  !< Grid indexes and iterators
 
-        $:GPU_PARALLEL_LOOP(private='[q, i, j, k, ii, jj, kk, dist, gp, interp_coeffs, fluid_mask]', &
-                            & copyin='[ib_markers%sf]', present='[ghost_points]')
+        $:GPU_PARALLEL_LOOP(private='[q, i, j, k, ii, jj, kk, dist, gp, interp_coeffs, fluid_mask]', copyin='[ib_markers%sf]', &
+                            & present='[ghost_points]')
         do q = 1, num_gps
             gp = ghost_points(q)
             ! Get the interpolation points

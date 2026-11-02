@@ -318,11 +318,11 @@ contains
     end subroutine s_amr_sort_by_key
 
     !> Fine-level distribution map: assigns each active block a single owner rank by chains-on-chains balancing of fine-work weight
-    !! in Morton order of the block's low corner (a space-filling-curve cut at block granularity).
-    !! Fine work = measured coarse-footprint cost (s_amr_block_cost) x the level's refinement factor per active dim, so blocks
-    !! concentrating IB or phase-change work weigh more than equal-size quiescent ones. The cost vector is allreduced (one
-    !! collective; every rank must call this), after which the assignment is deterministic and identical on every rank.
-    !! s_set_amr_fine_geometry applies it as amr_rank_owns_block = (amr_block_owner(amr_cur) == proc_rank).
+    !! in Morton order of the block's low corner (a space-filling-curve cut at block granularity). Fine work = measured
+    !! coarse-footprint cost (s_amr_block_cost) x the level's refinement factor per active dim, so blocks concentrating IB or
+    !! phase-change work weigh more than equal-size quiescent ones. The cost vector is allreduced (one collective; every rank must
+    !! call this), after which the assignment is deterministic and identical on every rank. s_set_amr_fine_geometry applies it as
+    !! amr_rank_owns_block = (amr_block_owner(amr_cur) == proc_rank).
     !> Refresh the owned-block list if any owner write has happened since the last refresh. Rebuilt lazily rather than in
     !! s_amr_assign_block_owners because that routine is not the only writer of amr_block_owner.
     impure subroutine s_amr_refresh_my_blocks()

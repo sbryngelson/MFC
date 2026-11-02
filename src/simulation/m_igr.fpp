@@ -245,82 +245,91 @@ contains
         end if
 
         do q = 1, num_iters
-            $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l, rho_lx, rho_rx, rho_ly, rho_ry, rho_lz, rho_rz, fd_coeff, ibm, jl, &
-                                & kl, ll]')
-            do l = 0, p
-                do k = 0, n
-                    do j = 0, m
-                        ! batched AMR slab: update only the member interiors, so the ghost shells between members keep the
-                        ! frozen parent sigma exactly as a single block's shell does and the members stay decoupled
-                        if (amr_in_fine_advance .and. amr_bat_n > 1) then
-                            jl = j; kl = k; ll = l
-                            select case (amr_bat_sd)
-                            case (1); ibm = j/amr_bat_w + 1; jl = j - (ibm - 1)*amr_bat_w
-                            case (2); ibm = k/amr_bat_w + 1; kl = k - (ibm - 1)*amr_bat_w
-                            case default; ibm = l/amr_bat_w + 1; ll = l - (ibm - 1)*amr_bat_w
-                            end select
-                            if (ibm > amr_bat_n) cycle
-                            if (jl > amr_bat_mext(1, ibm) .or. kl > amr_bat_mext(2, ibm) .or. ll > amr_bat_mext(3, ibm)) cycle
-                        end if
-                        rho_lx = 0._wp
-                        rho_rx = 0._wp
-                        rho_ly = 0._wp
-                        rho_ry = 0._wp
-                        rho_lz = 0._wp
-                        rho_rz = 0._wp
-                        fd_coeff = 0._wp
+            ! a batched AMR slab updates only the member interiors, so the ghost shells between members keep the frozen parent
+            ! sigma and the members stay decoupled; the plain kernel stays free of that test
+            #:for BAT in [False, True]
+                #:set PRIV = '[j, k, l, rho_lx, rho_rx, rho_ly, rho_ry, rho_lz, rho_rz, fd_coeff' &
+                    & + (', ibm, jl, kl, ll]' if BAT else ']')
+                if (${'' if BAT else '.not. '}$(amr_in_fine_advance .and. amr_bat_n > 1)) then
+                    $:GPU_PARALLEL_LOOP(collapse=3, private=PRIV)
+                    do l = 0, p
+                        do k = 0, n
+                            do j = 0, m
+                                #:if BAT
+                                    jl = j; kl = k; ll = l
+                                    select case (amr_bat_sd)
+                                    case (1); ibm = j/amr_bat_w + 1; jl = j - (ibm - 1)*amr_bat_w
+                                    case (2); ibm = k/amr_bat_w + 1; kl = k - (ibm - 1)*amr_bat_w
+                                    case default; ibm = l/amr_bat_w + 1; ll = l - (ibm - 1)*amr_bat_w
+                                    end select
+                                    if (ibm > amr_bat_n) cycle
+                                    if (jl > amr_bat_mext(1, ibm) .or. kl > amr_bat_mext(2, ibm) .or. ll > amr_bat_mext(3, &
+                                        & ibm)) cycle
+                                #:endif
+                                rho_lx = 0._wp
+                                rho_rx = 0._wp
+                                rho_ly = 0._wp
+                                rho_ry = 0._wp
+                                rho_lz = 0._wp
+                                rho_rz = 0._wp
+                                fd_coeff = 0._wp
 
-                        $:GPU_LOOP(parallelism='[seq]')
-                        do i = 1, num_fluids
-                            rho_lx = rho_lx + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j - 1, k, l), kind=wp)/2._wp
-                            rho_rx = rho_rx + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j + 1, k, l), kind=wp)/2._wp
-                            rho_ly = rho_ly + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j, k - 1, l), kind=wp)/2._wp
-                            rho_ry = rho_ry + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j, k + 1, l), kind=wp)/2._wp
-                            if (p > 0) then
-                                rho_lz = rho_lz + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j, k, l - 1), kind=wp)/2._wp
-                                rho_rz = rho_rz + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j, k, l + 1), kind=wp)/2._wp
-                            end if
-                            fd_coeff = fd_coeff + q_cons_vf(i)%sf(j, k, l)
+                                $:GPU_LOOP(parallelism='[seq]')
+                                do i = 1, num_fluids
+                                    rho_lx = rho_lx + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j - 1, k, l), kind=wp)/2._wp
+                                    rho_rx = rho_rx + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j + 1, k, l), kind=wp)/2._wp
+                                    rho_ly = rho_ly + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j, k - 1, l), kind=wp)/2._wp
+                                    rho_ry = rho_ry + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j, k + 1, l), kind=wp)/2._wp
+                                    if (p > 0) then
+                                        rho_lz = rho_lz + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j, k, l - 1), &
+                                                               & kind=wp)/2._wp
+                                        rho_rz = rho_rz + real(q_cons_vf(i)%sf(j, k, l) + q_cons_vf(i)%sf(j, k, l + 1), &
+                                                               & kind=wp)/2._wp
+                                    end if
+                                    fd_coeff = fd_coeff + q_cons_vf(i)%sf(j, k, l)
+                                end do
+
+                                fd_coeff = 1._wp/fd_coeff + alf_igr*((1._wp/dx(j)**2._wp)*(1._wp/rho_lx + 1._wp/rho_rx) &
+                                                                     & + (1._wp/dy(k)**2._wp)*(1._wp/rho_ly + 1._wp/rho_ry))
+
+                                if (num_dims == 3) then
+                                    fd_coeff = fd_coeff + alf_igr*(1._wp/dz(l)**2._wp)*(1._wp/rho_lz + 1._wp/rho_rz)
+                                end if
+
+                                if (igr_iter_solver == 1) then  ! Jacobi iteration
+                                    if (num_dims == 3) then
+                                        jac(j, k, l) = real((alf_igr/fd_coeff)*((1._wp/dx(j)**2._wp)*(jac_old(j - 1, k, &
+                                            & l)/rho_lx + jac_old(j + 1, k, l)/rho_rx) + (1._wp/dy(k)**2._wp)*(jac_old(j, k - 1, &
+                                            & l)/rho_ly + jac_old(j, k + 1, l)/rho_ry) + (1._wp/dz(l)**2._wp)*(jac_old(j, k, &
+                                            & l - 1)/rho_lz + jac_old(j, k, l + 1)/rho_rz)) + real(jac_rhs(j, k, l), &
+                                            & kind=wp)/fd_coeff, kind=stp)
+                                    else
+                                        jac(j, k, l) = real((alf_igr/fd_coeff)*((1._wp/dx(j)**2._wp)*(real(jac_old(j - 1, k, l), &
+                                            & kind=wp)/rho_lx + real(jac_old(j + 1, k, l), &
+                                            & kind=wp)/rho_rx) + (1._wp/dy(k)**2._wp)*(real(jac_old(j, k - 1, l), &
+                                            & kind=wp)/rho_ly + real(jac_old(j, k + 1, l), kind=wp)/rho_ry)) + real(jac_rhs(j, k, &
+                                            & l), kind=wp)/fd_coeff, kind=stp)
+                                    end if
+                                else  ! Gauss Seidel iteration
+                                    if (num_dims == 3) then
+                                        jac(j, k, l) = real((alf_igr/fd_coeff)*((1._wp/dx(j)**2._wp)*(jac(j - 1, k, &
+                                            & l)/rho_lx + jac(j + 1, k, l)/rho_rx) + (1._wp/dy(k)**2._wp)*(jac(j, k - 1, &
+                                            & l)/rho_ly + jac(j, k + 1, l)/rho_ry) + (1._wp/dz(l)**2._wp)*(jac(j, k, &
+                                            & l - 1)/rho_lz + jac(j, k, l + 1)/rho_rz)) + real(jac_rhs(j, k, l), &
+                                            & kind=wp)/fd_coeff, kind=stp)
+                                    else
+                                        jac(j, k, l) = real((alf_igr/fd_coeff)*((1._wp/dx(j)**2._wp)*(jac(j - 1, k, &
+                                            & l)/rho_lx + jac(j + 1, k, l)/rho_rx) + (1._wp/dy(k)**2._wp)*(jac(j, k - 1, &
+                                            & l)/rho_ly + jac(j, k + 1, l)/rho_ry)) + real(jac_rhs(j, k, l), kind=wp)/fd_coeff, &
+                                            & kind=stp)
+                                    end if
+                                end if
+                            end do
                         end do
-
-                        fd_coeff = 1._wp/fd_coeff + alf_igr*((1._wp/dx(j)**2._wp)*(1._wp/rho_lx + 1._wp/rho_rx) + (1._wp/dy(k) &
-                                                             & **2._wp)*(1._wp/rho_ly + 1._wp/rho_ry))
-
-                        if (num_dims == 3) then
-                            fd_coeff = fd_coeff + alf_igr*(1._wp/dz(l)**2._wp)*(1._wp/rho_lz + 1._wp/rho_rz)
-                        end if
-
-                        if (igr_iter_solver == 1) then  ! Jacobi iteration
-                            if (num_dims == 3) then
-                                jac(j, k, l) = real((alf_igr/fd_coeff)*((1._wp/dx(j)**2._wp)*(jac_old(j - 1, k, &
-                                    & l)/rho_lx + jac_old(j + 1, k, l)/rho_rx) + (1._wp/dy(k)**2._wp)*(jac_old(j, k - 1, &
-                                    & l)/rho_ly + jac_old(j, k + 1, l)/rho_ry) + (1._wp/dz(l)**2._wp)*(jac_old(j, k, &
-                                    & l - 1)/rho_lz + jac_old(j, k, l + 1)/rho_rz)) + real(jac_rhs(j, k, l), kind=wp)/fd_coeff, &
-                                    & kind=stp)
-                            else
-                                jac(j, k, l) = real((alf_igr/fd_coeff)*((1._wp/dx(j)**2._wp)*(real(jac_old(j - 1, k, l), &
-                                    & kind=wp)/rho_lx + real(jac_old(j + 1, k, l), &
-                                    & kind=wp)/rho_rx) + (1._wp/dy(k)**2._wp)*(real(jac_old(j, k - 1, l), &
-                                    & kind=wp)/rho_ly + real(jac_old(j, k + 1, l), kind=wp)/rho_ry)) + real(jac_rhs(j, k, l), &
-                                    & kind=wp)/fd_coeff, kind=stp)
-                            end if
-                        else  ! Gauss Seidel iteration
-                            if (num_dims == 3) then
-                                jac(j, k, l) = real((alf_igr/fd_coeff)*((1._wp/dx(j)**2._wp)*(jac(j - 1, k, &
-                                    & l)/rho_lx + jac(j + 1, k, l)/rho_rx) + (1._wp/dy(k)**2._wp)*(jac(j, k - 1, &
-                                    & l)/rho_ly + jac(j, k + 1, l)/rho_ry) + (1._wp/dz(l)**2._wp)*(jac(j, k, &
-                                    & l - 1)/rho_lz + jac(j, k, l + 1)/rho_rz)) + real(jac_rhs(j, k, l), kind=wp)/fd_coeff, &
-                                    & kind=stp)
-                            else
-                                jac(j, k, l) = real((alf_igr/fd_coeff)*((1._wp/dx(j)**2._wp)*(jac(j - 1, k, &
-                                    & l)/rho_lx + jac(j + 1, k, l)/rho_rx) + (1._wp/dy(k)**2._wp)*(jac(j, k - 1, &
-                                    & l)/rho_ly + jac(j, k + 1, l)/rho_ry)) + real(jac_rhs(j, k, l), kind=wp)/fd_coeff, kind=stp)
-                            end if
-                        end if
                     end do
-                end do
-            end do
-            $:END_GPU_PARALLEL_LOOP()
+                    $:END_GPU_PARALLEL_LOOP()
+                end if
+            #:endfor
 
             ! AMR fine advance: the block's jac ghost shell holds frozen Dirichlet data prolonged
             ! from the converged coarse sigma (seeded by s_amr_igr_swap_sigma); the physical-BC/halo

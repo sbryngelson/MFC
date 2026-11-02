@@ -49,7 +49,7 @@ module m_constants
     integer, parameter  :: dflt_num_igr_warm_start_iters = 50  !< default number of iterations for IGR elliptic solve
     real(wp), parameter :: dflt_alf_factor = 10._wp            !< scaling factor for IGR alpha
     integer, parameter  :: gp_layers = 3                       !< Number of ghost point layers for IBM
-    real(wp), parameter :: K_ib = 2._wp  !< AMR block-owner cost per IB cell, relative to a fluid cell
+    real(wp), parameter :: K_ib = 2._wp                        !< AMR block-owner cost per IB cell, relative to a fluid cell
     !> AMR fine-level restart per-block header size, in integers: region box (6) + amr_block_level (1).
     !> The writer (m_amr:s_write_amr_restart) and BOTH readers (m_amr:s_read_amr_restart and
     !> m_data_input:s_read_amr_data) must agree on this layout - a mismatch silently misaligns every

@@ -817,9 +817,9 @@ contains
 
     end subroutine s_amr_fine_fine_drain
 
-    !> Flat-index decode shared by the fused exchange kernels (amr_device_pack): binary-search the plan prefix
-    !! for the transfer t that owns flat element e, then invert its linear buffer index into (i, g3, g2, g1). One text, so the
-    !! kernels cannot drift from each other or from the per-transfer index map.
+    !> Flat-index decode shared by the fused exchange kernels (amr_device_pack): binary-search the plan prefix for the transfer t
+    !! that owns flat element e, then invert its linear buffer index into (i, g3, g2, g1). One text, so the kernels cannot drift
+    !! from each other or from the per-transfer index map.
     #:def FX_DECODE()
         lo = t0; hi = t1
         do while (lo < hi)

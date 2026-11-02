@@ -86,7 +86,6 @@ module m_amr_registers
     integer(8) :: amr_ctab_epoch_built = -1_8
     integer    :: amr_ctab_nblk_built = -1
 
-
 contains
 
     #:def REG_GROW(A, L2, U2, L3, U3)

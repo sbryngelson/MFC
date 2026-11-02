@@ -284,8 +284,8 @@ contains
                                                 & i)*vel_L(norm_dir) + s_M*s_P*(qL_prim_rsx_vf(${SF('')}$, &
                                                 & i) - qR_prim_rsx_vf(${SF(' + 1')}$, i)))/(s_M - s_P)
                                 end do
-                                flux_src_rsx_vf(${SF('')}$, eqn_idx%adv%beg) = (s_M*vel_R(norm_dir) - s_P*vel_L(norm_dir))/(s_M &
-                                    & - s_P)
+                                flux_src_rsx_vf(${SF('')}$, &
+                                                & eqn_idx%adv%beg) = (s_M*vel_R(norm_dir) - s_P*vel_L(norm_dir))/(s_M - s_P)
 
                                 if (bubbles_euler) then
                                     ! From HLLC: Kills mass transport @ bubble gas density
@@ -332,8 +332,7 @@ contains
                                         end do
                                         flux_gsrc_rsx_vf(${SF('')}$, eqn_idx%mom%beg + 1) = -flux_rsx_vf(${SF('')}$, &
                                                          & eqn_idx%mom%end) + (s_M*pres_R - s_P*pres_L)/(s_M - s_P)
-                                        flux_gsrc_rsx_vf(${SF('')}$, eqn_idx%mom%end) = flux_rsx_vf(${SF('')}$, &
-                                                         & eqn_idx%mom%beg + 1)
+                                        flux_gsrc_rsx_vf(${SF('')}$, eqn_idx%mom%end) = flux_rsx_vf(${SF('')}$, eqn_idx%mom%beg + 1)
                                     end if
                                 #:endif
                             end do

@@ -625,9 +625,9 @@ contains
         integer, intent(in) :: t_step
         integer, intent(in) :: stage
         integer :: id
-        integer(kind=8) :: i, j, k, l, q                     !< Generic loop iterators
+        integer(kind=8) :: i, j, k, l, q  !< Generic loop iterators
         integer :: n_copy
-        integer :: copy_beg, copy_end                        !< q_prim_vf components refreshed from q_prim_qp
+        integer :: copy_beg, copy_end     !< q_prim_vf components refreshed from q_prim_qp
 
         ! RHS: halo exchange -> reconstruct -> Riemann solve -> flux difference -> source terms
 
@@ -1154,15 +1154,15 @@ contains
         type(vector_field), intent(inout) :: q_cons_vf
         type(vector_field), intent(inout) :: q_prim_vf
         logical, intent(in) :: is_hat_L
-        integer :: j, k, l, q  !< Loop iterators from original, meaning varies
+        integer :: j, k, l, q              !< Loop iterators from original, meaning varies
         integer :: k_loop, l_loop, q_loop  !< Standardized spatial loop iterators 0:m, 0:n, 0:p
         integer :: i_fluid_loop
         real(wp) :: inv_ds, flux_face1, flux_face2
         real(wp) :: advected_qty_val, pressure_val
         real(wp) :: G1_eff, G2_eff, pres_K, alpha_K, alpha_rho_K, blkmod_K
         real(wp) :: rhs_val
-        logical :: adv_fused  !< The vel_iface alpha*div(u) term rides in the flux-difference kernel
-        integer :: fadv_lo, fadv_hi  !< Its equation range there (empty when not fused)
+        logical :: adv_fused               !< The vel_iface alpha*div(u) term rides in the flux-difference kernel
+        integer :: fadv_lo, fadv_hi        !< Its equation range there (empty when not fused)
 
         adv_fused = adv_src_mode == adv_src_mode_vel_iface .and. hypo_nc_mode /= hypo_nc_mode_dual_pass .and. .not. (idir == 3 &
             & .and. grid_geometry == 3)

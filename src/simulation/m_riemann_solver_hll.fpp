@@ -123,8 +123,8 @@ contains
                                         & G_L, G_R, damage_L, damage_R, solid_partial_density_L, solid_partial_density_R, &
                                         & rho_avg, H_avg, c_avg, gamma_avg, ptilde_L, ptilde_R, vel_L_rms, vel_R_rms, &
                                         & vel_avg_rms, Ms_L, Ms_R, pres_SL, pres_SR, alpha_L_sum, alpha_R_sum, flux_tau_L, &
-                                        & flux_tau_R, vel_interface]', copyin='[norm_dir]', &
-                                        & firstprivate='[Re_size_loc1, Re_size_loc2, need_nc_vel]')
+                                        & flux_tau_R, vel_interface]', copyin='[norm_dir]', firstprivate='[Re_size_loc1, &
+                                        & Re_size_loc2, need_nc_vel]')
                     do l = ${Z_BND}$%beg, ${Z_BND}$%end
                         do k = ${Y_BND}$%beg, ${Y_BND}$%end
                             do j = ${X_BND}$%beg, ${X_BND}$%end
@@ -717,8 +717,7 @@ contains
                                         end do
                                         flux_gsrc_rsx_vf(${SF('')}$, eqn_idx%mom%beg + 1) = -flux_rsx_vf(${SF('')}$, &
                                                          & eqn_idx%mom%end) + (s_M*pres_R - s_P*pres_L)/(s_M - s_P)
-                                        flux_gsrc_rsx_vf(${SF('')}$, eqn_idx%mom%end) = flux_rsx_vf(${SF('')}$, &
-                                                         & eqn_idx%mom%beg + 1)
+                                        flux_gsrc_rsx_vf(${SF('')}$, eqn_idx%mom%end) = flux_rsx_vf(${SF('')}$, eqn_idx%mom%beg + 1)
                                     end if
                                 #:endif
                             end do
