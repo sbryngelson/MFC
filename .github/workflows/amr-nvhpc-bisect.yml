@@ -1,0 +1,77 @@
+name: AMR NVHPC OpenMP compile bisect
+on:
+  push:
+    branches: [amr-nvhpc-bisect]
+  workflow_dispatch:
+
+jobs:
+  bisect:
+    name: variant ${{ matrix.variant }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { variant: base, chunk: 0, cc: '' }
+          - { variant: cc80, chunk: 0, cc: '80' }
+          - { variant: strip1, chunk: 1, cc: '' }
+          - { variant: strip2, chunk: 2, cc: '' }
+          - { variant: strip3, chunk: 3, cc: '' }
+          - { variant: strip4, chunk: 4, cc: '' }
+          - { variant: strip5, chunk: 5, cc: '' }
+          - { variant: strip6, chunk: 6, cc: '' }
+          - { variant: strip7, chunk: 7, cc: '' }
+          - { variant: strip8, chunk: 8, cc: '' }
+    env:
+      NVHPC_IMAGE: nvcr.io/nvidia/nvhpc:26.3-devel-cuda_multi-ubuntu22.04
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache \
+            /usr/local/graalvm /usr/local/.ghcup /usr/local/share/chromium /usr/local/lib/node_modules
+          sudo docker image prune -af
+          sudo apt-get clean
+          df -h /
+      - uses: actions/checkout@v5
+      - name: Strip kernels (variant)
+        run: python3 .github/bisect/strip_kernels.py ${{ matrix.chunk }} 8
+      - name: Pull NVHPC container
+        run: |
+          for attempt in 1 2 3 4 5; do
+            docker pull "$NVHPC_IMAGE" && exit 0
+            sleep $((attempt * 30))
+          done
+          exit 1
+      - name: Start NVHPC container
+        run: |
+          docker run -d --name nvhpc --security-opt seccomp=unconfined \
+            -v "${{ github.workspace }}:/workspace" -w /workspace \
+            -e CC=nvc -e CXX=nvc++ -e FC=nvfortran \
+            -e OMPI_ALLOW_RUN_AS_ROOT=1 -e OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 -e PMIX_MCA_gds=hash \
+            -e OMPI_MCA_hwloc_base_binding_policy=none \
+            -e "FFLAGS=-tp=px -Kieee -noswitcherror" -e CFLAGS=-tp=px -e CXXFLAGS=-tp=px \
+            ${{ matrix.cc != '' && format('-e MFC_CUDA_CC={0}', matrix.cc) || '' }} \
+            "$NVHPC_IMAGE" sleep infinity
+      - name: Setup NVHPC
+        run: |
+          docker exec nvhpc bash -c '
+            set -e
+            apt-get update -y
+            apt-get install -y cmake python3 python3-venv python3-pip libfftw3-dev libhdf5-dev hdf5-tools git
+            git config --global --add safe.directory /workspace
+            HPCX_DIR=$(dirname "$(find /opt/nvidia/hpc_sdk -path "*/hpcx/hpcx-*/ompi/bin/mpirun" | head -1)")/../..
+            MPI_LIB=$(mpifort --showme:link | grep -oP "(?<=-L)\S+" | head -1)
+            cat > /etc/nvhpc-env.sh <<EOF
+          export LD_LIBRARY_PATH=${MPI_LIB}:${HPCX_DIR}/ucx/lib:${HPCX_DIR}/ucc/lib:\$LD_LIBRARY_PATH
+          export OMPI_MCA_rmaps_base_oversubscribe=1
+          EOF
+            nvfortran --version
+          '
+      - name: Build simulation, OpenMP offload
+        run: |
+          docker exec nvhpc bash -c '
+            source /etc/nvhpc-env.sh
+            free -g | head -2
+            /bin/bash mfc.sh build -v -t simulation --gpu mp -j 2
+          '
