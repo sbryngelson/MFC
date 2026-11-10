@@ -2342,13 +2342,23 @@ contains
     impure subroutine s_ib_flux_wall_prepare(q_cons_vf)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
-        real(wp), parameter                                 :: ib_wall_safety = 0.9_wp
-        real(wp)                                            :: dt_loc, use, th, rhoY
-        integer                                             :: j, k, l, q
+        real(wp), parameter :: ib_wall_safety = 0.9_wp
+        real(wp) :: dt_loc, use, th, rhoY
+        integer :: j, k, l, q, mode
+        integer, save :: fw_mode = -1  ! DIAGNOSTIC: FW_THETA_MODE 0 normal, 1 theta = 1, 2 skip trace species
+        character(len=16) :: env
+        integer :: st
 
+        if (fw_mode < 0) then
+            fw_mode = 0
+            call get_environment_variable('FW_THETA_MODE', env, status=st)
+            if (st == 0) read (env, *) fw_mode
+            print '(A, I0)', ' FWDIAG FW_THETA_MODE = ', fw_mode
+        end if
+        mode = fw_mode
         call s_ib_wall_src_buffers()
         dt_loc = dt
-        $:GPU_PARALLEL_LOOP(private='[j, k, l, q, use, th, rhoY]', collapse=3, copyin='[dt_loc]')
+        $:GPU_PARALLEL_LOOP(private='[j, k, l, q, use, th, rhoY]', collapse=3, copyin='[dt_loc, mode]')
         do l = 0, p
             do k = 0, n
                 do j = 0, m
@@ -2359,10 +2369,12 @@ contains
                             do q = 1, num_species
                                 use = dt_loc*f_wall_face_sum(ib_wall_src, j, k, l, q)
                                 rhoY = q_cons_vf(eqn_idx%species%beg + q - 1)%sf(j, k, l)
+                                if (mode == 2 .and. rhoY <= 1.e-6_wp*q_cons_vf(eqn_idx%cont%beg)%sf(j, k, l)) cycle
                                 if (use > ib_wall_safety*rhoY) th = min(th, ib_wall_safety*max(rhoY, 0._wp)/use)
                             end do
                         end if
                     end if
+                    if (mode == 1) th = 1._wp
                     ib_wall_theta%sf(j, k, l) = th
                 end do
             end do
@@ -2418,6 +2430,18 @@ contains
             & ' E min,max = ', emin, emax, ' E max at ', je
         print '(A, ES13.5, A, 4I5, A, I0)', ' FWDIAG fluid min rho*Y = ', ymin, ' at (j,k,l,species) ', jy, &
             & ' cells with rho < 0.9 rho0 = ', nlow
+        do q = eqn_idx%species%beg, eqn_idx%species%end
+            ymin = huge(1._wp); jy = 0
+            do k = 0, n
+                do j = 0, m
+                    if (ib_markers%sf(j, k, 0) == 0 .and. q_cons_vf(q)%sf(j, k, 0) < ymin) then
+                        ymin = q_cons_vf(q)%sf(j, k, 0); jy(1:2) = [j, k]
+                    end if
+                end do
+            end do
+            print '(A, I3, A, ES13.5, A, 2I5)', ' FWDIAG species ', q - eqn_idx%species%beg + 1, ' fluid min rho*Y = ', ymin, &
+                & ' at ', jy(1:2)
+        end do
         if (.not. ib_flux_wall) return
         do q = 1, ibw_a + 1
             if (q <= ibw_a) then
@@ -2435,11 +2459,17 @@ contains
                     & 0:p) < 1._wp)
                 do k = 0, n
                     do j = 0, m
-                        if (ib_wall_theta%sf(j, k, 0) < 1._wp) print '(A, 2I5, A, ES12.4, A, 6ES12.4)', ' FWDIAG theta<1 at ', j, &
-                            & k, ' theta = ', ib_wall_theta%sf(j, k, 0), ' rho*Y(CO,CO2,H2O,O2) and rho: ', &
-                            & q_cons_vf(eqn_idx%species%beg)%sf(j, k, 0), q_cons_vf(eqn_idx%species%beg + 1)%sf(j, k, 0), &
-                            & q_cons_vf(eqn_idx%species%beg + 3)%sf(j, k, 0), q_cons_vf(eqn_idx%species%beg + 4)%sf(j, k, 0), &
-                            & q_cons_vf(1)%sf(j, k, 0)
+                        if (ib_wall_theta%sf(j, k, 0) < 1._wp) then
+                            print '(A, 2I5, A, ES12.4, A, ES12.4, A, ES12.4)', ' FWDIAG theta<1 at ', j, k, ' theta = ', &
+                                & ib_wall_theta%sf(j, k, 0), ' rho = ', q_cons_vf(1)%sf(j, k, 0), ' dt*wall-area/V = ', &
+                                & dt*f_wall_face_sum(ib_wall_src, j, k, 0, 0)
+                            do q = 1, num_species
+                                print '(A, I3, A, ES14.5, A, ES14.5, A, L1)', ' FWDIAG    species ', q, ' rhoY = ', &
+                                    & q_cons_vf(eqn_idx%species%beg + q - 1)%sf(j, k, 0), ' use = ', &
+                                    & dt*f_wall_face_sum(ib_wall_src, j, k, 0, q), ' limits = ', dt*f_wall_face_sum(ib_wall_src, &
+                                    & j, k, 0, q) > 0.9_wp*q_cons_vf(eqn_idx%species%beg + q - 1)%sf(j, k, 0)
+                            end do
+                        end if
                     end do
                 end do
             end if
