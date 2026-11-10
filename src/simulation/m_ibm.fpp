@@ -33,7 +33,7 @@ module m_ibm
     private :: s_compute_image_points, s_compute_interpolation_coeffs, s_interpolate_image_point, s_find_ghost_points, &
         & s_find_num_ghost_points, s_compute_ghost_point_pressure, s_compute_ghost_point_velocity, s_interpolation_weights
     ; public :: s_initialize_ibm_module, s_ibm_setup, s_ibm_correct_state, s_finalize_ibm_module, s_report_ibm_surface, &
-        & s_write_ib_surface, s_ib_flux_wall_prepare
+        & s_write_ib_surface, s_ib_flux_wall_prepare, s_ib_flux_wall_diag
 
     !> Ghost points at which the reacting-surface Newton solve did not reach its tolerance, so the point fell back to a chemically
     !! inert wall (keeping a prescribed Twall). Counted because that fallback is otherwise indistinguishable from a surface
@@ -2369,21 +2369,56 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
-        call s_ib_flux_wall_diag(q_cons_vf)  ! DIAGNOSTIC, not for the PR
-
     end subroutine s_ib_flux_wall_prepare
 
-    !> DIAGNOSTIC, not for the PR: min/max and NaN counts of the wall source, theta and the species densities, first 40 calls.
+    !> DIAGNOSTIC, not for the PR: first 40 RHS calls, fluid cells only (ib_markers == 0): extremes of rho, E and the species
+    !! densities with their locations, NaN counts, and with ib_flux_wall the wall source and theta. Works with the option off.
     impure subroutine s_ib_flux_wall_diag(q_cons_vf)
 
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
         integer, save                                       :: ncall = 0
-        integer                                             :: q, nn, na
-        real(wp)                                            :: lo, hi
+        integer                                             :: q, j, k, l, nn, na
+        real(wp)                                            :: lo, hi, rmin, emin, emax, ymin
+        integer                                             :: jr(3), je(3), jy(4), nnan, nlow
 
         ncall = ncall + 1
         if (ncall > 40) return
-        print '(A, I0, A, ES12.4, A, F10.6)', ' FWDIAG call ', ncall, ' dt = ', dt, ' mytime = ', mytime
+        print '(A, I0, A, ES12.4, A, F10.6, A, L1)', ' FWDIAG call ', ncall, ' dt = ', dt, ' mytime = ', mytime, &
+            & ' ib_flux_wall = ', ib_flux_wall
+        $:GPU_UPDATE(host='[ib_markers%sf]')
+        do q = 1, sys_size
+            $:GPU_UPDATE(host='[q_cons_vf(q)%sf]')
+        end do
+        rmin = huge(1._wp); emin = huge(1._wp); emax = -huge(1._wp); ymin = huge(1._wp); nnan = 0; nlow = 0
+        jr = 0; je = 0; jy = 0
+        do l = 0, p
+            do k = 0, n
+                do j = 0, m
+                    if (ib_markers%sf(j, k, l) /= 0) cycle
+                    do q = 1, sys_size
+                        if (q_cons_vf(q)%sf(j, k, l) /= q_cons_vf(q)%sf(j, k, l)) nnan = nnan + 1
+                    end do
+                    if (q_cons_vf(1)%sf(j, k, l) < rmin) then
+                        rmin = q_cons_vf(1)%sf(j, k, l); jr = [j, k, l]
+                    end if
+                    if (q_cons_vf(1)%sf(j, k, l) < 0.9_wp*1.1762_wp) nlow = nlow + 1
+                    if (q_cons_vf(eqn_idx%E)%sf(j, k, l) < emin) emin = q_cons_vf(eqn_idx%E)%sf(j, k, l)
+                    if (q_cons_vf(eqn_idx%E)%sf(j, k, l) > emax) then
+                        emax = q_cons_vf(eqn_idx%E)%sf(j, k, l); je = [j, k, l]
+                    end if
+                    do q = eqn_idx%species%beg, eqn_idx%species%end
+                        if (q_cons_vf(q)%sf(j, k, l) < ymin) then
+                            ymin = q_cons_vf(q)%sf(j, k, l); jy = [j, k, l, q - eqn_idx%species%beg + 1]
+                        end if
+                    end do
+                end do
+            end do
+        end do
+        print '(A, I0, A, ES13.5, A, 3I5, A, 2ES13.5, A, 3I5)', ' FWDIAG fluid nan = ', nnan, ' rho min = ', rmin, ' at ', jr, &
+            & ' E min,max = ', emin, emax, ' E max at ', je
+        print '(A, ES13.5, A, 4I5, A, I0)', ' FWDIAG fluid min rho*Y = ', ymin, ' at (j,k,l,species) ', jy, &
+            & ' cells with rho < 0.9 rho0 = ', nlow
+        if (.not. ib_flux_wall) return
         do q = 1, ibw_a + 1
             if (q <= ibw_a) then
                 $:GPU_UPDATE(host='[ib_wall_src(q)%sf]')
@@ -2395,18 +2430,18 @@ contains
                     & ' nonzero = ', na
             else
                 $:GPU_UPDATE(host='[ib_wall_theta%sf]')
-                lo = real(minval(ib_wall_theta%sf(0:m,0:n,0:p)), wp)
-                hi = real(maxval(ib_wall_theta%sf(0:m,0:n,0:p)), wp)
-                print '(A, 2ES14.5, A, I0)', ' FWDIAG theta min,max = ', lo, hi, ' count(theta<1) = ', count(ib_wall_theta%sf(0:m, &
-                    & 0:n,0:p) < 1._wp)
-            end if
-        end do
-        do q = eqn_idx%cont%beg, eqn_idx%species%end
-            $:GPU_UPDATE(host='[q_cons_vf(q)%sf]')
-            nn = count(q_cons_vf(q)%sf(0:m,0:n,0:p) /= q_cons_vf(q)%sf(0:m,0:n,0:p))
-            if (nn > 0 .or. q <= eqn_idx%E .or. q == eqn_idx%species%beg) then
-                print '(A, I3, A, 2ES14.5, A, I0)', ' FWDIAG cons(', q, ') min,max = ', real(minval(q_cons_vf(q)%sf(0:m,0:n, &
-                    & 0:p)), wp), real(maxval(q_cons_vf(q)%sf(0:m,0:n,0:p)), wp), ' nan = ', nn
+                print '(A, 2ES14.5, A, I0)', ' FWDIAG theta min,max = ', real(minval(ib_wall_theta%sf(0:m,0:n,0:p)), wp), &
+                    & real(maxval(ib_wall_theta%sf(0:m,0:n,0:p)), wp), ' count(theta<1) = ', count(ib_wall_theta%sf(0:m,0:n, &
+                    & 0:p) < 1._wp)
+                do k = 0, n
+                    do j = 0, m
+                        if (ib_wall_theta%sf(j, k, 0) < 1._wp) print '(A, 2I5, A, ES12.4, A, 6ES12.4)', ' FWDIAG theta<1 at ', j, &
+                            & k, ' theta = ', ib_wall_theta%sf(j, k, 0), ' rho*Y(CO,CO2,H2O,O2) and rho: ', &
+                            & q_cons_vf(eqn_idx%species%beg)%sf(j, k, 0), q_cons_vf(eqn_idx%species%beg + 1)%sf(j, k, 0), &
+                            & q_cons_vf(eqn_idx%species%beg + 3)%sf(j, k, 0), q_cons_vf(eqn_idx%species%beg + 4)%sf(j, k, 0), &
+                            & q_cons_vf(1)%sf(j, k, 0)
+                    end do
+                end do
             end if
         end do
 

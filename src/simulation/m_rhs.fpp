@@ -679,6 +679,7 @@ contains
             end if
             call nvtxEndRange
             if (ib_flux_wall) call s_ib_flux_wall_prepare(q_cons_vf)
+            if (ib) call s_ib_flux_wall_diag(q_cons_vf)  ! DIAGNOSTIC, not for the PR
 
             call nvtxStartRange("RHS-COMMUNICATION")
             call s_populate_variables_buffers(bc_type, q_prim_qp%vf, pb_in, mv_in, q_T_sf)
