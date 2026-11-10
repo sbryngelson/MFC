@@ -27,6 +27,8 @@ contains
     !> Accumulate -k*dT/dx_idir into the energy source flux at each idir-normal face.
     subroutine s_compute_conduction_source_flux(idir, q_prim_qp, q_T_sf, irx, iry, irz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                             :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         integer, intent(in)                                 :: idir
         type(scalar_field), dimension(sys_size), intent(in) :: q_prim_qp
         type(scalar_field), intent(in)                      :: q_T_sf
@@ -40,10 +42,13 @@ contains
 
         $:GPU_UPDATE(device='[isc1, isc2, isc3, offsets_c]')
 
+        bnd0_lo = isc3%beg; bnd0_hi = isc3%end
+        bnd1_lo = isc2%beg; bnd1_hi = isc2%end
+        bnd2_lo = isc1%beg; bnd2_hi = isc1%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[k_face, dT_dxi, grid_spacing, alpha_face, i]')
-        do z = isc3%beg, isc3%end
-            do y = isc2%beg, isc2%end
-                do x = isc1%beg, isc1%end
+        do z = bnd0_lo, bnd0_hi
+            do y = bnd1_lo, bnd1_hi
+                do x = bnd2_lo, bnd2_hi
                     select case (idir)
                     case (1)
                         grid_spacing = x_cc(x + 1) - x_cc(x)
@@ -84,6 +89,8 @@ contains
     !! zeroing itself.
     subroutine s_compute_conduction_axis_source(q_prim_vf, q_T_sf, tau_Re_vf, ix, iy, iz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                                  :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(sys_size), intent(in)      :: q_prim_vf
         type(scalar_field), intent(in)                           :: q_T_sf
         type(scalar_field), dimension(1:sys_size), intent(inout) :: tau_Re_vf
@@ -95,10 +102,13 @@ contains
         $:GPU_UPDATE(device='[isc1, isc2, isc3]')
 
         if (.not. viscous) then
+            bnd0_lo = isc3%beg; bnd0_hi = isc3%end
+            bnd1_lo = isc2%beg; bnd1_hi = isc2%end
+            bnd2_lo = isc1%beg; bnd2_hi = isc1%end
             $:GPU_PARALLEL_LOOP(collapse=3, private='[i]')
-            do l = isc3%beg, isc3%end
-                do k = isc2%beg, isc2%end
-                    do j = isc1%beg, isc1%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         $:GPU_LOOP(parallelism='[seq]')
                         do i = eqn_idx%mom%beg, eqn_idx%E
                             tau_Re_vf(i)%sf(j, k, l) = 0._wp
@@ -109,10 +119,13 @@ contains
             $:END_GPU_PARALLEL_LOOP()
         end if
 
+        bnd0_lo = isc3%beg; bnd0_hi = isc3%end
+        bnd1_lo = isc2%beg + 1; bnd1_hi = isc2%end - 1
+        bnd2_lo = isc1%beg; bnd2_hi = isc1%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[k_cell, dT_dr, dr_l, dr_r, alpha_cell, i]')
-        do l = isc3%beg, isc3%end
-            do k = isc2%beg + 1, isc2%end - 1
-                do j = isc1%beg, isc1%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     k_cell = 0._wp
                     $:GPU_LOOP(parallelism='[seq]')
                     do i = 1, num_fluids

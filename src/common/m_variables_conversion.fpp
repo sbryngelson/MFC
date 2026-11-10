@@ -394,6 +394,8 @@ contains
 
         use m_global_parameters_common, only: shear_indices  ! Performance fix with AMDFlang
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                                :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(sys_size), intent(in)    :: qK_cons_vf
         type(scalar_field), intent(inout)                      :: q_T_sf
         type(scalar_field), dimension(sys_size), intent(inout) :: qK_prim_vf
@@ -429,12 +431,15 @@ contains
         integer :: Re_size_loc1, Re_size_loc2
 
         Re_size_loc1 = Re_size(1); Re_size_loc2 = Re_size(2)
+        bnd0_lo = ibounds(3)%beg; bnd0_hi = ibounds(3)%end
+        bnd1_lo = ibounds(2)%beg; bnd1_hi = ibounds(2)%end
+        bnd2_lo = ibounds(1)%beg; bnd2_hi = ibounds(1)%end
         $:GPU_PARALLEL_LOOP(collapse=3, privateArrays='[alpha_K, alpha_rho_K, Re_K, nRtmp, rhoYks, B]', private='[rho_K, gamma_K, &
                             & pi_inf_K, qv_K, dyn_pres_K, pres, vftmp, nbub_sc, G_K, solid_partial_density, T, pres_mag, Ga, B2, &
                             & m2, S, W, dW, E, D, f, dGa_dW, dp_dW, df_dW, iter]', firstprivate='[Re_size_loc1, Re_size_loc2]')
-        do l = ibounds(3)%beg, ibounds(3)%end
-            do k = ibounds(2)%beg, ibounds(2)%end
-                do j = ibounds(1)%beg, ibounds(1)%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     dyn_pres_K = 0._wp
 
                     call s_compute_species_fraction(qK_cons_vf, j, k, l, alpha_rho_K, alpha_K)

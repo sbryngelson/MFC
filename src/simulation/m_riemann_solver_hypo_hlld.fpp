@@ -65,6 +65,8 @@ contains
                                           & qR_prim_rsx_vf, dqR_prim_dx_vf, dqR_prim_dy_vf, dqR_prim_dz_vf, qR_prim_vf, &
                                           & q_prim_vf, flux_vf, flux_src_vf, flux_gsrc_vf, norm_dir, ix, iy, iz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: qL_prim_rsx_vf, qR_prim_rsx_vf
         type(scalar_field), allocatable, dimension(:), intent(inout) :: dqL_prim_dx_vf, dqR_prim_dx_vf, dqL_prim_dy_vf, &
              & dqR_prim_dy_vf, dqL_prim_dz_vf, dqR_prim_dz_vf
@@ -223,10 +225,13 @@ contains
                     & ('rho{S}_star*tau_qq_{S}_star', None)]
                 #:set _hlld_arr = '[alpha_rho_L, alpha_rho_R, alpha_L, alpha_R, U_L, U_R, F_L, F_R, F_hlld, tau_e_L, tau_e_R, alpha_hat, &
                     & alpha_rho_hat, tau_e_hat]'
+                bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                 $:GPU_PARALLEL_LOOP(collapse=3, privateArrays=_hlld_arr, private=_hlld_p1 + _hlld_p2 + _hlld_p3 + _hlld_p4)
-                do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                    do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                        do j = ${X_BND}$%beg, ${X_BND}$%end
+                do l = bnd0_lo, bnd0_hi
+                    do k = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
                             ! Extract left/right primitive states
 
                             do i = 1, eqn_idx%cont%end
@@ -978,16 +983,21 @@ contains
     #:for SUFFIX, NCV in [('', 'nc_iface_vel_rsx'), ('_hatR', 'nc_iface_vel_hatR_rsx')]
         subroutine s_finalize_nc_iface_vel${SUFFIX}$ (nc_iface_vel_vf, norm_dir)
 
+            !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+            integer                                         :: bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
             type(scalar_field), dimension(:), intent(inout) :: nc_iface_vel_vf
             integer, intent(in)                             :: norm_dir
             integer                                         :: i, j, k, l
 
             if (norm_dir == 2) then
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is1%beg; bnd2_hi = is1%end
+                bnd3_lo = is2%beg; bnd3_hi = is2%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, num_dims
-                    do l = is3%beg, is3%end
-                        do j = is1%beg, is1%end
-                            do k = is2%beg, is2%end
+                    do l = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
+                            do k = bnd3_lo, bnd3_hi
                                 nc_iface_vel_vf(i)%sf(k, j, l) = ${NCV}$_vf(k, j, l, i)
                             end do
                         end do
@@ -995,11 +1005,14 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
             else if (norm_dir == 1) then
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
+                bnd3_lo = is1%beg; bnd3_hi = is1%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, num_dims
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
-                            do j = is1%beg, is1%end
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do j = bnd3_lo, bnd3_hi
                                 nc_iface_vel_vf(i)%sf(j, k, l) = ${NCV}$_vf(j, k, l, i)
                             end do
                         end do
@@ -1007,11 +1020,14 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
             else if (norm_dir == 3) then
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
+                bnd3_lo = is1%beg; bnd3_hi = is1%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, num_dims
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
-                            do j = is1%beg, is1%end
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do j = bnd3_lo, bnd3_hi
                                 nc_iface_vel_vf(i)%sf(l, k, j) = ${NCV}$_vf(l, k, j, i)
                             end do
                         end do

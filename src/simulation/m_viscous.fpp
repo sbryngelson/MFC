@@ -101,6 +101,8 @@ contains
 
     subroutine s_compute_viscous_stress_cylindrical_boundary(q_prim_vf, grad_x_vf, grad_y_vf, grad_z_vf, tau_Re_vf, ix, iy, iz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
         type(scalar_field), dimension(num_dims), intent(in) :: grad_x_vf, grad_y_vf, grad_z_vf
         type(scalar_field), dimension(1:sys_size), intent(inout) :: tau_Re_vf
@@ -124,10 +126,13 @@ contains
 
         $:GPU_UPDATE(device='[is1_viscous, is2_viscous, is3_viscous]')
 
+        bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+        bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+        bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
         $:GPU_PARALLEL_LOOP(collapse=3)
-        do l = is3_viscous%beg, is3_viscous%end
-            do k = is2_viscous%beg, is2_viscous%end
-                do j = is1_viscous%beg, is1_viscous%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     $:GPU_LOOP(parallelism='[seq]')
                     do i = eqn_idx%mom%beg, eqn_idx%E
                         tau_Re_vf(i)%sf(j, k, l) = 0._wp
@@ -139,11 +144,13 @@ contains
 
         #:if not MFC_CASE_OPTIMIZATION or num_dims > 1
             if (shear_stress) then  ! Shear stresses
+                bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+                bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, q, rho_visc, gamma_visc, pi_inf_visc, qv_visc, &
                                     & alpha_visc_sum, alpha_visc, alpha_rho_visc, Re_visc, tau_Re]', firstprivate='[Re_size_loc1, Re_size_loc2]')
-                do l = is3_viscous%beg, is3_viscous%end
+                do l = bnd0_lo, bnd0_hi
                     do k = -1, 1
-                        do j = is1_viscous%beg, is1_viscous%end
+                        do j = bnd2_lo, bnd2_hi
                             $:GPU_LOOP(parallelism='[seq]')
                             do i = 1, num_fluids
                                 alpha_rho_visc(i) = q_prim_vf(i)%sf(j, k, l)
@@ -194,11 +201,13 @@ contains
 
         #:if not MFC_CASE_OPTIMIZATION or num_dims > 1
             if (bulk_stress) then  ! Bulk stresses
+                bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+                bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, q, rho_visc, gamma_visc, pi_inf_visc, qv_visc, &
                                     & alpha_visc_sum, alpha_visc, alpha_rho_visc, Re_visc, tau_Re]', firstprivate='[Re_size_loc1, Re_size_loc2]')
-                do l = is3_viscous%beg, is3_viscous%end
+                do l = bnd0_lo, bnd0_hi
                     do k = -1, 1
-                        do j = is1_viscous%beg, is1_viscous%end
+                        do j = bnd2_lo, bnd2_hi
                             $:GPU_LOOP(parallelism='[seq]')
                             do i = 1, num_fluids
                                 alpha_rho_visc(i) = q_prim_vf(i)%sf(j, k, l)
@@ -243,11 +252,13 @@ contains
         if (p == 0) return
         #:if not MFC_CASE_OPTIMIZATION or num_dims > 2
             if (shear_stress) then  ! Shear stresses
+                bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+                bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, q, rho_visc, gamma_visc, pi_inf_visc, qv_visc, &
                                     & alpha_visc_sum, alpha_visc, alpha_rho_visc, Re_visc, tau_Re]', firstprivate='[Re_size_loc1, Re_size_loc2]')
-                do l = is3_viscous%beg, is3_viscous%end
+                do l = bnd0_lo, bnd0_hi
                     do k = -1, 1
-                        do j = is1_viscous%beg, is1_viscous%end
+                        do j = bnd2_lo, bnd2_hi
                             $:GPU_LOOP(parallelism='[seq]')
                             do i = 1, num_fluids
                                 alpha_rho_visc(i) = q_prim_vf(i)%sf(j, k, l)
@@ -295,11 +306,13 @@ contains
             end if
 
             if (bulk_stress) then  ! Bulk stresses
+                bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+                bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, q, rho_visc, gamma_visc, pi_inf_visc, qv_visc, &
                                     & alpha_visc_sum, alpha_visc, alpha_rho_visc, Re_visc, tau_Re]', firstprivate='[Re_size_loc1, Re_size_loc2]')
-                do l = is3_viscous%beg, is3_viscous%end
+                do l = bnd0_lo, bnd0_hi
                     do k = -1, 1
-                        do j = is1_viscous%beg, is1_viscous%end
+                        do j = bnd2_lo, bnd2_hi
                             $:GPU_LOOP(parallelism='[seq]')
                             do i = 1, num_fluids
                                 alpha_rho_visc(i) = q_prim_vf(i)%sf(j, k, l)
@@ -347,6 +360,8 @@ contains
                              & dqR_prim_dy_n, dqR_prim_dz_n, qR_prim, q_prim_qp, dq_prim_dx_qp, dq_prim_dy_qp, dq_prim_dz_qp, ix, &
                              & iy, iz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: qL_prim_rsx_vf, qR_prim_rsx_vf
         type(vector_field), dimension(num_dims), intent(inout) :: qL_prim, qR_prim
         type(vector_field), intent(in) :: q_prim_qp
@@ -390,10 +405,13 @@ contains
 
             $:GPU_UPDATE(device='[is1_viscous, is2_viscous, is3_viscous]')
 
+            bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+            bnd1_lo = iy%beg; bnd1_hi = iy%end
+            bnd2_lo = is1_viscous%beg + 1; bnd2_hi = is1_viscous%end
             $:GPU_PARALLEL_LOOP(collapse=3)
-            do l = is3_viscous%beg, is3_viscous%end
-                do k = iy%beg, iy%end
-                    do j = is1_viscous%beg + 1, is1_viscous%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         $:GPU_LOOP(parallelism='[seq]')
                         do i = iv%beg, iv%end
                             dqL_prim_dx_n(1)%vf(i)%sf(j, k, l) = (q_prim_qp%vf(i)%sf(j, k, l) - q_prim_qp%vf(i)%sf(j - 1, k, &
@@ -404,10 +422,13 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
 
+            bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+            bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+            bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end - 1
             $:GPU_PARALLEL_LOOP(collapse=3)
-            do l = is3_viscous%beg, is3_viscous%end
-                do k = is2_viscous%beg, is2_viscous%end
-                    do j = is1_viscous%beg, is1_viscous%end - 1
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         $:GPU_LOOP(parallelism='[seq]')
                         do i = iv%beg, iv%end
                             dqR_prim_dx_n(1)%vf(i)%sf(j, k, l) = (q_prim_qp%vf(i)%sf(j + 1, k, l) - q_prim_qp%vf(i)%sf(j, k, &
@@ -420,10 +441,13 @@ contains
 
             if (n > 0) then
                 #:if not MFC_CASE_OPTIMIZATION or num_dims > 1
+                    bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+                    bnd1_lo = is2_viscous%beg + 1; bnd1_hi = is2_viscous%end
+                    bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do l = is3_viscous%beg, is3_viscous%end
-                        do j = is2_viscous%beg + 1, is2_viscous%end
-                            do k = is1_viscous%beg, is1_viscous%end
+                    do l = bnd0_lo, bnd0_hi
+                        do j = bnd1_lo, bnd1_hi
+                            do k = bnd2_lo, bnd2_hi
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = iv%beg, iv%end
                                     dqL_prim_dy_n(2)%vf(i)%sf(k, j, l) = (q_prim_qp%vf(i)%sf(k, j, l) - q_prim_qp%vf(i)%sf(k, &
@@ -434,10 +458,13 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
 
+                    bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+                    bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end - 1
+                    bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do l = is3_viscous%beg, is3_viscous%end
-                        do j = is2_viscous%beg, is2_viscous%end - 1
-                            do k = is1_viscous%beg, is1_viscous%end
+                    do l = bnd0_lo, bnd0_hi
+                        do j = bnd1_lo, bnd1_hi
+                            do k = bnd2_lo, bnd2_hi
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = iv%beg, iv%end
                                     dqR_prim_dy_n(2)%vf(i)%sf(k, j, l) = (q_prim_qp%vf(i)%sf(k, j + 1, l) - q_prim_qp%vf(i)%sf(k, &
@@ -448,10 +475,13 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
 
+                    bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+                    bnd1_lo = is2_viscous%beg + 1; bnd1_hi = is2_viscous%end
+                    bnd2_lo = is1_viscous%beg + 1; bnd2_hi = is1_viscous%end - 1
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do l = is3_viscous%beg, is3_viscous%end
-                        do j = is2_viscous%beg + 1, is2_viscous%end
-                            do k = is1_viscous%beg + 1, is1_viscous%end - 1
+                    do l = bnd0_lo, bnd0_hi
+                        do j = bnd1_lo, bnd1_hi
+                            do k = bnd2_lo, bnd2_hi
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = iv%beg, iv%end
                                     dqL_prim_dx_n(2)%vf(i)%sf(k, j, l) = (dqL_prim_dx_n(1)%vf(i)%sf(k, j, &
@@ -465,10 +495,13 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
 
+                    bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+                    bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end - 1
+                    bnd2_lo = is1_viscous%beg + 1; bnd2_hi = is1_viscous%end - 1
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do l = is3_viscous%beg, is3_viscous%end
-                        do j = is2_viscous%beg, is2_viscous%end - 1
-                            do k = is1_viscous%beg + 1, is1_viscous%end - 1
+                    do l = bnd0_lo, bnd0_hi
+                        do j = bnd1_lo, bnd1_hi
+                            do k = bnd2_lo, bnd2_hi
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = iv%beg, iv%end
                                     dqR_prim_dx_n(2)%vf(i)%sf(k, j, l) = (dqL_prim_dx_n(1)%vf(i)%sf(k, j + 1, &
@@ -482,10 +515,13 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
 
+                    bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+                    bnd1_lo = is2_viscous%beg + 1; bnd1_hi = is2_viscous%end - 1
+                    bnd2_lo = is1_viscous%beg + 1; bnd2_hi = is1_viscous%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do l = is3_viscous%beg, is3_viscous%end
-                        do k = is2_viscous%beg + 1, is2_viscous%end - 1
-                            do j = is1_viscous%beg + 1, is1_viscous%end
+                    do l = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = iv%beg, iv%end
                                     dqL_prim_dy_n(1)%vf(i)%sf(j, k, l) = (dqL_prim_dy_n(2)%vf(i)%sf(j, k, &
@@ -499,10 +535,13 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
 
+                    bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+                    bnd1_lo = is2_viscous%beg + 1; bnd1_hi = is2_viscous%end - 1
+                    bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end - 1
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do l = is3_viscous%beg, is3_viscous%end
-                        do k = is2_viscous%beg + 1, is2_viscous%end - 1
-                            do j = is1_viscous%beg, is1_viscous%end - 1
+                    do l = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = iv%beg, iv%end
                                     dqR_prim_dy_n(1)%vf(i)%sf(j, k, l) = (dqL_prim_dy_n(2)%vf(i)%sf(j + 1, k, &
@@ -519,10 +558,13 @@ contains
 
                 if (p > 0) then
                     #:if not MFC_CASE_OPTIMIZATION or num_dims > 2
+                        bnd0_lo = is3_viscous%beg + 1; bnd0_hi = is3_viscous%end
+                        bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+                        bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do j = is3_viscous%beg + 1, is3_viscous%end
-                            do l = is2_viscous%beg, is2_viscous%end
-                                do k = is1_viscous%beg, is1_viscous%end
+                        do j = bnd0_lo, bnd0_hi
+                            do l = bnd1_lo, bnd1_hi
+                                do k = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = iv%beg, iv%end
                                         dqL_prim_dz_n(3)%vf(i)%sf(k, l, j) = (q_prim_qp%vf(i)%sf(k, l, j) - q_prim_qp%vf(i)%sf(k, &
@@ -533,10 +575,13 @@ contains
                         end do
                         $:END_GPU_PARALLEL_LOOP()
 
+                        bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end - 1
+                        bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+                        bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do j = is3_viscous%beg, is3_viscous%end - 1
-                            do l = is2_viscous%beg, is2_viscous%end
-                                do k = is1_viscous%beg, is1_viscous%end
+                        do j = bnd0_lo, bnd0_hi
+                            do l = bnd1_lo, bnd1_hi
+                                do k = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = iv%beg, iv%end
                                         dqR_prim_dz_n(3)%vf(i)%sf(k, l, j) = (q_prim_qp%vf(i)%sf(k, l, &
@@ -547,10 +592,13 @@ contains
                         end do
                         $:END_GPU_PARALLEL_LOOP()
 
+                        bnd0_lo = is3_viscous%beg + 1; bnd0_hi = is3_viscous%end - 1
+                        bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+                        bnd2_lo = is1_viscous%beg + 1; bnd2_hi = is1_viscous%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do l = is3_viscous%beg + 1, is3_viscous%end - 1
-                            do k = is2_viscous%beg, is2_viscous%end
-                                do j = is1_viscous%beg + 1, is1_viscous%end
+                        do l = bnd0_lo, bnd0_hi
+                            do k = bnd1_lo, bnd1_hi
+                                do j = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = iv%beg, iv%end
                                         dqL_prim_dz_n(1)%vf(i)%sf(j, k, l) = (dqL_prim_dz_n(3)%vf(i)%sf(j, k, &
@@ -565,10 +613,13 @@ contains
                         end do
                         $:END_GPU_PARALLEL_LOOP()
 
+                        bnd0_lo = is3_viscous%beg + 1; bnd0_hi = is3_viscous%end - 1
+                        bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+                        bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end - 1
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do l = is3_viscous%beg + 1, is3_viscous%end - 1
-                            do k = is2_viscous%beg, is2_viscous%end
-                                do j = is1_viscous%beg, is1_viscous%end - 1
+                        do l = bnd0_lo, bnd0_hi
+                            do k = bnd1_lo, bnd1_hi
+                                do j = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = iv%beg, iv%end
                                         dqR_prim_dz_n(1)%vf(i)%sf(j, k, l) = (dqL_prim_dz_n(3)%vf(i)%sf(j + 1, k, &
@@ -583,10 +634,13 @@ contains
                         end do
                         $:END_GPU_PARALLEL_LOOP()
 
+                        bnd0_lo = is3_viscous%beg + 1; bnd0_hi = is3_viscous%end - 1
+                        bnd1_lo = is2_viscous%beg + 1; bnd1_hi = is2_viscous%end
+                        bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do l = is3_viscous%beg + 1, is3_viscous%end - 1
-                            do j = is2_viscous%beg + 1, is2_viscous%end
-                                do k = is1_viscous%beg, is1_viscous%end
+                        do l = bnd0_lo, bnd0_hi
+                            do j = bnd1_lo, bnd1_hi
+                                do k = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = iv%beg, iv%end
                                         dqL_prim_dz_n(2)%vf(i)%sf(k, j, l) = (dqL_prim_dz_n(3)%vf(i)%sf(k, j, &
@@ -600,10 +654,13 @@ contains
                         end do
                         $:END_GPU_PARALLEL_LOOP()
 
+                        bnd0_lo = is3_viscous%beg + 1; bnd0_hi = is3_viscous%end - 1
+                        bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end - 1
+                        bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do l = is3_viscous%beg + 1, is3_viscous%end - 1
-                            do j = is2_viscous%beg, is2_viscous%end - 1
-                                do k = is1_viscous%beg, is1_viscous%end
+                        do l = bnd0_lo, bnd0_hi
+                            do j = bnd1_lo, bnd1_hi
+                                do k = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = iv%beg, iv%end
                                         dqR_prim_dz_n(2)%vf(i)%sf(k, j, l) = (dqL_prim_dz_n(3)%vf(i)%sf(k, j + 1, &
@@ -618,10 +675,13 @@ contains
                         end do
                         $:END_GPU_PARALLEL_LOOP()
 
+                        bnd0_lo = is3_viscous%beg + 1; bnd0_hi = is3_viscous%end
+                        bnd1_lo = is2_viscous%beg + 1; bnd1_hi = is2_viscous%end - 1
+                        bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do j = is3_viscous%beg + 1, is3_viscous%end
-                            do l = is2_viscous%beg + 1, is2_viscous%end - 1
-                                do k = is1_viscous%beg, is1_viscous%end
+                        do j = bnd0_lo, bnd0_hi
+                            do l = bnd1_lo, bnd1_hi
+                                do k = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = iv%beg, iv%end
                                         dqL_prim_dy_n(3)%vf(i)%sf(k, l, j) = (dqL_prim_dy_n(2)%vf(i)%sf(k, l, &
@@ -635,10 +695,13 @@ contains
                         end do
                         $:END_GPU_PARALLEL_LOOP()
 
+                        bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end - 1
+                        bnd1_lo = is2_viscous%beg + 1; bnd1_hi = is2_viscous%end - 1
+                        bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do j = is3_viscous%beg, is3_viscous%end - 1
-                            do l = is2_viscous%beg + 1, is2_viscous%end - 1
-                                do k = is1_viscous%beg, is1_viscous%end
+                        do j = bnd0_lo, bnd0_hi
+                            do l = bnd1_lo, bnd1_hi
+                                do k = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = iv%beg, iv%end
                                         dqR_prim_dy_n(3)%vf(i)%sf(k, l, j) = (dqL_prim_dy_n(2)%vf(i)%sf(k, l, &
@@ -652,10 +715,13 @@ contains
                             end do
                         end do
                         $:END_GPU_PARALLEL_LOOP()
+                        bnd0_lo = is3_viscous%beg + 1; bnd0_hi = is3_viscous%end
+                        bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+                        bnd2_lo = is1_viscous%beg + 1; bnd2_hi = is1_viscous%end - 1
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do j = is3_viscous%beg + 1, is3_viscous%end
-                            do l = is2_viscous%beg, is2_viscous%end
-                                do k = is1_viscous%beg + 1, is1_viscous%end - 1
+                        do j = bnd0_lo, bnd0_hi
+                            do l = bnd1_lo, bnd1_hi
+                                do k = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = iv%beg, iv%end
                                         dqL_prim_dx_n(3)%vf(i)%sf(k, l, j) = (dqL_prim_dx_n(1)%vf(i)%sf(k, l, &
@@ -668,10 +734,13 @@ contains
                             end do
                         end do
                         $:END_GPU_PARALLEL_LOOP()
+                        bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end - 1
+                        bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+                        bnd2_lo = is1_viscous%beg + 1; bnd2_hi = is1_viscous%end - 1
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do j = is3_viscous%beg, is3_viscous%end - 1
-                            do l = is2_viscous%beg, is2_viscous%end
-                                do k = is1_viscous%beg + 1, is1_viscous%end - 1
+                        do j = bnd0_lo, bnd0_hi
+                            do l = bnd1_lo, bnd1_hi
+                                do k = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = iv%beg, iv%end
                                         dqR_prim_dx_n(3)%vf(i)%sf(k, l, j) = (dqL_prim_dx_n(1)%vf(i)%sf(k, l, &
@@ -684,9 +753,10 @@ contains
                                 end do
                             end do
                         end do
+                        bnd0_lo = iv%beg; bnd0_hi = iv%end
                         $:END_GPU_PARALLEL_LOOP()
 
-                        do i = iv%beg, iv%end
+                        do i = bnd0_lo, bnd0_hi
                             call s_compute_fd_gradient(q_prim_qp%vf(i), dq_prim_dx_qp(1)%vf(i), dq_prim_dy_qp(1)%vf(i), &
                                                        & dq_prim_dz_qp(1)%vf(i))
                         end do
@@ -710,6 +780,8 @@ contains
     !> Reconstruct left and right cell-boundary values of viscous primitive variables
     subroutine s_reconstruct_cell_boundary_values_visc(v_vf, vL_x, vR_x, norm_dir, vL_prim_vf, vR_prim_vf, ix, iy, iz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
         type(scalar_field), dimension(iv%beg:iv%end), intent(in) :: v_vf
         type(scalar_field), dimension(iv%beg:iv%end), intent(inout) :: vL_prim_vf, vR_prim_vf
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_x, vR_x
@@ -746,11 +818,15 @@ contains
         if (viscous) then
             if (weno_Re_flux) then
                 if (norm_dir == 2) then
+                    bnd0_lo = iv%beg; bnd0_hi = iv%end
+                    bnd1_lo = is3_viscous%beg; bnd1_hi = is3_viscous%end
+                    bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
+                    bnd3_lo = is2_viscous%beg; bnd3_hi = is2_viscous%end
                     $:GPU_PARALLEL_LOOP(collapse=4)
-                    do i = iv%beg, iv%end
-                        do l = is3_viscous%beg, is3_viscous%end
-                            do j = is1_viscous%beg, is1_viscous%end
-                                do k = is2_viscous%beg, is2_viscous%end
+                    do i = bnd0_lo, bnd0_hi
+                        do l = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
+                                do k = bnd3_lo, bnd3_hi
                                     vL_prim_vf(i)%sf(k, j, l) = vL_x(k, j, l, i)
                                     vR_prim_vf(i)%sf(k, j, l) = vR_x(k, j, l, i)
                                 end do
@@ -759,11 +835,15 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 else if (norm_dir == 3) then
+                    bnd0_lo = iv%beg; bnd0_hi = iv%end
+                    bnd1_lo = is1_viscous%beg; bnd1_hi = is1_viscous%end
+                    bnd2_lo = is2_viscous%beg; bnd2_hi = is2_viscous%end
+                    bnd3_lo = is3_viscous%beg; bnd3_hi = is3_viscous%end
                     $:GPU_PARALLEL_LOOP(collapse=4)
-                    do i = iv%beg, iv%end
-                        do j = is1_viscous%beg, is1_viscous%end
-                            do k = is2_viscous%beg, is2_viscous%end
-                                do l = is3_viscous%beg, is3_viscous%end
+                    do i = bnd0_lo, bnd0_hi
+                        do j = bnd1_lo, bnd1_hi
+                            do k = bnd2_lo, bnd2_hi
+                                do l = bnd3_lo, bnd3_hi
                                     vL_prim_vf(i)%sf(l, k, j) = vL_x(l, k, j, i)
                                     vR_prim_vf(i)%sf(l, k, j) = vR_x(l, k, j, i)
                                 end do
@@ -772,11 +852,15 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 else if (norm_dir == 1) then
+                    bnd0_lo = iv%beg; bnd0_hi = iv%end
+                    bnd1_lo = is3_viscous%beg; bnd1_hi = is3_viscous%end
+                    bnd2_lo = is2_viscous%beg; bnd2_hi = is2_viscous%end
+                    bnd3_lo = is1_viscous%beg; bnd3_hi = is1_viscous%end
                     $:GPU_PARALLEL_LOOP(collapse=4)
-                    do i = iv%beg, iv%end
-                        do l = is3_viscous%beg, is3_viscous%end
-                            do k = is2_viscous%beg, is2_viscous%end
-                                do j = is1_viscous%beg, is1_viscous%end
+                    do i = bnd0_lo, bnd0_hi
+                        do l = bnd1_lo, bnd1_hi
+                            do k = bnd2_lo, bnd2_hi
+                                do j = bnd3_lo, bnd3_hi
                                     vL_prim_vf(i)%sf(j, k, l) = vL_x(j, k, l, i)
                                     vR_prim_vf(i)%sf(j, k, l) = vR_x(j, k, l, i)
                                 end do
@@ -793,6 +877,8 @@ contains
     !> Reconstruct left and right cell-boundary values of viscous primitive variable derivatives
     subroutine s_reconstruct_cell_boundary_values_visc_deriv(v_vf, vL_x, vR_x, norm_dir, vL_prim_vf, vR_prim_vf, ix, iy, iz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
         type(scalar_field), dimension(iv%beg:iv%end), intent(in) :: v_vf
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,iv%beg:), intent(inout) :: vL_x, vR_x
         type(scalar_field), dimension(iv%beg:iv%end), intent(inout) :: vL_prim_vf, vR_prim_vf
@@ -828,11 +914,15 @@ contains
         if (viscous) then
             if (weno_Re_flux) then
                 if (norm_dir == 2) then
+                    bnd0_lo = iv%beg; bnd0_hi = iv%end
+                    bnd1_lo = is3_viscous%beg; bnd1_hi = is3_viscous%end
+                    bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
+                    bnd3_lo = is2_viscous%beg; bnd3_hi = is2_viscous%end
                     $:GPU_PARALLEL_LOOP(collapse=4)
-                    do i = iv%beg, iv%end
-                        do l = is3_viscous%beg, is3_viscous%end
-                            do j = is1_viscous%beg, is1_viscous%end
-                                do k = is2_viscous%beg, is2_viscous%end
+                    do i = bnd0_lo, bnd0_hi
+                        do l = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
+                                do k = bnd3_lo, bnd3_hi
                                     vL_prim_vf(i)%sf(k, j, l) = vL_x(k, j, l, i)
                                     vR_prim_vf(i)%sf(k, j, l) = vR_x(k, j, l, i)
                                 end do
@@ -841,11 +931,15 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 else if (norm_dir == 3) then
+                    bnd0_lo = iv%beg; bnd0_hi = iv%end
+                    bnd1_lo = is1_viscous%beg; bnd1_hi = is1_viscous%end
+                    bnd2_lo = is2_viscous%beg; bnd2_hi = is2_viscous%end
+                    bnd3_lo = is3_viscous%beg; bnd3_hi = is3_viscous%end
                     $:GPU_PARALLEL_LOOP(collapse=4)
-                    do i = iv%beg, iv%end
-                        do j = is1_viscous%beg, is1_viscous%end
-                            do k = is2_viscous%beg, is2_viscous%end
-                                do l = is3_viscous%beg, is3_viscous%end
+                    do i = bnd0_lo, bnd0_hi
+                        do j = bnd1_lo, bnd1_hi
+                            do k = bnd2_lo, bnd2_hi
+                                do l = bnd3_lo, bnd3_hi
                                     vL_prim_vf(i)%sf(l, k, j) = vL_x(l, k, j, i)
                                     vR_prim_vf(i)%sf(l, k, j) = vR_x(l, k, j, i)
                                 end do
@@ -854,11 +948,15 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 else if (norm_dir == 1) then
+                    bnd0_lo = iv%beg; bnd0_hi = iv%end
+                    bnd1_lo = is3_viscous%beg; bnd1_hi = is3_viscous%end
+                    bnd2_lo = is2_viscous%beg; bnd2_hi = is2_viscous%end
+                    bnd3_lo = is1_viscous%beg; bnd3_hi = is1_viscous%end
                     $:GPU_PARALLEL_LOOP(collapse=4)
-                    do i = iv%beg, iv%end
-                        do l = is3_viscous%beg, is3_viscous%end
-                            do k = is2_viscous%beg, is2_viscous%end
-                                do j = is1_viscous%beg, is1_viscous%end
+                    do i = bnd0_lo, bnd0_hi
+                        do l = bnd1_lo, bnd1_hi
+                            do k = bnd2_lo, bnd2_hi
+                                do j = bnd3_lo, bnd3_hi
                                     vL_prim_vf(i)%sf(j, k, l) = vL_x(j, k, l, i)
                                     vR_prim_vf(i)%sf(j, k, l) = vR_x(j, k, l, i)
                                 end do
@@ -876,6 +974,8 @@ contains
     subroutine s_apply_scalar_divergence_theorem(vL_vf, vR_vf, dv_ds_vf, norm_dir, ix, iy, iz, iv_in, dL, dim, buff_size_in)
 
         ! arrays of cell widths
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                                           :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(iv%beg:iv%end), intent(in)          :: vL_vf, vR_vf
         type(scalar_field), dimension(iv%beg:iv%end), intent(inout)       :: dv_ds_vf
         integer, intent(in)                                               :: norm_dir
@@ -897,10 +997,13 @@ contains
             ! integral-averages, inside each cell, or an arithmetic mean of these two at the cell-boundaries, to calculate the
             ! cell-averaged first-order spatial derivatives inside the cell.
 
+            bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+            bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+            bnd2_lo = is1_viscous%beg + 1; bnd2_hi = is1_viscous%end - 1
             $:GPU_PARALLEL_LOOP(collapse=3)
-            do l = is3_viscous%beg, is3_viscous%end
-                do k = is2_viscous%beg, is2_viscous%end
-                    do j = is1_viscous%beg + 1, is1_viscous%end - 1
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         $:GPU_LOOP(parallelism='[seq]')
                         do i = iv%beg, iv%end
                             dv_ds_vf(i)%sf(j, k, l) = 1._wp/((1._wp + wa_flg)*dL(j))*(wa_flg*vL_vf(i)%sf(j + 1, k, &
@@ -919,10 +1022,13 @@ contains
             ! integral-averages, inside each cell, or an arithmetic mean of these two at the cell-boundaries, to calculate the
             ! cell-averaged first-order spatial derivatives inside the cell.
 
+            bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+            bnd1_lo = is2_viscous%beg + 1; bnd1_hi = is2_viscous%end - 1
+            bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
             $:GPU_PARALLEL_LOOP(collapse=3)
-            do l = is3_viscous%beg, is3_viscous%end
-                do k = is2_viscous%beg + 1, is2_viscous%end - 1
-                    do j = is1_viscous%beg, is1_viscous%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         $:GPU_LOOP(parallelism='[seq]')
                         do i = iv%beg, iv%end
                             dv_ds_vf(i)%sf(j, k, l) = 1._wp/((1._wp + wa_flg)*dL(k))*(wa_flg*vL_vf(i)%sf(j, k + 1, &
@@ -941,10 +1047,13 @@ contains
             ! integral-averages, inside each cell, or an arithmetic mean of these two at the cell-boundaries, to calculate the
             ! cell-averaged first-order spatial derivatives inside the cell.
 
+            bnd0_lo = is3_viscous%beg + 1; bnd0_hi = is3_viscous%end - 1
+            bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+            bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
             $:GPU_PARALLEL_LOOP(collapse=3)
-            do l = is3_viscous%beg + 1, is3_viscous%end - 1
-                do k = is2_viscous%beg, is2_viscous%end
-                    do j = is1_viscous%beg, is1_viscous%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         $:GPU_LOOP(parallelism='[seq]')
                         do i = iv%beg, iv%end
                             dv_ds_vf(i)%sf(j, k, l) = 1._wp/((1._wp + wa_flg)*dL(l))*(wa_flg*vL_vf(i)%sf(j, k, &
@@ -962,6 +1071,8 @@ contains
     !> Computes the scalar gradient fields via finite differences
     subroutine s_compute_fd_gradient(var, grad_x, grad_y, grad_z)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                           :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), intent(in)    :: var
         type(scalar_field), intent(inout) :: grad_x
         type(scalar_field), intent(inout) :: grad_y
@@ -986,10 +1097,13 @@ contains
 
         $:GPU_UPDATE(device='[is1_viscous, is2_viscous, is3_viscous]')
 
+        bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+        bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+        bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
         $:GPU_PARALLEL_LOOP(collapse=3)
-        do l = is3_viscous%beg, is3_viscous%end
-            do k = is2_viscous%beg, is2_viscous%end
-                do j = is1_viscous%beg, is1_viscous%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     grad_x%sf(j, k, l) = (var%sf(j + 1, k, l) - var%sf(j - 1, k, l))/(x_cc(j + 1) - x_cc(j - 1))
                 end do
             end do
@@ -997,10 +1111,13 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
         if (n > 0) then
+            bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+            bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+            bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
             $:GPU_PARALLEL_LOOP(collapse=3)
-            do l = is3_viscous%beg, is3_viscous%end
-                do k = is2_viscous%beg, is2_viscous%end
-                    do j = is1_viscous%beg, is1_viscous%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         grad_y%sf(j, k, l) = (var%sf(j, k + 1, l) - var%sf(j, k - 1, l))/(y_cc(k + 1) - y_cc(k - 1))
                     end do
                 end do
@@ -1009,10 +1126,13 @@ contains
         end if
 
         if (p > 0) then
+            bnd0_lo = is3_viscous%beg; bnd0_hi = is3_viscous%end
+            bnd1_lo = is2_viscous%beg; bnd1_hi = is2_viscous%end
+            bnd2_lo = is1_viscous%beg; bnd2_hi = is1_viscous%end
             $:GPU_PARALLEL_LOOP(collapse=3)
-            do l = is3_viscous%beg, is3_viscous%end
-                do k = is2_viscous%beg, is2_viscous%end
-                    do j = is1_viscous%beg, is1_viscous%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         grad_z%sf(j, k, l) = (var%sf(j, k, l + 1) - var%sf(j, k, l - 1))/(z_cc(l + 1) - z_cc(l - 1))
                     end do
                 end do
@@ -1020,9 +1140,11 @@ contains
             $:END_GPU_PARALLEL_LOOP()
         end if
 
+        bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+        bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
         $:GPU_PARALLEL_LOOP(collapse=2)
-        do l = idwbuff(3)%beg, idwbuff(3)%end
-            do k = idwbuff(2)%beg, idwbuff(2)%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
                 grad_x%sf(idwbuff(1)%beg, k, l) = (-3._wp*var%sf(idwbuff(1)%beg, k, l) + 4._wp*var%sf(idwbuff(1)%beg + 1, k, &
                           & l) - var%sf(idwbuff(1)%beg + 2, k, l))/(x_cc(idwbuff(1)%beg + 2) - x_cc(idwbuff(1)%beg))
                 grad_x%sf(idwbuff(1)%end, k, l) = (+3._wp*var%sf(idwbuff(1)%end, k, l) - 4._wp*var%sf(idwbuff(1)%end - 1, k, &
@@ -1031,9 +1153,11 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
         if (n > 0) then
+            bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+            bnd1_lo = idwbuff(1)%beg; bnd1_hi = idwbuff(1)%end
             $:GPU_PARALLEL_LOOP(collapse=2)
-            do l = idwbuff(3)%beg, idwbuff(3)%end
-                do j = idwbuff(1)%beg, idwbuff(1)%end
+            do l = bnd0_lo, bnd0_hi
+                do j = bnd1_lo, bnd1_hi
                     grad_y%sf(j, idwbuff(2)%beg, l) = (-3._wp*var%sf(j, idwbuff(2)%beg, l) + 4._wp*var%sf(j, idwbuff(2)%beg + 1, &
                               & l) - var%sf(j, idwbuff(2)%beg + 2, l))/(y_cc(idwbuff(2)%beg + 2) - y_cc(idwbuff(2)%beg))
                     grad_y%sf(j, idwbuff(2)%end, l) = (+3._wp*var%sf(j, idwbuff(2)%end, l) - 4._wp*var%sf(j, idwbuff(2)%end - 1, &
@@ -1042,9 +1166,11 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
             if (p > 0) then
+                bnd0_lo = idwbuff(2)%beg; bnd0_hi = idwbuff(2)%end
+                bnd1_lo = idwbuff(1)%beg; bnd1_hi = idwbuff(1)%end
                 $:GPU_PARALLEL_LOOP(collapse=2)
-                do k = idwbuff(2)%beg, idwbuff(2)%end
-                    do j = idwbuff(1)%beg, idwbuff(1)%end
+                do k = bnd0_lo, bnd0_hi
+                    do j = bnd1_lo, bnd1_hi
                         grad_z%sf(j, k, idwbuff(3)%beg) = (-3._wp*var%sf(j, k, idwbuff(3)%beg) + 4._wp*var%sf(j, k, &
                                   & idwbuff(3)%beg + 1) - var%sf(j, k, &
                                   & idwbuff(3)%beg + 2))/(z_cc(idwbuff(3)%beg + 2) - z_cc(idwbuff(3)%beg))
@@ -1058,18 +1184,22 @@ contains
         end if
 
         if (bc_x%beg <= BC_GHOST_EXTRAP) then
+            bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+            bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
             $:GPU_PARALLEL_LOOP(collapse=2)
-            do l = idwbuff(3)%beg, idwbuff(3)%end
-                do k = idwbuff(2)%beg, idwbuff(2)%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
                     grad_x%sf(0, k, l) = (-3._wp*var%sf(0, k, l) + 4._wp*var%sf(1, k, l) - var%sf(2, k, l))/(x_cc(2) - x_cc(0))
                 end do
             end do
             $:END_GPU_PARALLEL_LOOP()
         end if
         if (bc_x%end <= BC_GHOST_EXTRAP) then
+            bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+            bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
             $:GPU_PARALLEL_LOOP(collapse=2)
-            do l = idwbuff(3)%beg, idwbuff(3)%end
-                do k = idwbuff(2)%beg, idwbuff(2)%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
                     grad_x%sf(m, k, l) = (3._wp*var%sf(m, k, l) - 4._wp*var%sf(m - 1, k, l) + var%sf(m - 2, k, &
                               & l))/(x_cc(m) - x_cc(m - 2))
                 end do
@@ -1078,18 +1208,22 @@ contains
         end if
         if (n > 0) then
             if (bc_y%beg <= BC_GHOST_EXTRAP .and. bc_y%beg /= BC_NULL) then
+                bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+                bnd1_lo = idwbuff(1)%beg; bnd1_hi = idwbuff(1)%end
                 $:GPU_PARALLEL_LOOP(collapse=2)
-                do l = idwbuff(3)%beg, idwbuff(3)%end
-                    do j = idwbuff(1)%beg, idwbuff(1)%end
+                do l = bnd0_lo, bnd0_hi
+                    do j = bnd1_lo, bnd1_hi
                         grad_y%sf(j, 0, l) = (-3._wp*var%sf(j, 0, l) + 4._wp*var%sf(j, 1, l) - var%sf(j, 2, l))/(y_cc(2) - y_cc(0))
                     end do
                 end do
                 $:END_GPU_PARALLEL_LOOP()
             end if
             if (bc_y%end <= BC_GHOST_EXTRAP) then
+                bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+                bnd1_lo = idwbuff(1)%beg; bnd1_hi = idwbuff(1)%end
                 $:GPU_PARALLEL_LOOP(collapse=2)
-                do l = idwbuff(3)%beg, idwbuff(3)%end
-                    do j = idwbuff(1)%beg, idwbuff(1)%end
+                do l = bnd0_lo, bnd0_hi
+                    do j = bnd1_lo, bnd1_hi
                         grad_y%sf(j, n, l) = (3._wp*var%sf(j, n, l) - 4._wp*var%sf(j, n - 1, l) + var%sf(j, n - 2, &
                                   & l))/(y_cc(n) - y_cc(n - 2))
                     end do
@@ -1098,9 +1232,11 @@ contains
             end if
             if (p > 0) then
                 if (bc_z%beg <= BC_GHOST_EXTRAP) then
+                    bnd0_lo = idwbuff(2)%beg; bnd0_hi = idwbuff(2)%end
+                    bnd1_lo = idwbuff(1)%beg; bnd1_hi = idwbuff(1)%end
                     $:GPU_PARALLEL_LOOP(collapse=2)
-                    do k = idwbuff(2)%beg, idwbuff(2)%end
-                        do j = idwbuff(1)%beg, idwbuff(1)%end
+                    do k = bnd0_lo, bnd0_hi
+                        do j = bnd1_lo, bnd1_hi
                             grad_z%sf(j, k, 0) = (-3._wp*var%sf(j, k, 0) + 4._wp*var%sf(j, k, 1) - var%sf(j, k, &
                                       & 2))/(z_cc(2) - z_cc(0))
                         end do
@@ -1108,9 +1244,11 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
                 end if
                 if (bc_z%end <= BC_GHOST_EXTRAP) then
+                    bnd0_lo = idwbuff(2)%beg; bnd0_hi = idwbuff(2)%end
+                    bnd1_lo = idwbuff(1)%beg; bnd1_hi = idwbuff(1)%end
                     $:GPU_PARALLEL_LOOP(collapse=2)
-                    do k = idwbuff(2)%beg, idwbuff(2)%end
-                        do j = idwbuff(1)%beg, idwbuff(1)%end
+                    do k = bnd0_lo, bnd0_hi
+                        do j = bnd1_lo, bnd1_hi
                             grad_z%sf(j, k, p) = (3._wp*var%sf(j, k, p) - 4._wp*var%sf(j, k, p - 1) + var%sf(j, k, &
                                       & p - 2))/(z_cc(p) - z_cc(p - 2))
                         end do

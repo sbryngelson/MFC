@@ -23,6 +23,8 @@ contains
     subroutine s_lf_riemann_solver(qL_prim_rsx_vf, dqL_prim_dx_vf, dqL_prim_dy_vf, dqL_prim_dz_vf, qL_prim_vf, qR_prim_rsx_vf, &
                                    & dqR_prim_dx_vf, dqR_prim_dy_vf, dqR_prim_dz_vf, qR_prim_vf, q_prim_vf, norm_dir, ix, iy, iz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: qL_prim_rsx_vf, qR_prim_rsx_vf
         type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
         type(scalar_field), allocatable, dimension(:), intent(inout) :: qL_prim_vf, qR_prim_vf
@@ -90,6 +92,9 @@ contains
                 #:set SV = STENCIL_VAR
                 #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
                 if (norm_dir == ${NORM_DIR}$) then
+                    bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                    bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                    bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                     $:GPU_PARALLEL_LOOP(collapse=3, privateArrays='[alpha_rho_L, alpha_rho_R, vel_L, vel_R, alpha_L, alpha_R, &
                                         & Re_L, Re_R, Ys_L, Ys_R, Cp_iL, Cp_iR, Xs_L, Xs_R, Gamma_iL, Gamma_iR, vel_grad_L, &
                                         & vel_grad_R, idx_right_phys]', private='[i, j, k, l, s_L, s_R, pcorr, vel_L_rms, &
@@ -97,9 +102,9 @@ contains
                                         & pi_inf_L, pi_inf_R, qv_L, qv_R, c_L, c_R, Gamm_L, Gamm_R, E_L, E_R, ptilde_L, ptilde_R, &
                                         & s_M, s_P, Cp_L, Cp_R, Cv_L, Cv_R, R_gas_L, R_gas_R, MW_L, MW_R, T_L, T_R, Y_L, Y_R]', &
                                         & firstprivate='[Re_size_loc1, Re_size_loc2]')
-                    do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                        do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                            do j = ${X_BND}$%beg, ${X_BND}$%end
+                    do l = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = 1, eqn_idx%cont%end
                                     alpha_rho_L(i) = qL_prim_rsx_vf(${SF('')}$, i)
@@ -341,12 +346,15 @@ contains
             #:endfor
 
             if (viscous) then
+                bnd0_lo = isz%beg; bnd0_hi = isz%end
+                bnd1_lo = isy%beg; bnd1_hi = isy%end
+                bnd2_lo = isx%beg; bnd2_hi = isx%end
                 $:GPU_PARALLEL_LOOP(collapse=3, privateArrays='[idx_right_phys, vel_grad_L, vel_grad_R, alpha_L, alpha_R, vel_L, &
                                     & vel_R, Re_L, Re_R]', private='[i, j, k, l]', copyin='[norm_dir]', &
                                     & firstprivate='[Re_size_loc1, Re_size_loc2]')
-                do l = isz%beg, isz%end
-                    do k = isy%beg, isy%end
-                        do j = isx%beg, isx%end
+                do l = bnd0_lo, bnd0_hi
+                    do k = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
                             idx_right_phys(1) = j
                             idx_right_phys(2) = k
                             idx_right_phys(3) = l

@@ -240,6 +240,8 @@ contains
     !> Apply the body force of Wei & Freund (JFM, 2005)
     subroutine s_compute_body_force_with_spatial_support(t, bounds)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                           :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         real(wp), intent(in)                              :: t
         type(int_bounds_info), dimension(1:3), intent(in) :: bounds
         real(wp)                                          :: support                    !< spatial support
@@ -250,10 +252,13 @@ contains
         ! Safety check: if convective velocity is too small, skip computation
 
         if (abs(spbf_conv_vel) < 1.0e-12_wp) then
+            bnd0_lo = bounds(3)%beg; bnd0_hi = bounds(3)%end
+            bnd1_lo = bounds(2)%beg; bnd1_hi = bounds(2)%end
+            bnd2_lo = bounds(1)%beg; bnd2_hi = bounds(1)%end
             $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3, copyin='[bounds]')
-            do l = bounds(3)%beg, bounds(3)%end
-                do k = bounds(2)%beg, bounds(2)%end
-                    do j = bounds(1)%beg, bounds(1)%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         spbf_source_x(j, k, l) = 0._wp
                         spbf_source_y(j, k, l) = 0._wp
                     end do
@@ -263,10 +268,13 @@ contains
             return
         end if
 
+        bnd0_lo = bounds(3)%beg; bnd0_hi = bounds(3)%end
+        bnd1_lo = bounds(2)%beg; bnd1_hi = bounds(2)%end
+        bnd2_lo = bounds(1)%beg; bnd2_hi = bounds(1)%end
         $:GPU_PARALLEL_LOOP(private='[support, theta_x, theta_y, pre_fac, f, j, k, l]', collapse=3, copyin='[bounds, t]')
-        do l = bounds(3)%beg, bounds(3)%end
-            do k = bounds(2)%beg, bounds(2)%end
-                do j = bounds(1)%beg, bounds(1)%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     support = exp(-spbf_sigma*((x_cc(j) - spbf_xc)**2 + (y_cc(k) - spbf_yc)**2))
                     spbf_source_x(j, k, l) = 0._wp
                     spbf_source_y(j, k, l) = 0._wp
@@ -291,14 +299,19 @@ contains
     !> Compute the mixture density at each cell center
     subroutine s_compute_mixture_density(q_cons_vf, bounds)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                             :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
         type(int_bounds_info), dimension(1:3), intent(in)   :: bounds
         integer                                             :: i, j, k, l  !< standard iterators
 
+        bnd0_lo = bounds(3)%beg; bnd0_hi = bounds(3)%end
+        bnd1_lo = bounds(2)%beg; bnd1_hi = bounds(2)%end
+        bnd2_lo = bounds(1)%beg; bnd2_hi = bounds(1)%end
         $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3, copyin='[bounds]')
-        do l = bounds(3)%beg, bounds(3)%end
-            do k = bounds(2)%beg, bounds(2)%end
-                do j = bounds(1)%beg, bounds(1)%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     rhoM(j, k, l) = 0._wp
                     do i = 1, num_fluids
                         rhoM(j, k, l) = rhoM(j, k, l) + q_cons_vf(eqn_idx%cont%beg + i - 1)%sf(j, k, l)
@@ -313,11 +326,13 @@ contains
     !> Compute the body force source terms for momentum and energy equations
     subroutine s_compute_body_forces_rhs(q_prim_vf, q_cons_vf, rhs_vf, bounds)
 
-        type(scalar_field), dimension(sys_size), intent(in)    :: q_prim_vf
-        type(scalar_field), dimension(sys_size), intent(in)    :: q_cons_vf
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
+        type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
+        type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
         type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf
-        type(int_bounds_info), dimension(1:3), intent(in)      :: bounds
-        integer                                                :: i, j, k, l  !< Loop variables
+        type(int_bounds_info), dimension(1:3), intent(in) :: bounds
+        integer :: i, j, k, l  !< Loop variables
 
         if (bf_x .or. bf_y .or. bf_z) then
             call s_compute_acceleration(mytime)
@@ -329,11 +344,15 @@ contains
 
         call s_compute_mixture_density(q_cons_vf, bounds)
 
+        bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%E
+        bnd1_lo = bounds(3)%beg; bnd1_hi = bounds(3)%end
+        bnd2_lo = bounds(2)%beg; bnd2_hi = bounds(2)%end
+        bnd3_lo = bounds(1)%beg; bnd3_hi = bounds(1)%end
         $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4, copyin='[bounds]')
-        do i = eqn_idx%mom%beg, eqn_idx%E
-            do l = bounds(3)%beg, bounds(3)%end
-                do k = bounds(2)%beg, bounds(2)%end
-                    do j = bounds(1)%beg, bounds(1)%end
+        do i = bnd0_lo, bnd0_hi
+            do l = bnd1_lo, bnd1_hi
+                do k = bnd2_lo, bnd2_hi
+                    do j = bnd3_lo, bnd3_hi
                         rhs_vf(i)%sf(j, k, l) = 0._wp
                     end do
                 end do
@@ -342,10 +361,13 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
         if (bf_spatial_support) then
+            bnd0_lo = bounds(3)%beg; bnd0_hi = bounds(3)%end
+            bnd1_lo = bounds(2)%beg; bnd1_hi = bounds(2)%end
+            bnd2_lo = bounds(1)%beg; bnd2_hi = bounds(1)%end
             $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3, copyin='[bounds]')
-            do l = bounds(3)%beg, bounds(3)%end
-                do k = bounds(2)%beg, bounds(2)%end
-                    do j = bounds(1)%beg, bounds(1)%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         rhs_vf(eqn_idx%mom%beg)%sf(j, k, l) = rhs_vf(eqn_idx%mom%beg)%sf(j, k, l) + spbf_source_x(j, k, l)
                         rhs_vf(eqn_idx%mom%beg + 1)%sf(j, k, l) = rhs_vf(eqn_idx%mom%beg + 1)%sf(j, k, l) + spbf_source_y(j, k, l)
                         ! Energy work term u*f: velocity (mom/rho) dotted with the momentum source,
@@ -362,10 +384,13 @@ contains
         ! bf_*: rho*g; mean pressure gradient: uniform -dP/dx in fluid cells. Energy source u*f for both.
         #:for DIR, XYZ in [(1, 'x'), (2, 'y'), (3, 'z')]
             if (bf_${XYZ}$ .or. mpg_dir(${DIR}$)) then
+                bnd0_lo = bounds(3)%beg; bnd0_hi = bounds(3)%end
+                bnd1_lo = bounds(2)%beg; bnd1_hi = bounds(2)%end
+                bnd2_lo = bounds(1)%beg; bnd2_hi = bounds(1)%end
                 $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3, copyin='[bounds]')
-                do l = bounds(3)%beg, bounds(3)%end
-                    do k = bounds(2)%beg, bounds(2)%end
-                        do j = bounds(1)%beg, bounds(1)%end
+                do l = bnd0_lo, bnd0_hi
+                    do k = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
                             rhs_vf(eqn_idx%mom%beg + ${DIR - 1}$)%sf(j, k, l) = rhs_vf(eqn_idx%mom%beg + ${DIR - 1}$)%sf(j, k, &
                                    & l) + rhoM(j, k, l)*accel_bf(${DIR}$) + mpg_force(${DIR}$)
                             rhs_vf(eqn_idx%E)%sf(j, k, l) = rhs_vf(eqn_idx%E)%sf(j, k, &
@@ -380,10 +405,13 @@ contains
 
         ! Thermostat: uniform heat source per volume
         if (mts_on) then
+            bnd0_lo = bounds(3)%beg; bnd0_hi = bounds(3)%end
+            bnd1_lo = bounds(2)%beg; bnd1_hi = bounds(2)%end
+            bnd2_lo = bounds(1)%beg; bnd2_hi = bounds(1)%end
             $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3, copyin='[bounds]')
-            do l = bounds(3)%beg, bounds(3)%end
-                do k = bounds(2)%beg, bounds(2)%end
-                    do j = bounds(1)%beg, bounds(1)%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         rhs_vf(eqn_idx%E)%sf(j, k, l) = rhs_vf(eqn_idx%E)%sf(j, k, l) + mts_qdot
                     end do
                 end do
@@ -516,25 +544,27 @@ contains
     !> bounding box of the Gaussian window.
     subroutine s_compute_synthetic_forces_rhs(q_prim_vf, q_cons_vf, rhs_vf)
 
-        type(scalar_field), dimension(sys_size), intent(in)    :: q_prim_vf
-        type(scalar_field), dimension(sys_size), intent(in)    :: q_cons_vf
+        integer :: bnd0_hi, bnd0_lo  !< collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
+        type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
         type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf
-        integer                                                :: i, j, k, l, n_mode, turb_idx, iq
-        real(wp)                                               :: pos_x, pos_y, pos_z
-        real(wp)                                               :: gauss_env, G_norm, f_scale
-        real(wp)                                               :: a_m, phase_arg
-        real(wp)                                               :: force_x, force_y, force_z
-        real(wp)                                               :: rho_local, u_local_x, u_local_y, u_local_z
-        real(wp)                                               :: adv_offset
-        logical                                                :: in_box
+        integer :: i, j, k, l, n_mode, turb_idx, iq
+        real(wp) :: pos_x, pos_y, pos_z
+        real(wp) :: gauss_env, G_norm, f_scale
+        real(wp) :: a_m, phase_arg
+        real(wp) :: force_x, force_y, force_z
+        real(wp) :: rho_local, u_local_x, u_local_y, u_local_z
+        real(wp) :: adv_offset
+        logical :: in_box
 
         ! G_bar for exp(-pi/2 * (2x/L)^2) over [-L/2, L/2]: erf(sqrt(pi/2))/sqrt(pi/2) ~ 0.7602
         real(wp), parameter :: G_BAR = 0.760173_wp
 
         ! Zero momentum and energy RHS for the synthetic turbulence pass
 
+        bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%E
         $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
-        do i = eqn_idx%mom%beg, eqn_idx%E
+        do i = bnd0_lo, bnd0_hi
             do l = 0, p
                 do k = 0, n
                     do j = 0, m

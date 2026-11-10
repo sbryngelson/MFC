@@ -758,15 +758,21 @@ contains
         real(wp) :: pres, rho, nbub, c, alf, momsum, drdt, drdt2, chi_vw, x_vw, rho_mw, k_mw, grad_T
         integer  :: id1, id2, id3, i1, i2, j, q, r
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_lo, bnd0_hi, bnd1_lo, bnd1_hi, bnd2_lo, bnd2_hi
+
         is1_qbmm = ix; is2_qbmm = iy; is3_qbmm = iz
         $:GPU_UPDATE(device='[is1_qbmm, is2_qbmm, is3_qbmm]')
 
+        bnd0_lo = is3_qbmm%beg; bnd0_hi = is3_qbmm%end
+        bnd1_lo = is2_qbmm%beg; bnd1_hi = is2_qbmm%end
+        bnd2_lo = is1_qbmm%beg; bnd2_hi = is1_qbmm%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[id1, id2, id3, moms, msum, wght, abscX, abscY, wght_pb, wght_mv, wght_ht, &
                             & coeff, ht, r, q, pres, rho, nbub, c, alf, momsum, drdt, drdt2, chi_vw, x_vw, rho_mw, k_mw, grad_T, &
                             & i1, i2, j]')
-        do id3 = is3_qbmm%beg, is3_qbmm%end
-            do id2 = is2_qbmm%beg, is2_qbmm%end
-                do id1 = is1_qbmm%beg, is1_qbmm%end
+        do id3 = bnd0_lo, bnd0_hi
+            do id2 = bnd1_lo, bnd1_hi
+                do id1 = bnd2_lo, bnd2_hi
                     alf = q_prim_vf(eqn_idx%alf)%sf(id1, id2, id3)
                     pres = q_prim_vf(eqn_idx%E)%sf(id1, id2, id3)
                     rho = q_prim_vf(eqn_idx%cont%beg)%sf(id1, id2, id3)

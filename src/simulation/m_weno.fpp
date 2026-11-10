@@ -871,13 +871,18 @@ contains
 
     subroutine s_pack_weno_input_arr(v_vf)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                       :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(1:), intent(in) :: v_vf
         integer                                       :: i, j, k, l, n_vars
 
+        bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+        bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
+        bnd2_lo = idwbuff(1)%beg; bnd2_hi = idwbuff(1)%end
         $:GPU_PARALLEL_LOOP(collapse=3)
-        do l = idwbuff(3)%beg, idwbuff(3)%end
-            do k = idwbuff(2)%beg, idwbuff(2)%end
-                do j = idwbuff(1)%beg, idwbuff(1)%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     $:GPU_LOOP(parallelism='[seq]')
                     do i = 1, v_size
                         v_rs_weno(j, k, l, i) = v_vf(i)%sf(j, k, l)
@@ -892,12 +897,14 @@ contains
     !> Perform WENO reconstruction of left and right cell-boundary values from cell-averaged variables
     subroutine s_weno(v_vf, vL_rs_vf_x, vR_rs_vf_x, weno_dir, is1_weno_d, is2_weno_d, is3_weno_d, packed)
 
-        type(scalar_field), dimension(1:), intent(in)                                          :: v_vf
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
+        type(scalar_field), dimension(1:), intent(in) :: v_vf
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf_x
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_rs_vf_x
-        integer, intent(in)                                                                    :: weno_dir
-        type(int_bounds_info), intent(in)                                                      :: is1_weno_d, is2_weno_d, is3_weno_d
-        logical, optional, intent(in)                                                          :: packed  !< v_rs_weno holds v_vf
+        integer, intent(in) :: weno_dir
+        type(int_bounds_info), intent(in) :: is1_weno_d, is2_weno_d, is3_weno_d
+        logical, optional, intent(in) :: packed  !< v_rs_weno holds v_vf
 
         ! Non-case-optimized amdflang sizes these 0:4 (weno_num_stencils is not constant): whole-array ops span all five entries, so
         ! unused ones are zeroed (alpha) or the op is sliced (WENO5)
@@ -933,11 +940,14 @@ contains
 
         if (weno_order == 1) then
             if (weno_dir == 1) then
+                bnd1_lo = is3_weno%beg; bnd1_hi = is3_weno%end
+                bnd2_lo = is2_weno%beg; bnd2_hi = is2_weno%end
+                bnd3_lo = is1_weno%beg; bnd3_hi = is1_weno%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, v_size
-                    do l = is3_weno%beg, is3_weno%end
-                        do k = is2_weno%beg, is2_weno%end
-                            do j = is1_weno%beg, is1_weno%end
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do j = bnd3_lo, bnd3_hi
                                 vL_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
                                 vR_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
                             end do
@@ -946,11 +956,14 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
             else if (weno_dir == 2) then
+                bnd1_lo = is3_weno%beg; bnd1_hi = is3_weno%end
+                bnd2_lo = is1_weno%beg; bnd2_hi = is1_weno%end
+                bnd3_lo = is2_weno%beg; bnd3_hi = is2_weno%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, v_size
-                    do l = is3_weno%beg, is3_weno%end
-                        do j = is1_weno%beg, is1_weno%end
-                            do k = is2_weno%beg, is2_weno%end
+                    do l = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
+                            do k = bnd3_lo, bnd3_hi
                                 vL_rs_vf_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
                                 vR_rs_vf_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
                             end do
@@ -959,11 +972,14 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
             else if (weno_dir == 3) then
+                bnd1_lo = is1_weno%beg; bnd1_hi = is1_weno%end
+                bnd2_lo = is2_weno%beg; bnd2_hi = is2_weno%end
+                bnd3_lo = is3_weno%beg; bnd3_hi = is3_weno%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, v_size
-                    do j = is1_weno%beg, is1_weno%end
-                        do k = is2_weno%beg, is2_weno%end
-                            do l = is3_weno%beg, is3_weno%end
+                    do j = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do l = bnd3_lo, bnd3_hi
                                 vL_rs_vf_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
                                 vR_rs_vf_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
                             end do
@@ -987,11 +1003,14 @@ contains
                 #:set SV = STENCIL_VAR
                 #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
                 if (weno_dir == ${WENO_DIR}$) then
+                    bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                    bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                    bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                     $:GPU_PARALLEL_LOOP(collapse=4, privateArrays='[beta, dvd, poly, omega, alpha]', &
                                         & private='[tau, q, vp0, vp1, vm1]')
-                    do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                        do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                            do j = ${X_BND}$%beg, ${X_BND}$%end
+                    do l = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 do i = 1, v_size
                                     ! reconstruct from left side
 
@@ -1078,11 +1097,14 @@ contains
                     #:set SV = STENCIL_VAR
                     #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
                     if (weno_dir == ${WENO_DIR}$) then
+                        bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                        bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                        bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                         $:GPU_PARALLEL_LOOP(collapse=3, privateArrays='[dvd, poly, beta, alpha, omega, delta]', private='[tau, q, &
                                             & vp0, vm1, vm2, vp1, vp2]')
-                        do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                            do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                                do j = ${X_BND}$%beg, ${X_BND}$%end
+                        do l = bnd0_lo, bnd0_hi
+                            do k = bnd1_lo, bnd1_hi
+                                do j = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = 1, v_size
                                         ! reconstruct from left side
@@ -1237,11 +1259,14 @@ contains
                     #:set SV = STENCIL_VAR
                     #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
                     if (weno_dir == ${WENO_DIR}$) then
+                        bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                        bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                        bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                         $:GPU_PARALLEL_LOOP(collapse=3, privateArrays='[poly, beta, alpha, omega, delta, dvd, v]', private='[tau, &
                                             & q, vp0, vp1, vp2, vp3, vm1, vm2, vm3]')
-                        do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                            do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                                do j = ${X_BND}$%beg, ${X_BND}$%end
+                        do l = bnd0_lo, bnd0_hi
+                            do k = bnd1_lo, bnd1_hi
+                                do j = bnd2_lo, bnd2_hi
                                     $:GPU_LOOP(parallelism='[seq]')
                                     do i = 1, v_size
                                         alpha(:) = 0._wp
@@ -1477,6 +1502,8 @@ contains
     !> Enforce monotonicity-preserving bounds on the WENO reconstruction
     subroutine s_preserve_monotonicity(v_rs_ws, vL_rs_vf, vR_rs_vf, weno_dir)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(in) :: v_rs_ws
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf, vR_rs_vf
         integer, intent(in) :: weno_dir
@@ -1503,10 +1530,13 @@ contains
             #:set SV = STENCIL_VAR
             #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
             if (weno_dir == ${WENO_DIR}$) then
+                bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                 $:GPU_PARALLEL_LOOP(collapse=4, privateArrays='[d]', private='[vp0, vp1, vp2, vm1, vm2]')
-                do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                    do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                        do j = ${X_BND}$%beg, ${X_BND}$%end
+                do l = bnd0_lo, bnd0_hi
+                    do k = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
                             do i = 1, v_size
                                 ! Second-order undivided differences for curvature estimation
 

@@ -603,11 +603,13 @@ contains
     !> Compute the right-hand side of the semi-discrete governing equations for a single time stage
     impure subroutine s_compute_rhs(q_cons_vf, q_T_sf, q_prim_vf, bc_type, rhs_vf, pb_in, rhs_pb, mv_in, rhs_mv, t_step, stage)
 
-        type(scalar_field), dimension(sys_size), intent(inout)                                     :: q_cons_vf
-        type(scalar_field), intent(inout)                                                          :: q_T_sf
-        type(scalar_field), dimension(sys_size), intent(inout)                                     :: q_prim_vf
-        type(integer_field), dimension(1:num_dims,1:2), intent(in)                                 :: bc_type
-        type(scalar_field), dimension(sys_size), intent(inout)                                     :: rhs_vf
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
+        type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
+        type(scalar_field), intent(inout) :: q_T_sf
+        type(scalar_field), dimension(sys_size), intent(inout) :: q_prim_vf
+        type(integer_field), dimension(1:num_dims,1:2), intent(in) :: bc_type
+        type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf
         real(stp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:,1:), intent(inout) :: pb_in
 
         ! TODO :: I think these other two variables need to be stp as well, but it doesn't compile like that right now
@@ -628,10 +630,13 @@ contains
         if (.not. igr) then
             ! Association/Population of Working Variables
             n_copy = size(cons_copy_idx)
+            bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+            bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
+            bnd2_lo = idwbuff(1)%beg; bnd2_hi = idwbuff(1)%end
             $:GPU_PARALLEL_LOOP(private='[i, j, k, l, q]', collapse=3)
-            do l = idwbuff(3)%beg, idwbuff(3)%end
-                do k = idwbuff(2)%beg, idwbuff(2)%end
-                    do j = idwbuff(1)%beg, idwbuff(1)%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         $:GPU_LOOP(parallelism='[seq]')
                         do q = 1, n_copy
                             i = cons_copy_idx(q)
@@ -645,10 +650,13 @@ contains
             ! Converting Conservative to Primitive Variables
 
             if (mpp_lim .and. bubbles_euler) then
+                bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+                bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
+                bnd2_lo = idwbuff(1)%beg; bnd2_hi = idwbuff(1)%end
                 $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3)
-                do l = idwbuff(3)%beg, idwbuff(3)%end
-                    do k = idwbuff(2)%beg, idwbuff(2)%end
-                        do j = idwbuff(1)%beg, idwbuff(1)%end
+                do l = bnd0_lo, bnd0_hi
+                    do k = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
                             alf_sum%sf(j, k, l) = 0._wp
                             $:GPU_LOOP(parallelism='[seq]')
                             do i = eqn_idx%adv%beg, eqn_idx%adv%end - 1
@@ -965,11 +973,14 @@ contains
             copy_end = merge(eqn_idx%psi, 0, hyper_cleaning)
         end if
         if (.not. igr) then
+            bnd1_lo = idwbuff(3)%beg; bnd1_hi = idwbuff(3)%end
+            bnd2_lo = idwbuff(2)%beg; bnd2_hi = idwbuff(2)%end
+            bnd3_lo = idwbuff(1)%beg; bnd3_hi = idwbuff(1)%end
             $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
             do i = copy_beg, copy_end
-                do l = idwbuff(3)%beg, idwbuff(3)%end
-                    do k = idwbuff(2)%beg, idwbuff(2)%end
-                        do j = idwbuff(1)%beg, idwbuff(1)%end
+                do l = bnd1_lo, bnd1_hi
+                    do k = bnd2_lo, bnd2_hi
+                        do j = bnd3_lo, bnd3_hi
                             q_prim_vf(i)%sf(j, k, l) = q_prim_qp%vf(i)%sf(j, k, l)
                         end do
                     end do
@@ -987,6 +998,8 @@ contains
     !! sweep direction; both anchored passes of the fused dual-pass HLLD solve in that direction reuse these buffers.
     subroutine s_reconstruct_riemann_states(id)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer             :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
         integer, intent(in) :: id
         integer             :: i, j, k, l  !< Generic loop iterators
 
@@ -1006,11 +1019,15 @@ contains
                 iv%beg = eqn_idx%mom%beg; iv%end = eqn_idx%mom%end; iglob = id
                 $:GPU_UPDATE(device='[iv, iglob]')
 
+                bnd0_lo = iv%beg; bnd0_hi = iv%end
+                bnd1_lo = idwbuff(3)%beg; bnd1_hi = idwbuff(3)%end
+                bnd2_lo = idwbuff(2)%beg; bnd2_hi = idwbuff(2)%end
+                bnd3_lo = idwbuff(1)%beg; bnd3_hi = idwbuff(1)%end
                 $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
-                do i = iv%beg, iv%end
-                    do l = idwbuff(3)%beg, idwbuff(3)%end
-                        do k = idwbuff(2)%beg, idwbuff(2)%end
-                            do j = idwbuff(1)%beg, idwbuff(1)%end
+                do i = bnd0_lo, bnd0_hi
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do j = bnd3_lo, bnd3_hi
                                 qL_rsx_vf(j, k, l, i) = qL_prim(iglob)%vf(i)%sf(j, k, l)
                                 qR_rsx_vf(j, k, l, i) = qR_prim(iglob)%vf(i)%sf(j, k, l)
                             end do
@@ -1046,11 +1063,15 @@ contains
                 iv%beg = eqn_idx%mom%beg; iv%end = eqn_idx%mom%end; iglob = id
                 $:GPU_UPDATE(device='[iv, iglob]')
 
+                bnd0_lo = iv%beg; bnd0_hi = iv%end
+                bnd1_lo = idwbuff(3)%beg; bnd1_hi = idwbuff(3)%end
+                bnd2_lo = idwbuff(2)%beg; bnd2_hi = idwbuff(2)%end
+                bnd3_lo = idwbuff(1)%beg; bnd3_hi = idwbuff(1)%end
                 $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
-                do i = iv%beg, iv%end
-                    do l = idwbuff(3)%beg, idwbuff(3)%end
-                        do k = idwbuff(2)%beg, idwbuff(2)%end
-                            do j = idwbuff(1)%beg, idwbuff(1)%end
+                do i = bnd0_lo, bnd0_hi
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do j = bnd3_lo, bnd3_hi
                                 qL_rsx_vf(j, k, l, i) = qL_prim(iglob)%vf(i)%sf(j, k, l)
                                 qR_rsx_vf(j, k, l, i) = qR_prim(iglob)%vf(i)%sf(j, k, l)
                             end do
@@ -1545,14 +1566,15 @@ contains
         !> Add the advection source flux-difference terms for a single coordinate direction to the RHS
         subroutine s_add_directional_advection_source_terms(current_idir, rhs_vf_arg, q_cons_vf_arg, q_prim_vf_arg, Kterm_arg)
 
-            integer, intent(in)                                    :: current_idir
+            integer :: bnd0_hi, bnd0_lo  !< collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+            integer, intent(in) :: current_idir
             type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf_arg
-            type(vector_field), intent(in)                         :: q_cons_vf_arg
-            type(vector_field), intent(in)                         :: q_prim_vf_arg
-            real(wp), allocatable, dimension(:,:,:), intent(in)    :: Kterm_arg
-            integer                                                :: j_adv, k_idx, l_idx, q_idx
-            real(wp)                                               :: local_inv_ds, local_term_coeff, local_flux1, local_flux2
-            real(wp)                                               :: local_k_term_val
+            type(vector_field), intent(in) :: q_cons_vf_arg
+            type(vector_field), intent(in) :: q_prim_vf_arg
+            real(wp), allocatable, dimension(:,:,:), intent(in) :: Kterm_arg
+            integer :: j_adv, k_idx, l_idx, q_idx
+            real(wp) :: local_inv_ds, local_term_coeff, local_flux1, local_flux2
+            real(wp) :: local_k_term_val
 
             ! Three mutually exclusive modes for the NC volume fraction advection source term:
 
@@ -1566,9 +1588,10 @@ contains
             case (1)  ! x-direction
                 if (adv_src_mode == adv_src_mode_alpha_iface) then
                     ! Alpha-interface: flux_src(j_adv) supplies interface alpha_k. RHS applies velocity * d(alpha_k)/dx.
+                    bnd0_lo = eqn_idx%adv%beg; bnd0_hi = eqn_idx%adv%end
                     $:GPU_PARALLEL_LOOP(collapse=4,private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
                                         & local_flux1, local_flux2]')
-                    do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
+                    do j_adv = bnd0_lo, bnd0_hi
                         do q_idx = 0, p  ! z_extent
                             do l_idx = 0, n  ! y_extent
                                 do k_idx = 0, m  ! x_extent
@@ -1601,9 +1624,10 @@ contains
                 else if (adv_src_mode == adv_src_mode_vel_iface) then
                     ! u-interface: flux_src(adv%beg) supplies one shared face-normal velocity. RHS applies alpha_k * du/dx.
                     if (.not. adv_fused) then  ! otherwise added in the flux-difference kernel
+                        bnd0_lo = eqn_idx%adv%beg; bnd0_hi = eqn_idx%adv%end
                         $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
                                             & local_flux1, local_flux2]')
-                        do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
+                        do j_adv = bnd0_lo, bnd0_hi
                             do q_idx = 0, p; do l_idx = 0, n; do k_idx = 0, m
                                 local_inv_ds = 1._wp/dx(k_idx)
                                 local_term_coeff = q_cons_vf_arg%vf(j_adv)%sf(k_idx, l_idx, q_idx)
@@ -1634,9 +1658,10 @@ contains
             case (2)  ! y-direction
                 if (adv_src_mode == adv_src_mode_alpha_iface) then
                     ! Alpha-interface: flux_src(j_adv) supplies interface alpha_k. RHS applies velocity * d(alpha_k)/dy.
+                    bnd0_lo = eqn_idx%adv%beg; bnd0_hi = eqn_idx%adv%end
                     $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
                                         & local_flux1, local_flux2]')
-                    do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
+                    do j_adv = bnd0_lo, bnd0_hi
                         do l_idx = 0, p  ! z_extent
                             do k_idx = 0, n  ! y_extent
                                 do q_idx = 0, m  ! x_extent
@@ -1682,9 +1707,10 @@ contains
                 else if (adv_src_mode == adv_src_mode_vel_iface) then
                     ! u-interface: flux_src(adv%beg) supplies one shared face-normal velocity. RHS applies alpha_k * du/dy.
                     if (.not. adv_fused) then  ! otherwise added in the flux-difference kernel
+                        bnd0_lo = eqn_idx%adv%beg; bnd0_hi = eqn_idx%adv%end
                         $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
                                             & local_flux1, local_flux2]')
-                        do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
+                        do j_adv = bnd0_lo, bnd0_hi
                             do l_idx = 0, p; do k_idx = 0, n; do q_idx = 0, m
                                 local_inv_ds = 1._wp/dy(k_idx)
                                 local_term_coeff = q_cons_vf_arg%vf(j_adv)%sf(q_idx, k_idx, l_idx)
@@ -1729,9 +1755,10 @@ contains
             case (3)  ! z-direction
                 if (grid_geometry == 3) then
                     if (adv_src_mode == adv_src_mode_alpha_iface) then
+                        bnd0_lo = eqn_idx%adv%beg; bnd0_hi = eqn_idx%adv%end
                         $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
                                             & local_flux1, local_flux2]')
-                        do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
+                        do j_adv = bnd0_lo, bnd0_hi
                             do k_idx = 0, p  ! z_extent
                                 do q_idx = 0, n  ! y_extent
                                     do l_idx = 0, m  ! x_extent
@@ -1763,9 +1790,10 @@ contains
                         end if
                     else if (adv_src_mode == adv_src_mode_vel_iface) then
                         ! u-interface: flux_src(adv%beg) supplies one shared face-normal velocity. RHS applies alpha_k * du/dz.
+                        bnd0_lo = eqn_idx%adv%beg; bnd0_hi = eqn_idx%adv%end
                         $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
                                             & local_flux1, local_flux2]')
-                        do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
+                        do j_adv = bnd0_lo, bnd0_hi
                             do k_idx = 0, p; do q_idx = 0, n; do l_idx = 0, m
                                 local_inv_ds = 1._wp/(dz(k_idx)*y_cc(q_idx))
                                 local_term_coeff = q_cons_vf_arg%vf(j_adv)%sf(l_idx, q_idx, k_idx)
@@ -1795,9 +1823,10 @@ contains
                 else  ! non-cylindrical z-direction
                     if (adv_src_mode == adv_src_mode_alpha_iface) then
                         ! Alpha-interface: flux_src(j_adv) supplies interface alpha_k. RHS applies velocity * d(alpha_k)/dz.
+                        bnd0_lo = eqn_idx%adv%beg; bnd0_hi = eqn_idx%adv%end
                         $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
                                             & local_flux1, local_flux2]')
-                        do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
+                        do j_adv = bnd0_lo, bnd0_hi
                             do k_idx = 0, p  ! z_extent
                                 do q_idx = 0, n  ! y_extent
                                     do l_idx = 0, m  ! x_extent
@@ -1830,9 +1859,10 @@ contains
                     else if (adv_src_mode == adv_src_mode_vel_iface) then
                         ! u-interface: flux_src(adv%beg) supplies one shared face-normal velocity. RHS applies alpha_k * du/dz.
                         if (.not. adv_fused) then  ! otherwise added in the flux-difference kernel
+                            bnd0_lo = eqn_idx%adv%beg; bnd0_hi = eqn_idx%adv%end
                             $:GPU_PARALLEL_LOOP(collapse=4, private='[j_adv, k_idx, l_idx, q_idx, local_inv_ds, local_term_coeff, &
                                                 & local_flux1, local_flux2]')
-                            do j_adv = eqn_idx%adv%beg, eqn_idx%adv%end
+                            do j_adv = bnd0_lo, bnd0_hi
                                 do k_idx = 0, p; do q_idx = 0, n; do l_idx = 0, m
                                     local_inv_ds = 1._wp/dz(k_idx)
                                     local_term_coeff = q_cons_vf_arg%vf(j_adv)%sf(l_idx, q_idx, k_idx)
@@ -2159,6 +2189,8 @@ contains
     !> Perform first-order (piecewise constant) reconstruction of left and right cell-boundary values
     subroutine s_reconstruct_cell_boundary_values_first_order(v_vf, vL_x, vR_x, norm_dir)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
         type(scalar_field), dimension(iv%beg:iv%end), intent(in) :: v_vf
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_x
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vR_x
@@ -2188,11 +2220,15 @@ contains
         #:endfor
 
         if (recon_dir == 1) then
+            bnd0_lo = iv%beg; bnd0_hi = iv%end
+            bnd1_lo = is3%beg; bnd1_hi = is3%end
+            bnd2_lo = is2%beg; bnd2_hi = is2%end
+            bnd3_lo = is1%beg; bnd3_hi = is1%end
             $:GPU_PARALLEL_LOOP(collapse=4)
-            do i = iv%beg, iv%end
-                do l = is3%beg, is3%end
-                    do k = is2%beg, is2%end
-                        do j = is1%beg, is1%end
+            do i = bnd0_lo, bnd0_hi
+                do l = bnd1_lo, bnd1_hi
+                    do k = bnd2_lo, bnd2_hi
+                        do j = bnd3_lo, bnd3_hi
                             vL_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
                             vR_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
                         end do
@@ -2201,11 +2237,15 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
         else if (recon_dir == 2) then
+            bnd0_lo = iv%beg; bnd0_hi = iv%end
+            bnd1_lo = is3%beg; bnd1_hi = is3%end
+            bnd2_lo = is1%beg; bnd2_hi = is1%end
+            bnd3_lo = is2%beg; bnd3_hi = is2%end
             $:GPU_PARALLEL_LOOP(collapse=4)
-            do i = iv%beg, iv%end
-                do l = is3%beg, is3%end
-                    do j = is1%beg, is1%end
-                        do k = is2%beg, is2%end
+            do i = bnd0_lo, bnd0_hi
+                do l = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
+                        do k = bnd3_lo, bnd3_hi
                             vL_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
                             vR_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
                         end do
@@ -2214,11 +2254,15 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
         else if (recon_dir == 3) then
+            bnd0_lo = iv%beg; bnd0_hi = iv%end
+            bnd1_lo = is1%beg; bnd1_hi = is1%end
+            bnd2_lo = is2%beg; bnd2_hi = is2%end
+            bnd3_lo = is3%beg; bnd3_hi = is3%end
             $:GPU_PARALLEL_LOOP(collapse=4)
-            do i = iv%beg, iv%end
-                do j = is1%beg, is1%end
-                    do k = is2%beg, is2%end
-                        do l = is3%beg, is3%end
+            do i = bnd0_lo, bnd0_hi
+                do j = bnd1_lo, bnd1_hi
+                    do k = bnd2_lo, bnd2_hi
+                        do l = bnd3_lo, bnd3_hi
                             vL_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
                             vR_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
                         end do

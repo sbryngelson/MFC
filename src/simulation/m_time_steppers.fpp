@@ -839,17 +839,19 @@ contains
     !> Apply the body forces source term at each Runge-Kutta stage
     subroutine s_apply_bodyforces(q_cons_vf, q_prim_vf_in, rhs_vf_in, ldt)
 
+        integer :: bnd0_hi, bnd0_lo  !< collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
         type(scalar_field), dimension(1:sys_size), intent(inout) :: q_cons_vf
-        type(scalar_field), dimension(1:sys_size), intent(in)    :: q_prim_vf_in
+        type(scalar_field), dimension(1:sys_size), intent(in) :: q_prim_vf_in
         type(scalar_field), dimension(1:sys_size), intent(inout) :: rhs_vf_in
-        real(wp), intent(in)                                     :: ldt  !< local dt
-        integer                                                  :: i, j, k, l
+        real(wp), intent(in) :: ldt  !< local dt
+        integer :: i, j, k, l
 
         call nvtxStartRange("RHS-BODYFORCES")
         call s_compute_body_forces_rhs(q_prim_vf_in, q_cons_vf, rhs_vf_in, idwint)
 
+        bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%E
         $:GPU_PARALLEL_LOOP(collapse=4)
-        do i = eqn_idx%mom%beg, eqn_idx%E
+        do i = bnd0_lo, bnd0_hi
             do l = 0, p
                 do k = 0, n
                     do j = 0, m
@@ -866,17 +868,19 @@ contains
 
     subroutine s_apply_synthetic_turbulence_force(q_cons_vf, q_prim_vf_in, rhs_vf_in, ldt)
 
+        integer :: bnd0_hi, bnd0_lo  !< collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
         type(scalar_field), dimension(1:sys_size), intent(inout) :: q_cons_vf
-        type(scalar_field), dimension(1:sys_size), intent(in)    :: q_prim_vf_in
+        type(scalar_field), dimension(1:sys_size), intent(in) :: q_prim_vf_in
         type(scalar_field), dimension(1:sys_size), intent(inout) :: rhs_vf_in
-        real(wp), intent(in)                                     :: ldt  !< local dt
-        integer                                                  :: i, j, k, l
+        real(wp), intent(in) :: ldt  !< local dt
+        integer :: i, j, k, l
 
         call nvtxStartRange("RHS-SYNTHETICFORCE")
         call s_compute_synthetic_forces_rhs(q_prim_vf_in, q_cons_vf, rhs_vf_in)
 
+        bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%E
         $:GPU_PARALLEL_LOOP(collapse=4)
-        do i = eqn_idx%mom%beg, eqn_idx%E
+        do i = bnd0_lo, bnd0_hi
             do l = 0, p
                 do k = 0, n
                     do j = 0, m

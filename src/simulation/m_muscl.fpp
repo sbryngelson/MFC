@@ -87,6 +87,8 @@ contains
     !> Perform MUSCL reconstruction of left and right cell-boundary values from cell-averaged variables
     subroutine s_muscl(v_vf, vL_rs_vf_x, vR_rs_vf_x, muscl_dir, is1_muscl_d, is2_muscl_d, is3_muscl_d, packed)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
         type(scalar_field), dimension(1:), intent(in) :: v_vf
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf_x, vR_rs_vf_x
         integer, intent(in) :: muscl_dir
@@ -103,11 +105,14 @@ contains
 
         if (muscl_order == muscl_order_first_order) then
             if (muscl_dir == 1) then
+                bnd1_lo = is3_muscl%beg; bnd1_hi = is3_muscl%end
+                bnd2_lo = is2_muscl%beg; bnd2_hi = is2_muscl%end
+                bnd3_lo = is1_muscl%beg; bnd3_hi = is1_muscl%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, ubound(v_vf, 1)
-                    do l = is3_muscl%beg, is3_muscl%end
-                        do k = is2_muscl%beg, is2_muscl%end
-                            do j = is1_muscl%beg, is1_muscl%end
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do j = bnd3_lo, bnd3_hi
                                 vL_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
                                 vR_rs_vf_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
                             end do
@@ -116,11 +121,14 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
             else if (muscl_dir == 2) then
+                bnd1_lo = is3_muscl%beg; bnd1_hi = is3_muscl%end
+                bnd2_lo = is1_muscl%beg; bnd2_hi = is1_muscl%end
+                bnd3_lo = is2_muscl%beg; bnd3_hi = is2_muscl%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, ubound(v_vf, 1)
-                    do l = is3_muscl%beg, is3_muscl%end
-                        do j = is1_muscl%beg, is1_muscl%end
-                            do k = is2_muscl%beg, is2_muscl%end
+                    do l = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
+                            do k = bnd3_lo, bnd3_hi
                                 vL_rs_vf_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
                                 vR_rs_vf_x(k, j, l, i) = v_vf(i)%sf(k, j, l)
                             end do
@@ -129,11 +137,14 @@ contains
                 end do
                 $:END_GPU_PARALLEL_LOOP()
             else if (muscl_dir == 3) then
+                bnd1_lo = is1_muscl%beg; bnd1_hi = is1_muscl%end
+                bnd2_lo = is2_muscl%beg; bnd2_hi = is2_muscl%end
+                bnd3_lo = is3_muscl%beg; bnd3_hi = is3_muscl%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, ubound(v_vf, 1)
-                    do j = is1_muscl%beg, is1_muscl%end
-                        do k = is2_muscl%beg, is2_muscl%end
-                            do l = is3_muscl%beg, is3_muscl%end
+                    do j = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do l = bnd3_lo, bnd3_hi
                                 vL_rs_vf_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
                                 vR_rs_vf_x(l, k, j, i) = v_vf(i)%sf(l, k, j)
                             end do
@@ -148,11 +159,14 @@ contains
         $:GPU_UPDATE(device='[v_size]')
 
         if (muscl_order /= muscl_order_first_order .and. .not. f_optional_true(packed)) then
+            bnd1_lo = idwbuff(3)%beg; bnd1_hi = idwbuff(3)%end
+            bnd2_lo = idwbuff(2)%beg; bnd2_hi = idwbuff(2)%end
+            bnd3_lo = idwbuff(1)%beg; bnd3_hi = idwbuff(1)%end
             $:GPU_PARALLEL_LOOP(private='[j, k, l, i]', collapse=4)
             do i = 1, v_size
-                do l = idwbuff(3)%beg, idwbuff(3)%end
-                    do k = idwbuff(2)%beg, idwbuff(2)%end
-                        do j = idwbuff(1)%beg, idwbuff(1)%end
+                do l = bnd1_lo, bnd1_hi
+                    do k = bnd2_lo, bnd2_hi
+                        do j = bnd3_lo, bnd3_hi
                             v_rs_ws_muscl(j, k, l, i) = v_vf(i)%sf(j, k, l)
                         end do
                     end do
@@ -170,10 +184,13 @@ contains
                 #:set SV = STENCIL_VAR
                 #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
                 if (muscl_dir == ${MUSCL_DIR}$) then
+                    bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                    bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                    bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                     $:GPU_PARALLEL_LOOP(collapse=4,private='[i, j, k, l, slopeL, slopeR, slope]')
-                    do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                        do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                            do j = ${X_BND}$%beg, ${X_BND}$%end
+                    do l = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 do i = 1, v_size
                                     slopeL = v_rs_ws_muscl(${SF(' + 1')}$, i) - v_rs_ws_muscl(${SF('')}$, i)
                                     slopeR = v_rs_ws_muscl(${SF('')}$, i) - v_rs_ws_muscl(${SF(' - 1')}$, i)

@@ -514,19 +514,25 @@ contains
     !> Compute the Lagrangian bubble source terms and add them to the RHS
     subroutine s_compute_bubbles_EL_source(q_cons_vf, q_prim_vf, rhs_vf)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
         type(scalar_field), dimension(sys_size), intent(inout) :: q_prim_vf
         type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf
-        integer                                                :: i, j, k, l
+        integer :: i, j, k, l
 
         call nvtxStartRange("LAGRANGE-BUBBLE-EL-SOURCE")
         ! (q / (1 - beta)) * d(beta)/dt source
         if (lag_params%cluster_type >= 4) then
+            bnd0_lo = idwint(3)%beg; bnd0_hi = idwint(3)%end
+            bnd1_lo = idwint(2)%beg; bnd1_hi = idwint(2)%end
+            bnd2_lo = idwint(1)%beg; bnd2_hi = idwint(1)%end
+            bnd3_lo = 1; bnd3_hi = eqn_idx%E
             $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
-            do k = idwint(3)%beg, idwint(3)%end
-                do j = idwint(2)%beg, idwint(2)%end
-                    do i = idwint(1)%beg, idwint(1)%end
-                        do l = 1, eqn_idx%E
+            do k = bnd0_lo, bnd0_hi
+                do j = bnd1_lo, bnd1_hi
+                    do i = bnd2_lo, bnd2_hi
+                        do l = bnd3_lo, bnd3_hi
                             if (q_beta(bub_q_idx%alphaf)%sf(i, j, k) > (1._wp - lag_params%valmaxvoid)) then
                                 rhs_vf(l)%sf(i, j, k) = rhs_vf(l)%sf(i, j, k) + q_cons_vf(l)%sf(i, j, &
                                        & k)*(q_beta(bub_q_idx%dbetadt)%sf(i, j, k) + q_beta(bub_q_idx%beta_dbetadt)%sf(i, j, k))
@@ -537,11 +543,15 @@ contains
             end do
             $:END_GPU_PARALLEL_LOOP()
         else
+            bnd0_lo = idwint(3)%beg; bnd0_hi = idwint(3)%end
+            bnd1_lo = idwint(2)%beg; bnd1_hi = idwint(2)%end
+            bnd2_lo = idwint(1)%beg; bnd2_hi = idwint(1)%end
+            bnd3_lo = 1; bnd3_hi = eqn_idx%E
             $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
-            do k = idwint(3)%beg, idwint(3)%end
-                do j = idwint(2)%beg, idwint(2)%end
-                    do i = idwint(1)%beg, idwint(1)%end
-                        do l = 1, eqn_idx%E
+            do k = bnd0_lo, bnd0_hi
+                do j = bnd1_lo, bnd1_hi
+                    do i = bnd2_lo, bnd2_hi
+                        do l = bnd3_lo, bnd3_hi
                             if (q_beta(bub_q_idx%alphaf)%sf(i, j, k) > (1._wp - lag_params%valmaxvoid)) then
                                 rhs_vf(l)%sf(i, j, k) = rhs_vf(l)%sf(i, j, k) + (q_cons_vf(l)%sf(i, j, &
                                        & k)/q_beta(bub_q_idx%alphaf)%sf(i, j, k))*q_beta(bub_q_idx%dbetadt)%sf(i, j, k)
@@ -557,10 +567,13 @@ contains
             call s_lag_gradient_dir(q_prim_vf(eqn_idx%E)%sf, q_beta(bub_q_idx%src_tmp)%sf, l)
 
             ! (q / (1 - beta)) * d(beta)/dt source
+            bnd0_lo = idwint(3)%beg; bnd0_hi = idwint(3)%end
+            bnd1_lo = idwint(2)%beg; bnd1_hi = idwint(2)%end
+            bnd2_lo = idwint(1)%beg; bnd2_hi = idwint(1)%end
             $:GPU_PARALLEL_LOOP(private='[i, j, k]', collapse=3)
-            do k = idwint(3)%beg, idwint(3)%end
-                do j = idwint(2)%beg, idwint(2)%end
-                    do i = idwint(1)%beg, idwint(1)%end
+            do k = bnd0_lo, bnd0_hi
+                do j = bnd1_lo, bnd1_hi
+                    do i = bnd2_lo, bnd2_hi
                         if (q_beta(bub_q_idx%alphaf)%sf(i, j, k) > (1._wp - lag_params%valmaxvoid)) then
                             rhs_vf(eqn_idx%cont%end + l)%sf(i, j, k) = rhs_vf(eqn_idx%cont%end + l)%sf(i, j, &
                                    & k) - (1._wp - q_beta(bub_q_idx%alphaf)%sf(i, j, k))/q_beta(bub_q_idx%alphaf)%sf(i, j, &
@@ -572,10 +585,13 @@ contains
             $:END_GPU_PARALLEL_LOOP()
 
             ! source in energy
+            bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+            bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
+            bnd2_lo = idwbuff(1)%beg; bnd2_hi = idwbuff(1)%end
             $:GPU_PARALLEL_LOOP(private='[i, j, k]', collapse=3)
-            do k = idwbuff(3)%beg, idwbuff(3)%end
-                do j = idwbuff(2)%beg, idwbuff(2)%end
-                    do i = idwbuff(1)%beg, idwbuff(1)%end
+            do k = bnd0_lo, bnd0_hi
+                do j = bnd1_lo, bnd1_hi
+                    do i = bnd2_lo, bnd2_hi
                         q_beta(bub_q_idx%src_tmp)%sf(i, j, k) = q_prim_vf(eqn_idx%E)%sf(i, j, &
                                & k)*q_prim_vf(eqn_idx%cont%end + l)%sf(i, j, k)
                     end do
@@ -586,10 +602,13 @@ contains
             call s_lag_gradient_dir(q_beta(bub_q_idx%src_tmp)%sf, q_beta(bub_q_idx%dsrc_tmp)%sf, l)
 
             ! (beta / (1 - beta)) * d(Pu)/dl source
+            bnd0_lo = idwint(3)%beg; bnd0_hi = idwint(3)%end
+            bnd1_lo = idwint(2)%beg; bnd1_hi = idwint(2)%end
+            bnd2_lo = idwint(1)%beg; bnd2_hi = idwint(1)%end
             $:GPU_PARALLEL_LOOP(private='[i, j, k]', collapse=3)
-            do k = idwint(3)%beg, idwint(3)%end
-                do j = idwint(2)%beg, idwint(2)%end
-                    do i = idwint(1)%beg, idwint(1)%end
+            do k = bnd0_lo, bnd0_hi
+                do j = bnd1_lo, bnd1_hi
+                    do i = bnd2_lo, bnd2_hi
                         if (q_beta(bub_q_idx%alphaf)%sf(i, j, k) > (1._wp - lag_params%valmaxvoid)) then
                             rhs_vf(eqn_idx%E)%sf(i, j, k) = rhs_vf(eqn_idx%E)%sf(i, j, k) - q_beta(bub_q_idx%dsrc_tmp)%sf(i, j, &
                                    & k)*(1._wp - q_beta(bub_q_idx%alphaf)%sf(i, j, k))/q_beta(bub_q_idx%alphaf)%sf(i, j, k)
@@ -606,15 +625,21 @@ contains
     !> Smear the bubble effects onto the Eulerian grid
     subroutine s_smear_voidfraction(bc_type)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
         type(integer_field), dimension(1:num_dims,1:2), intent(in) :: bc_type
-        integer                                                    :: i, j, k, l
+        integer :: i, j, k, l
 
         call nvtxStartRange("BUBBLES-LAGRANGE-SMEARING")
+        bnd0_lo = 1; bnd0_hi = bub_q_idx%num
+        bnd1_lo = idwbuff(3)%beg; bnd1_hi = idwbuff(3)%end
+        bnd2_lo = idwbuff(2)%beg; bnd2_hi = idwbuff(2)%end
+        bnd3_lo = idwbuff(1)%beg; bnd3_hi = idwbuff(1)%end
         $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
-        do i = 1, bub_q_idx%num
-            do l = idwbuff(3)%beg, idwbuff(3)%end
-                do k = idwbuff(2)%beg, idwbuff(2)%end
-                    do j = idwbuff(1)%beg, idwbuff(1)%end
+        do i = bnd0_lo, bnd0_hi
+            do l = bnd1_lo, bnd1_hi
+                do k = bnd2_lo, bnd2_hi
+                    do j = bnd3_lo, bnd3_hi
                         q_beta(i)%sf(j, k, l) = 0._wp
                         if (lag_params%kahan_summation) kahan_comp(i)%sf(j, k, l) = 0._wp
                     end do
@@ -638,10 +663,13 @@ contains
         call nvtxEndRange
 
         ! Store 1-beta
+        bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+        bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
+        bnd2_lo = idwbuff(1)%beg; bnd2_hi = idwbuff(1)%end
         $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3)
-        do l = idwbuff(3)%beg, idwbuff(3)%end
-            do k = idwbuff(2)%beg, idwbuff(2)%end
-                do j = idwbuff(1)%beg, idwbuff(1)%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     q_beta(bub_q_idx%alphaf)%sf(j, k, l) = 1._wp - q_beta(bub_q_idx%alphaf)%sf(j, k, l)
                     ! Limiting void fraction given max value
                     q_beta(bub_q_idx%alphaf)%sf(j, k, l) = max(q_beta(bub_q_idx%alphaf)%sf(j, k, l), 1._wp - lag_params%valmaxvoid)

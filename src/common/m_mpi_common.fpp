@@ -1139,6 +1139,8 @@ contains
     !! @param pbc_loc Processor boundary condition (PBC) location
     subroutine s_mpi_reduce_beta_variables_buffers(q_comm, kahan_comp, mpi_dir, pbc_loc, nVar)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                          :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
         type(scalar_field), dimension(1:), intent(inout) :: q_comm
         type(scalar_field), dimension(1:), intent(inout) :: kahan_comp
         integer, intent(in)                              :: mpi_dir, pbc_loc, nVar
@@ -1209,9 +1211,11 @@ contains
         #:for mpi_dir in [1, 2, 3]
             if (mpi_dir == ${mpi_dir}$) then
                 #:if mpi_dir == 1
+                    bnd0_lo = comm_coords(3)%beg; bnd0_hi = comm_coords(3)%end
+                    bnd1_lo = comm_coords(2)%beg; bnd1_hi = comm_coords(2)%end
                     $:GPU_PARALLEL_LOOP(collapse=4,private='[r]')
-                    do l = comm_coords(3)%beg, comm_coords(3)%end
-                        do k = comm_coords(2)%beg, comm_coords(2)%end
+                    do l = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
                             do j = -mapcells - 1, mapcells
                                 do i = 1, v_size
                                     r = (i - 1) + v_size*((j + mapcells + 1) + lb_size*((k - comm_coords(2)%beg) + comm_size(2) &
@@ -1224,11 +1228,13 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 #:elif mpi_dir == 2
+                    bnd1_lo = comm_coords(3)%beg; bnd1_hi = comm_coords(3)%end
+                    bnd3_lo = comm_coords(1)%beg; bnd3_hi = comm_coords(1)%end
                     $:GPU_PARALLEL_LOOP(collapse=4,private='[r]')
                     do i = 1, v_size
-                        do l = comm_coords(3)%beg, comm_coords(3)%end
+                        do l = bnd1_lo, bnd1_hi
                             do k = -mapcells - 1, mapcells
-                                do j = comm_coords(1)%beg, comm_coords(1)%end
+                                do j = bnd3_lo, bnd3_hi
                                     r = (i - 1) + v_size*((j - comm_coords(1)%beg) + comm_size(1)*((k + mapcells + 1) &
                                          & + lb_size*(l - comm_coords(3)%beg)))
                                     buff_send(r) = real(q_comm(beta_vars(i))%sf(j, k + pack_offset, l), &
@@ -1239,11 +1245,13 @@ contains
                     end do
                     $:END_GPU_PARALLEL_LOOP()
                 #:else
+                    bnd2_lo = comm_coords(2)%beg; bnd2_hi = comm_coords(2)%end
+                    bnd3_lo = comm_coords(1)%beg; bnd3_hi = comm_coords(1)%end
                     $:GPU_PARALLEL_LOOP(collapse=4,private='[r]')
                     do i = 1, v_size
                         do l = -mapcells - 1, mapcells
-                            do k = comm_coords(2)%beg, comm_coords(2)%end
-                                do j = comm_coords(1)%beg, comm_coords(1)%end
+                            do k = bnd2_lo, bnd2_hi
+                                do j = bnd3_lo, bnd3_hi
                                     r = (i - 1) + v_size*((j - comm_coords(1)%beg) + comm_size(1)*((k - comm_coords(2)%beg) &
                                          & + comm_size(2)*(l + mapcells + 1)))
                                     buff_send(r) = real(q_comm(beta_vars(i))%sf(j, k, l + pack_offset), &
@@ -1295,9 +1303,11 @@ contains
             #:for mpi_dir in [1, 2, 3]
                 if (mpi_dir == ${mpi_dir}$) then
                     #:if mpi_dir == 1
+                        bnd0_lo = comm_coords(3)%beg; bnd0_hi = comm_coords(3)%end
+                        bnd1_lo = comm_coords(2)%beg; bnd1_hi = comm_coords(2)%end
                         $:GPU_PARALLEL_LOOP(collapse=4,private='[r, y_kahan, t_kahan]',copyin='[replace_buff]')
-                        do l = comm_coords(3)%beg, comm_coords(3)%end
-                            do k = comm_coords(2)%beg, comm_coords(2)%end
+                        do l = bnd0_lo, bnd0_hi
+                            do k = bnd1_lo, bnd1_hi
                                 do j = -mapcells - 1, mapcells
                                     do i = 1, v_size
                                         r = (i - 1) + v_size*((j + mapcells + 1) + lb_size*((k - comm_coords(2)%beg) &
@@ -1321,11 +1331,13 @@ contains
                         end do
                         $:END_GPU_PARALLEL_LOOP()
                     #:elif mpi_dir == 2
+                        bnd1_lo = comm_coords(3)%beg; bnd1_hi = comm_coords(3)%end
+                        bnd3_lo = comm_coords(1)%beg; bnd3_hi = comm_coords(1)%end
                         $:GPU_PARALLEL_LOOP(collapse=4,private='[r, y_kahan, t_kahan]',copyin='[replace_buff]')
                         do i = 1, v_size
-                            do l = comm_coords(3)%beg, comm_coords(3)%end
+                            do l = bnd1_lo, bnd1_hi
                                 do k = -mapcells - 1, mapcells
-                                    do j = comm_coords(1)%beg, comm_coords(1)%end
+                                    do j = bnd3_lo, bnd3_hi
                                         r = (i - 1) + v_size*((j - comm_coords(1)%beg) + comm_size(1)*((k + mapcells + 1) &
                                              & + lb_size*(l - comm_coords(3)%beg)))
                                         if (replace_buff) then
@@ -1347,11 +1359,13 @@ contains
                         end do
                         $:END_GPU_PARALLEL_LOOP()
                     #:else
+                        bnd2_lo = comm_coords(2)%beg; bnd2_hi = comm_coords(2)%end
+                        bnd3_lo = comm_coords(1)%beg; bnd3_hi = comm_coords(1)%end
                         $:GPU_PARALLEL_LOOP(collapse=4,private='[r, y_kahan, t_kahan]',copyin='[replace_buff]')
                         do i = 1, v_size
                             do l = -mapcells - 1, mapcells
-                                do k = comm_coords(2)%beg, comm_coords(2)%end
-                                    do j = comm_coords(1)%beg, comm_coords(1)%end
+                                do k = bnd2_lo, bnd2_hi
+                                    do j = bnd3_lo, bnd3_hi
                                         r = (i - 1) + v_size*((j - comm_coords(1)%beg) + comm_size(1)*((k - comm_coords(2)%beg) &
                                              & + comm_size(2)*(l + mapcells + 1)))
                                         if (replace_buff) then

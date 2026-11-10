@@ -285,6 +285,8 @@ contains
     subroutine s_populate_riemann_states_variables_buffers(qL_prim_rsx_vf, dqL_prim_dx_vf, dqL_prim_dy_vf, dqL_prim_dz_vf, &
         & qR_prim_rsx_vf, dqR_prim_dx_vf, dqR_prim_dy_vf, dqR_prim_dz_vf, norm_dir, ix, iy, iz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: qL_prim_rsx_vf, qR_prim_rsx_vf
         type(scalar_field), allocatable, dimension(:), intent(inout) :: dqL_prim_dx_vf, dqR_prim_dx_vf, dqL_prim_dy_vf, &
              & dqR_prim_dy_vf, dqL_prim_dz_vf, dqR_prim_dz_vf
@@ -331,10 +333,12 @@ contains
         ! Population of Buffers in x-direction
         if (norm_dir == 1) then
             if (bc_x%beg == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at beginning
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
                             qL_prim_rsx_vf(-1, k, l, i) = qR_prim_rsx_vf(0, k, l, i)
                         end do
                     end do
@@ -342,10 +346,13 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
 
                 if (viscous) then
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isz%beg; bnd1_hi = isz%end
+                    bnd2_lo = isy%beg; bnd2_hi = isy%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do l = isz%beg, isz%end
-                            do k = isy%beg, isy%end
+                    do i = bnd0_lo, bnd0_hi
+                        do l = bnd1_lo, bnd1_hi
+                            do k = bnd2_lo, bnd2_hi
                                 dqL_prim_dx_vf(i)%sf(-1, k, l) = dqR_prim_dx_vf(i)%sf(0, k, l)
                             end do
                         end do
@@ -353,10 +360,13 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
 
                     if (n > 0) then
+                        bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                        bnd1_lo = isz%beg; bnd1_hi = isz%end
+                        bnd2_lo = isy%beg; bnd2_hi = isy%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                            do l = isz%beg, isz%end
-                                do k = isy%beg, isy%end
+                        do i = bnd0_lo, bnd0_hi
+                            do l = bnd1_lo, bnd1_hi
+                                do k = bnd2_lo, bnd2_hi
                                     dqL_prim_dy_vf(i)%sf(-1, k, l) = dqR_prim_dy_vf(i)%sf(0, k, l)
                                 end do
                             end do
@@ -364,10 +374,13 @@ contains
                         $:END_GPU_PARALLEL_LOOP()
 
                         if (p > 0) then
+                            bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                            bnd1_lo = isz%beg; bnd1_hi = isz%end
+                            bnd2_lo = isy%beg; bnd2_hi = isy%end
                             $:GPU_PARALLEL_LOOP(collapse=3)
-                            do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                                do l = isz%beg, isz%end
-                                    do k = isy%beg, isy%end
+                            do i = bnd0_lo, bnd0_hi
+                                do l = bnd1_lo, bnd1_hi
+                                    do k = bnd2_lo, bnd2_hi
                                         dqL_prim_dz_vf(i)%sf(-1, k, l) = dqR_prim_dz_vf(i)%sf(0, k, l)
                                     end do
                                 end do
@@ -379,10 +392,12 @@ contains
             end if
 
             if (bc_x%end == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at end
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
                             qR_prim_rsx_vf(m + 1, k, l, i) = qL_prim_rsx_vf(m, k, l, i)
                         end do
                     end do
@@ -390,10 +405,13 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
 
                 if (viscous) then
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isz%beg; bnd1_hi = isz%end
+                    bnd2_lo = isy%beg; bnd2_hi = isy%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do l = isz%beg, isz%end
-                            do k = isy%beg, isy%end
+                    do i = bnd0_lo, bnd0_hi
+                        do l = bnd1_lo, bnd1_hi
+                            do k = bnd2_lo, bnd2_hi
                                 dqR_prim_dx_vf(i)%sf(m + 1, k, l) = dqL_prim_dx_vf(i)%sf(m, k, l)
                             end do
                         end do
@@ -401,10 +419,13 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
 
                     if (n > 0) then
+                        bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                        bnd1_lo = isz%beg; bnd1_hi = isz%end
+                        bnd2_lo = isy%beg; bnd2_hi = isy%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                            do l = isz%beg, isz%end
-                                do k = isy%beg, isy%end
+                        do i = bnd0_lo, bnd0_hi
+                            do l = bnd1_lo, bnd1_hi
+                                do k = bnd2_lo, bnd2_hi
                                     dqR_prim_dy_vf(i)%sf(m + 1, k, l) = dqL_prim_dy_vf(i)%sf(m, k, l)
                                 end do
                             end do
@@ -412,10 +433,13 @@ contains
                         $:END_GPU_PARALLEL_LOOP()
 
                         if (p > 0) then
+                            bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                            bnd1_lo = isz%beg; bnd1_hi = isz%end
+                            bnd2_lo = isy%beg; bnd2_hi = isy%end
                             $:GPU_PARALLEL_LOOP(collapse=3)
-                            do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                                do l = isz%beg, isz%end
-                                    do k = isy%beg, isy%end
+                            do i = bnd0_lo, bnd0_hi
+                                do l = bnd1_lo, bnd1_hi
+                                    do k = bnd2_lo, bnd2_hi
                                         dqR_prim_dz_vf(i)%sf(m + 1, k, l) = dqL_prim_dz_vf(i)%sf(m, k, l)
                                     end do
                                 end do
@@ -430,10 +454,12 @@ contains
             ! Population of Buffers in y-direction
         else if (norm_dir == 2) then
             if (bc_y%beg == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at beginning
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
                             qL_prim_rsx_vf(k, -1, l, i) = qR_prim_rsx_vf(k, 0, l, i)
                         end do
                     end do
@@ -441,20 +467,26 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
 
                 if (viscous) then
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isz%beg; bnd1_hi = isz%end
+                    bnd2_lo = isx%beg; bnd2_hi = isx%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do l = isz%beg, isz%end
-                            do j = isx%beg, isx%end
+                    do i = bnd0_lo, bnd0_hi
+                        do l = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 dqL_prim_dx_vf(i)%sf(j, -1, l) = dqR_prim_dx_vf(i)%sf(j, 0, l)
                             end do
                         end do
                     end do
                     $:END_GPU_PARALLEL_LOOP()
 
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isz%beg; bnd1_hi = isz%end
+                    bnd2_lo = isx%beg; bnd2_hi = isx%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do l = isz%beg, isz%end
-                            do j = isx%beg, isx%end
+                    do i = bnd0_lo, bnd0_hi
+                        do l = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 dqL_prim_dy_vf(i)%sf(j, -1, l) = dqR_prim_dy_vf(i)%sf(j, 0, l)
                             end do
                         end do
@@ -462,10 +494,13 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
 
                     if (p > 0) then
+                        bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                        bnd1_lo = isz%beg; bnd1_hi = isz%end
+                        bnd2_lo = isx%beg; bnd2_hi = isx%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                            do l = isz%beg, isz%end
-                                do j = isx%beg, isx%end
+                        do i = bnd0_lo, bnd0_hi
+                            do l = bnd1_lo, bnd1_hi
+                                do j = bnd2_lo, bnd2_hi
                                     dqL_prim_dz_vf(i)%sf(j, -1, l) = dqR_prim_dz_vf(i)%sf(j, 0, l)
                                 end do
                             end do
@@ -476,10 +511,12 @@ contains
             end if
 
             if (bc_y%end == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at end
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
                             qR_prim_rsx_vf(k, n + 1, l, i) = qL_prim_rsx_vf(k, n, l, i)
                         end do
                     end do
@@ -487,20 +524,26 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
 
                 if (viscous) then
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isz%beg; bnd1_hi = isz%end
+                    bnd2_lo = isx%beg; bnd2_hi = isx%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do l = isz%beg, isz%end
-                            do j = isx%beg, isx%end
+                    do i = bnd0_lo, bnd0_hi
+                        do l = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 dqR_prim_dx_vf(i)%sf(j, n + 1, l) = dqL_prim_dx_vf(i)%sf(j, n, l)
                             end do
                         end do
                     end do
                     $:END_GPU_PARALLEL_LOOP()
 
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isz%beg; bnd1_hi = isz%end
+                    bnd2_lo = isx%beg; bnd2_hi = isx%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do l = isz%beg, isz%end
-                            do j = isx%beg, isx%end
+                    do i = bnd0_lo, bnd0_hi
+                        do l = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 dqR_prim_dy_vf(i)%sf(j, n + 1, l) = dqL_prim_dy_vf(i)%sf(j, n, l)
                             end do
                         end do
@@ -508,10 +551,13 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
 
                     if (p > 0) then
+                        bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                        bnd1_lo = isz%beg; bnd1_hi = isz%end
+                        bnd2_lo = isx%beg; bnd2_hi = isx%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                            do l = isz%beg, isz%end
-                                do j = isx%beg, isx%end
+                        do i = bnd0_lo, bnd0_hi
+                            do l = bnd1_lo, bnd1_hi
+                                do j = bnd2_lo, bnd2_hi
                                     dqR_prim_dz_vf(i)%sf(j, n + 1, l) = dqL_prim_dz_vf(i)%sf(j, n, l)
                                 end do
                             end do
@@ -525,10 +571,12 @@ contains
             ! Population of Buffers in z-direction
         else
             if (bc_z%beg == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at beginning
+                bnd1_lo = is2%beg; bnd1_hi = is2%end
+                bnd2_lo = is3%beg; bnd2_hi = is3%end
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size
-                    do k = is2%beg, is2%end
-                        do l = is3%beg, is3%end
+                    do k = bnd1_lo, bnd1_hi
+                        do l = bnd2_lo, bnd2_hi
                             qL_prim_rsx_vf(l, k, -1, i) = qR_prim_rsx_vf(l, k, 0, i)
                         end do
                     end do
@@ -536,28 +584,37 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
 
                 if (viscous) then
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isy%beg; bnd1_hi = isy%end
+                    bnd2_lo = isx%beg; bnd2_hi = isx%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do k = isy%beg, isy%end
-                            do j = isx%beg, isx%end
+                    do i = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 dqL_prim_dx_vf(i)%sf(j, k, -1) = dqR_prim_dx_vf(i)%sf(j, k, 0)
                             end do
                         end do
                     end do
                     $:END_GPU_PARALLEL_LOOP()
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isy%beg; bnd1_hi = isy%end
+                    bnd2_lo = isx%beg; bnd2_hi = isx%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do k = isy%beg, isy%end
-                            do j = isx%beg, isx%end
+                    do i = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 dqL_prim_dy_vf(i)%sf(j, k, -1) = dqR_prim_dy_vf(i)%sf(j, k, 0)
                             end do
                         end do
                     end do
                     $:END_GPU_PARALLEL_LOOP()
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isy%beg; bnd1_hi = isy%end
+                    bnd2_lo = isx%beg; bnd2_hi = isx%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do k = isy%beg, isy%end
-                            do j = isx%beg, isx%end
+                    do i = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 dqL_prim_dz_vf(i)%sf(j, k, -1) = dqR_prim_dz_vf(i)%sf(j, k, 0)
                             end do
                         end do
@@ -567,10 +624,12 @@ contains
             end if
 
             if (bc_z%end == BC_RIEMANN_EXTRAP) then  ! Riemann state extrap. BC at end
+                bnd1_lo = is2%beg; bnd1_hi = is2%end
+                bnd2_lo = is3%beg; bnd2_hi = is3%end
                 $:GPU_PARALLEL_LOOP(collapse=3)
                 do i = 1, sys_size
-                    do k = is2%beg, is2%end
-                        do l = is3%beg, is3%end
+                    do k = bnd1_lo, bnd1_hi
+                        do l = bnd2_lo, bnd2_hi
                             qR_prim_rsx_vf(l, k, p + 1, i) = qL_prim_rsx_vf(l, k, p, i)
                         end do
                     end do
@@ -578,30 +637,39 @@ contains
                 $:END_GPU_PARALLEL_LOOP()
 
                 if (viscous) then
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isy%beg; bnd1_hi = isy%end
+                    bnd2_lo = isx%beg; bnd2_hi = isx%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do k = isy%beg, isy%end
-                            do j = isx%beg, isx%end
+                    do i = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 dqR_prim_dx_vf(i)%sf(j, k, p + 1) = dqL_prim_dx_vf(i)%sf(j, k, p)
                             end do
                         end do
                     end do
                     $:END_GPU_PARALLEL_LOOP()
 
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isy%beg; bnd1_hi = isy%end
+                    bnd2_lo = isx%beg; bnd2_hi = isx%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do k = isy%beg, isy%end
-                            do j = isx%beg, isx%end
+                    do i = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 dqR_prim_dy_vf(i)%sf(j, k, p + 1) = dqL_prim_dy_vf(i)%sf(j, k, p)
                             end do
                         end do
                     end do
                     $:END_GPU_PARALLEL_LOOP()
 
+                    bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%mom%end
+                    bnd1_lo = isy%beg; bnd1_hi = isy%end
+                    bnd2_lo = isx%beg; bnd2_hi = isx%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do i = eqn_idx%mom%beg, eqn_idx%mom%end
-                        do k = isy%beg, isy%end
-                            do j = isx%beg, isx%end
+                    do i = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 dqR_prim_dz_vf(i)%sf(j, k, p + 1) = dqL_prim_dz_vf(i)%sf(j, k, p)
                             end do
                         end do
@@ -617,6 +685,8 @@ contains
     !> Set up the chosen Riemann solver algorithm for the current direction
     subroutine s_initialize_riemann_solver(norm_dir)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer             :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
         integer, intent(in) :: norm_dir
         integer             :: i, j, k, l  !< Generic loop iterators
 
@@ -624,11 +694,15 @@ contains
 
         if (norm_dir == 1) then
             if (viscous .or. surface_tension .or. heat_conduction) then
+                bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%E
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
+                bnd3_lo = is1%beg; bnd3_hi = is1%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
-                do i = eqn_idx%mom%beg, eqn_idx%E
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
-                            do j = is1%beg, is1%end
+                do i = bnd0_lo, bnd0_hi
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do j = bnd3_lo, bnd3_hi
                                 flux_src_rsx_vf(j, k, l, i) = 0._wp
                             end do
                         end do
@@ -638,11 +712,15 @@ contains
             end if
 
             if (chem_params%diffusion) then
+                bnd0_lo = eqn_idx%E; bnd0_hi = eqn_idx%species%end
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
+                bnd3_lo = is1%beg; bnd3_hi = is1%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
-                do i = eqn_idx%E, eqn_idx%species%end
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
-                            do j = is1%beg, is1%end
+                do i = bnd0_lo, bnd0_hi
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do j = bnd3_lo, bnd3_hi
                                 if (i == eqn_idx%E .or. i >= eqn_idx%species%beg) then
                                     flux_src_rsx_vf(j, k, l, i) = 0._wp
                                 end if
@@ -654,11 +732,14 @@ contains
             end if
 
             if (qbmm) then
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
+                bnd3_lo = is1%beg; bnd3_hi = is1%end + 1
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, 4
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
-                            do j = is1%beg, is1%end + 1
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do j = bnd3_lo, bnd3_hi
                                 mom_sp_rsx_vf(j, k, l, i) = mom_sp(i)%sf(j, k, l)
                             end do
                         end do
@@ -670,11 +751,15 @@ contains
             ! Reshaping Inputted Data in y-direction
         else if (norm_dir == 2) then
             if (viscous .or. surface_tension .or. heat_conduction) then
+                bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%E
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is1%beg; bnd2_hi = is1%end
+                bnd3_lo = is2%beg; bnd3_hi = is2%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
-                do i = eqn_idx%mom%beg, eqn_idx%E
-                    do l = is3%beg, is3%end
-                        do j = is1%beg, is1%end
-                            do k = is2%beg, is2%end
+                do i = bnd0_lo, bnd0_hi
+                    do l = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
+                            do k = bnd3_lo, bnd3_hi
                                 flux_src_rsx_vf(k, j, l, i) = 0._wp
                             end do
                         end do
@@ -684,11 +769,15 @@ contains
             end if
 
             if (chem_params%diffusion) then
+                bnd0_lo = eqn_idx%E; bnd0_hi = eqn_idx%species%end
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is1%beg; bnd2_hi = is1%end
+                bnd3_lo = is2%beg; bnd3_hi = is2%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
-                do i = eqn_idx%E, eqn_idx%species%end
-                    do l = is3%beg, is3%end
-                        do j = is1%beg, is1%end
-                            do k = is2%beg, is2%end
+                do i = bnd0_lo, bnd0_hi
+                    do l = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
+                            do k = bnd3_lo, bnd3_hi
                                 if (i == eqn_idx%E .or. i >= eqn_idx%species%beg) then
                                     flux_src_rsx_vf(k, j, l, i) = 0._wp
                                 end if
@@ -700,11 +789,14 @@ contains
             end if
 
             if (qbmm) then
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
+                bnd3_lo = is1%beg; bnd3_hi = is1%end + 1
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, 4
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
-                            do j = is1%beg, is1%end + 1
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do j = bnd3_lo, bnd3_hi
                                 mom_sp_rsx_vf(k, j, l, i) = mom_sp(i)%sf(k, j, l)
                             end do
                         end do
@@ -716,11 +808,15 @@ contains
             ! Reshaping Inputted Data in z-direction
         else
             if (viscous .or. surface_tension .or. heat_conduction) then
+                bnd0_lo = eqn_idx%mom%beg; bnd0_hi = eqn_idx%E
+                bnd1_lo = is1%beg; bnd1_hi = is1%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
+                bnd3_lo = is3%beg; bnd3_hi = is3%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
-                do i = eqn_idx%mom%beg, eqn_idx%E
-                    do j = is1%beg, is1%end
-                        do k = is2%beg, is2%end
-                            do l = is3%beg, is3%end
+                do i = bnd0_lo, bnd0_hi
+                    do j = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do l = bnd3_lo, bnd3_hi
                                 flux_src_rsx_vf(l, k, j, i) = 0._wp
                             end do
                         end do
@@ -730,11 +826,15 @@ contains
             end if
 
             if (chem_params%diffusion) then
+                bnd0_lo = eqn_idx%E; bnd0_hi = eqn_idx%species%end
+                bnd1_lo = is1%beg; bnd1_hi = is1%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
+                bnd3_lo = is3%beg; bnd3_hi = is3%end
                 $:GPU_PARALLEL_LOOP(collapse=4)
-                do i = eqn_idx%E, eqn_idx%species%end
-                    do j = is1%beg, is1%end
-                        do k = is2%beg, is2%end
-                            do l = is3%beg, is3%end
+                do i = bnd0_lo, bnd0_hi
+                    do j = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do l = bnd3_lo, bnd3_hi
                                 if (i == eqn_idx%E .or. i >= eqn_idx%species%beg) then
                                     flux_src_rsx_vf(l, k, j, i) = 0._wp
                                 end if
@@ -746,11 +846,14 @@ contains
             end if
 
             if (qbmm) then
+                bnd1_lo = is3%beg; bnd1_hi = is3%end
+                bnd2_lo = is2%beg; bnd2_hi = is2%end
+                bnd3_lo = is1%beg; bnd3_hi = is1%end + 1
                 $:GPU_PARALLEL_LOOP(collapse=4)
                 do i = 1, 4
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
-                            do j = is1%beg, is1%end + 1
+                    do l = bnd1_lo, bnd1_hi
+                        do k = bnd2_lo, bnd2_hi
+                            do j = bnd3_lo, bnd3_hi
                                 mom_sp_rsx_vf(l, k, j, i) = mom_sp(i)%sf(l, k, j)
                             end do
                         end do
@@ -766,6 +869,8 @@ contains
     subroutine s_compute_cylindrical_viscous_source_flux(velL_vf, dvelL_dx_vf, dvelL_dy_vf, dvelL_dz_vf, velR_vf, dvelR_dx_vf, &
         & dvelR_dy_vf, dvelR_dz_vf, q_prim_vf, norm_dir, ix, iy, iz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                             :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(num_dims), intent(in) :: velL_vf, velR_vf
         type(scalar_field), dimension(num_dims), intent(in) :: dvelL_dx_vf, dvelR_dx_vf
         type(scalar_field), dimension(num_dims), intent(in) :: dvelL_dy_vf, dvelR_dy_vf
@@ -810,12 +915,15 @@ contains
         integer :: Re_size_loc1, Re_size_loc2  !< host copies; amdflang reads Re_size stale cross-TU
 
         Re_size_loc1 = Re_size(1); Re_size_loc2 = Re_size(2)
+        bnd0_lo = iz%beg; bnd0_hi = iz%end
+        bnd1_lo = iy%beg; bnd1_hi = iy%end
+        bnd2_lo = ix%beg; bnd2_hi = ix%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[idx_rp, avg_v_int, avg_dvdx_int, avg_dvdy_int, avg_dvdz_int, Re_s, Re_b, &
                             & vel_src_int, r_eff, divergence_cyl, stress_vector_shear, stress_normal_bulk, div_v_term_const, &
                             & gamma_dot, D_xx, D_yy, D_zz, D_xy, D_xz, D_yz, Re_nn, alpha_avg, fl]', firstprivate='[Re_size_loc1, Re_size_loc2]')
-        do l = iz%beg, iz%end
-            do k = iy%beg, iy%end
-                do j = ix%beg, ix%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     ! Determine indices for the 'right' state for averaging across the interface
                     idx_rp = [j, k, l]
                     idx_rp(norm_dir) = idx_rp(norm_dir) + 1
@@ -990,6 +1098,8 @@ contains
         & dvelR_dz_vf, q_prim_vf, norm_dir)
 
         ! Arguments
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                             :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(num_dims), intent(in) :: dvelL_dx_vf, dvelR_dx_vf
         type(scalar_field), dimension(num_dims), intent(in) :: dvelL_dy_vf, dvelR_dy_vf
         type(scalar_field), dimension(num_dims), intent(in) :: dvelL_dz_vf, dvelR_dz_vf
@@ -1025,12 +1135,15 @@ contains
         integer                         :: Re_size_loc1, Re_size_loc2  !< host copies; amdflang reads Re_size stale cross-TU
 
         Re_size_loc1 = Re_size(1); Re_size_loc2 = Re_size(2)
+        bnd0_lo = isz%beg; bnd0_hi = isz%end
+        bnd1_lo = isy%beg; bnd1_hi = isy%end
+        bnd2_lo = isx%beg; bnd2_hi = isx%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[idx_right_phys, vel_grad_avg, current_tau_shear, current_tau_bulk, &
                             & vel_src_at_interface, Re_shear, Re_bulk, divergence_v, i_dim, vel_comp_idx, gamma_dot, D_xx, D_yy, &
                             & D_zz, D_xy, D_xz, D_yz, Re_nn, alpha_avg, fl]', firstprivate='[Re_size_loc1, Re_size_loc2]')
-        do l_loop = isz%beg, isz%end
-            do k_loop = isy%beg, isy%end
-                do j_loop = isx%beg, isx%end
+        do l_loop = bnd0_lo, bnd0_hi
+            do k_loop = bnd1_lo, bnd1_hi
+                do j_loop = bnd2_lo, bnd2_hi
                     idx_right_phys(1) = j_loop
                     idx_right_phys(2) = k_loop
                     idx_right_phys(3) = l_loop
@@ -1335,6 +1448,8 @@ contains
             #:else
                 subroutine s_finalize_riemann_solver_hatR(flux_vf, flux_gsrc_vf, norm_dir)
 
+                    !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+                    integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
                     type(scalar_field), dimension(sys_size), intent(inout) :: flux_vf, flux_gsrc_vf
 
                 #:endif
@@ -1343,10 +1458,13 @@ contains
                 ! Reshaping Outputted Data in y-direction
 
                 if (norm_dir == 2) then
+                    bnd0_lo = is3%beg; bnd0_hi = is3%end
+                    bnd1_lo = is1%beg; bnd1_hi = is1%end
+                    bnd2_lo = is2%beg; bnd2_hi = is2%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do l = is3%beg, is3%end
-                        do j = is1%beg, is1%end
-                            do k = is2%beg, is2%end
+                    do l = bnd0_lo, bnd0_hi
+                        do j = bnd1_lo, bnd1_hi
+                            do k = bnd2_lo, bnd2_hi
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = 1, sys_size
                                     flux_vf(i)%sf(k, j, l) = flux_${INFIX}$rsx_vf(k, j, l, i)
@@ -1357,11 +1475,14 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
 
                     if (cyl_coord) then
+                        bnd1_lo = is3%beg; bnd1_hi = is3%end
+                        bnd2_lo = is1%beg; bnd2_hi = is1%end
+                        bnd3_lo = is2%beg; bnd3_hi = is2%end
                         $:GPU_PARALLEL_LOOP(collapse=4)
                         do i = 1, sys_size
-                            do l = is3%beg, is3%end
-                                do j = is1%beg, is1%end
-                                    do k = is2%beg, is2%end
+                            do l = bnd1_lo, bnd1_hi
+                                do j = bnd2_lo, bnd2_hi
+                                    do k = bnd3_lo, bnd3_hi
                                         flux_gsrc_vf(i)%sf(k, j, l) = flux_gsrc_${INFIX}$rsx_vf(k, j, l, i)
                                     end do
                                 end do
@@ -1371,10 +1492,13 @@ contains
                     end if
 
                     #:if SUFFIX == ''
+                        bnd0_lo = is3%beg; bnd0_hi = is3%end
+                        bnd1_lo = is1%beg; bnd1_hi = is1%end
+                        bnd2_lo = is2%beg; bnd2_hi = is2%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do l = is3%beg, is3%end
-                            do j = is1%beg, is1%end
-                                do k = is2%beg, is2%end
+                        do l = bnd0_lo, bnd0_hi
+                            do j = bnd1_lo, bnd1_hi
+                                do k = bnd2_lo, bnd2_hi
                                     flux_src_vf(eqn_idx%adv%beg)%sf(k, j, l) = flux_src_rsx_vf(k, j, l, eqn_idx%adv%beg)
                                 end do
                             end do
@@ -1385,11 +1509,15 @@ contains
                         ! (adv_src_mode_none) writes only the adv%beg row, so its per-fluid entries are never
                         ! initialized and must not be copied out; nothing consumes them in that mode.
                         if (adv_src_mode == adv_src_mode_alpha_iface) then
+                            bnd0_lo = eqn_idx%adv%beg + 1; bnd0_hi = eqn_idx%adv%end
+                            bnd1_lo = is3%beg; bnd1_hi = is3%end
+                            bnd2_lo = is1%beg; bnd2_hi = is1%end
+                            bnd3_lo = is2%beg; bnd3_hi = is2%end
                             $:GPU_PARALLEL_LOOP(collapse=4)
-                            do i = eqn_idx%adv%beg + 1, eqn_idx%adv%end
-                                do l = is3%beg, is3%end
-                                    do j = is1%beg, is1%end
-                                        do k = is2%beg, is2%end
+                            do i = bnd0_lo, bnd0_hi
+                                do l = bnd1_lo, bnd1_hi
+                                    do j = bnd2_lo, bnd2_hi
+                                        do k = bnd3_lo, bnd3_hi
                                             flux_src_vf(i)%sf(k, j, l) = flux_src_rsx_vf(k, j, l, i)
                                         end do
                                     end do
@@ -1400,10 +1528,13 @@ contains
                     #:endif
                     ! Reshaping Outputted Data in z-direction
                 else if (norm_dir == 3) then
+                    bnd0_lo = is1%beg; bnd0_hi = is1%end
+                    bnd1_lo = is2%beg; bnd1_hi = is2%end
+                    bnd2_lo = is3%beg; bnd2_hi = is3%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do j = is1%beg, is1%end
-                        do k = is2%beg, is2%end
-                            do l = is3%beg, is3%end
+                    do j = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do l = bnd2_lo, bnd2_hi
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = 1, sys_size
                                     flux_vf(i)%sf(l, k, j) = flux_${INFIX}$rsx_vf(l, k, j, i)
@@ -1414,11 +1545,14 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
                     #:if SUFFIX == ''
                         if (grid_geometry == 3) then
+                            bnd1_lo = is1%beg; bnd1_hi = is1%end
+                            bnd2_lo = is2%beg; bnd2_hi = is2%end
+                            bnd3_lo = is3%beg; bnd3_hi = is3%end
                             $:GPU_PARALLEL_LOOP(collapse=4)
                             do i = 1, sys_size
-                                do j = is1%beg, is1%end
-                                    do k = is2%beg, is2%end
-                                        do l = is3%beg, is3%end
+                                do j = bnd1_lo, bnd1_hi
+                                    do k = bnd2_lo, bnd2_hi
+                                        do l = bnd3_lo, bnd3_hi
                                             flux_gsrc_vf(i)%sf(l, k, j) = flux_gsrc_rsx_vf(l, k, j, i)
                                         end do
                                     end do
@@ -1427,10 +1561,13 @@ contains
                             $:END_GPU_PARALLEL_LOOP()
                         end if
 
+                        bnd0_lo = is1%beg; bnd0_hi = is1%end
+                        bnd1_lo = is2%beg; bnd1_hi = is2%end
+                        bnd2_lo = is3%beg; bnd2_hi = is3%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do j = is1%beg, is1%end
-                            do k = is2%beg, is2%end
-                                do l = is3%beg, is3%end
+                        do j = bnd0_lo, bnd0_hi
+                            do k = bnd1_lo, bnd1_hi
+                                do l = bnd2_lo, bnd2_hi
                                     flux_src_vf(eqn_idx%adv%beg)%sf(l, k, j) = flux_src_rsx_vf(l, k, j, eqn_idx%adv%beg)
                                 end do
                             end do
@@ -1441,11 +1578,15 @@ contains
                         ! (adv_src_mode_none) writes only the adv%beg row, so its per-fluid entries are never
                         ! initialized and must not be copied out; nothing consumes them in that mode.
                         if (adv_src_mode == adv_src_mode_alpha_iface) then
+                            bnd0_lo = eqn_idx%adv%beg + 1; bnd0_hi = eqn_idx%adv%end
+                            bnd1_lo = is1%beg; bnd1_hi = is1%end
+                            bnd2_lo = is2%beg; bnd2_hi = is2%end
+                            bnd3_lo = is3%beg; bnd3_hi = is3%end
                             $:GPU_PARALLEL_LOOP(collapse=4)
-                            do i = eqn_idx%adv%beg + 1, eqn_idx%adv%end
-                                do j = is1%beg, is1%end
-                                    do k = is2%beg, is2%end
-                                        do l = is3%beg, is3%end
+                            do i = bnd0_lo, bnd0_hi
+                                do j = bnd1_lo, bnd1_hi
+                                    do k = bnd2_lo, bnd2_hi
+                                        do l = bnd3_lo, bnd3_hi
                                             flux_src_vf(i)%sf(l, k, j) = flux_src_rsx_vf(l, k, j, i)
                                         end do
                                     end do
@@ -1455,10 +1596,13 @@ contains
                         end if
                     #:endif
                 else if (norm_dir == 1) then
+                    bnd0_lo = is3%beg; bnd0_hi = is3%end
+                    bnd1_lo = is2%beg; bnd1_hi = is2%end
+                    bnd2_lo = is1%beg; bnd2_hi = is1%end
                     $:GPU_PARALLEL_LOOP(collapse=3)
-                    do l = is3%beg, is3%end
-                        do k = is2%beg, is2%end
-                            do j = is1%beg, is1%end
+                    do l = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 $:GPU_LOOP(parallelism='[seq]')
                                 do i = 1, sys_size
                                     flux_vf(i)%sf(j, k, l) = flux_${INFIX}$rsx_vf(j, k, l, i)
@@ -1469,10 +1613,13 @@ contains
                     $:END_GPU_PARALLEL_LOOP()
 
                     #:if SUFFIX == ''
+                        bnd0_lo = is3%beg; bnd0_hi = is3%end
+                        bnd1_lo = is2%beg; bnd1_hi = is2%end
+                        bnd2_lo = is1%beg; bnd2_hi = is1%end
                         $:GPU_PARALLEL_LOOP(collapse=3)
-                        do l = is3%beg, is3%end
-                            do k = is2%beg, is2%end
-                                do j = is1%beg, is1%end
+                        do l = bnd0_lo, bnd0_hi
+                            do k = bnd1_lo, bnd1_hi
+                                do j = bnd2_lo, bnd2_hi
                                     flux_src_vf(eqn_idx%adv%beg)%sf(j, k, l) = flux_src_rsx_vf(j, k, l, eqn_idx%adv%beg)
                                 end do
                             end do
@@ -1483,11 +1630,15 @@ contains
                         ! (adv_src_mode_none) writes only the adv%beg row, so its per-fluid entries are never
                         ! initialized and must not be copied out; nothing consumes them in that mode.
                         if (adv_src_mode == adv_src_mode_alpha_iface) then
+                            bnd0_lo = eqn_idx%adv%beg + 1; bnd0_hi = eqn_idx%adv%end
+                            bnd1_lo = is3%beg; bnd1_hi = is3%end
+                            bnd2_lo = is2%beg; bnd2_hi = is2%end
+                            bnd3_lo = is1%beg; bnd3_hi = is1%end
                             $:GPU_PARALLEL_LOOP(collapse=4)
-                            do i = eqn_idx%adv%beg + 1, eqn_idx%adv%end
-                                do l = is3%beg, is3%end
-                                    do k = is2%beg, is2%end
-                                        do j = is1%beg, is1%end
+                            do i = bnd0_lo, bnd0_hi
+                                do l = bnd1_lo, bnd1_hi
+                                    do k = bnd2_lo, bnd2_hi
+                                        do j = bnd3_lo, bnd3_hi
                                             flux_src_vf(i)%sf(j, k, l) = flux_src_rsx_vf(j, k, l, i)
                                         end do
                                     end do

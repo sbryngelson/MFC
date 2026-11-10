@@ -124,6 +124,8 @@ contains
     !! ids, or restart), project them onto the grid, and precompute the interpolation and finite-difference weights.
     impure subroutine s_initialize_particles_EL_module(bc_type, rows, ids, n_loc)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                                    :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(integer_field), dimension(1:num_dims,1:2), intent(in) :: bc_type
         real(wp), dimension(:,:), intent(in)                       :: rows
         integer, dimension(:), intent(in)                          :: ids
@@ -197,10 +199,13 @@ contains
         call s_initialize_lag_gradient(fd_order + 1)
 
         if (particle_params%added_mass_force > 0) then
+            bnd0_lo = idwint(3)%beg; bnd0_hi = idwint(3)%end
+            bnd1_lo = idwint(2)%beg; bnd1_hi = idwint(2)%end
+            bnd2_lo = idwint(1)%beg; bnd2_hi = idwint(1)%end
             $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l]')
-            do k = idwint(3)%beg, idwint(3)%end
-                do j = idwint(2)%beg, idwint(2)%end
-                    do i = idwint(1)%beg, idwint(1)%end
+            do k = bnd0_lo, bnd0_hi
+                do j = bnd1_lo, bnd1_hi
+                    do i = bnd2_lo, bnd2_hi
                         do l = 1, eqn_idx%mom%end
                             rhs_old(l)%sf(i, j, k) = 0._wp
                         end do
@@ -549,14 +554,16 @@ contains
     !! relocates the particles and recomputes the kernel normalization.
     subroutine s_smear_field_contributions(bc_type, ind_start, ind_end, recompute_gSum)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
         type(integer_field), dimension(1:num_dims,1:2), intent(in) :: bc_type
-        integer, intent(in)                                        :: ind_start, ind_end
-        logical, intent(in)                                        :: recompute_gSum
-        integer                                                    :: i, j, k, l, nVar
-        real(wp)                                                   :: myR, func_sum
-        real(wp), dimension(3)                                     :: myVel, myPos, s_cell, myForce
-        integer, dimension(3)                                      :: cell
-        integer, dimension(:), allocatable                         :: vars_send
+        integer, intent(in) :: ind_start, ind_end
+        logical, intent(in) :: recompute_gSum
+        integer :: i, j, k, l, nVar
+        real(wp) :: myR, func_sum
+        real(wp), dimension(3) :: myVel, myPos, s_cell, myForce
+        integer, dimension(3) :: cell
+        integer, dimension(:), allocatable :: vars_send
 
         nVar = ind_end - ind_start + 1
         allocate (vars_send(nVar))
@@ -565,11 +572,14 @@ contains
             vars_send(i) = ind_start + (i - 1)
         end do
 
+        bnd1_lo = idwbuff(3)%beg; bnd1_hi = idwbuff(3)%end
+        bnd2_lo = idwbuff(2)%beg; bnd2_hi = idwbuff(2)%end
+        bnd3_lo = idwbuff(1)%beg; bnd3_hi = idwbuff(1)%end
         $:GPU_PARALLEL_LOOP(private='[i, j, k, l]', collapse=4)
         do i = ind_start, ind_end
-            do l = idwbuff(3)%beg, idwbuff(3)%end
-                do k = idwbuff(2)%beg, idwbuff(2)%end
-                    do j = idwbuff(1)%beg, idwbuff(1)%end
+            do l = bnd1_lo, bnd1_hi
+                do k = bnd2_lo, bnd2_hi
+                    do j = bnd3_lo, bnd3_hi
                         if (i <= part_q_idx%num) then
                             q_particles(i)%sf(j, k, l) = 0._wp
                             kahan_comp_particles(i)%sf(j, k, l) = 0._wp
@@ -612,10 +622,13 @@ contains
 
         if (part_q_idx%alphaf >= ind_start .and. part_q_idx%alphaf <= ind_end) then
             ! Convert the deposited particle volume fraction to the fluid volume fraction
+            bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+            bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
+            bnd2_lo = idwbuff(1)%beg; bnd2_hi = idwbuff(1)%end
             $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3)
-            do l = idwbuff(3)%beg, idwbuff(3)%end
-                do k = idwbuff(2)%beg, idwbuff(2)%end
-                    do j = idwbuff(1)%beg, idwbuff(1)%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         q_particles(part_q_idx%alphaf)%sf(j, k, l) = 1._wp - q_particles(part_q_idx%alphaf)%sf(j, k, l)
                         ! Limiting void fraction given max value
                         q_particles(part_q_idx%alphaf)%sf(j, k, l) = max(q_particles(part_q_idx%alphaf)%sf(j, k, l), &
@@ -632,6 +645,8 @@ contains
     !! Colonius, 2018).
     subroutine s_compute_particles_EL_source(q_cons_vf, q_prim_vf, rhs_vf)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                                :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
         type(scalar_field), dimension(sys_size), intent(inout) :: q_prim_vf
         type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf
@@ -652,10 +667,13 @@ contains
             call s_lag_gradient_dir(q_prim_vf(eqn_idx%E)%sf, field_vars(part_field_idx%dsrc_tmp)%sf, l)
             call s_add_pressure_source(rhs_vf(eqn_idx%mom%beg + l - 1)%sf)
 
+            bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+            bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
+            bnd2_lo = idwbuff(1)%beg; bnd2_hi = idwbuff(1)%end
             $:GPU_PARALLEL_LOOP(private='[i, j, k]', collapse=3)
-            do k = idwbuff(3)%beg, idwbuff(3)%end
-                do j = idwbuff(2)%beg, idwbuff(2)%end
-                    do i = idwbuff(1)%beg, idwbuff(1)%end
+            do k = bnd0_lo, bnd0_hi
+                do j = bnd1_lo, bnd1_hi
+                    do i = bnd2_lo, bnd2_hi
                         field_vars(part_field_idx%src_tmp)%sf(i, j, k) = q_prim_vf(eqn_idx%E)%sf(i, j, &
                                    & k)*q_prim_vf(eqn_idx%mom%beg + l - 1)%sf(i, j, k)
                     end do
@@ -667,10 +685,13 @@ contains
         end do
 
         ! Apply particle sources to the Eulerian RHS
+        bnd0_lo = idwint(3)%beg; bnd0_hi = idwint(3)%end
+        bnd1_lo = idwint(2)%beg; bnd1_hi = idwint(2)%end
+        bnd2_lo = idwint(1)%beg; bnd2_hi = idwint(1)%end
         $:GPU_PARALLEL_LOOP(private='[i, j, k, l, alpha_f, dalphapdt, udot_gradalpha]', collapse=3)
-        do k = idwint(3)%beg, idwint(3)%end
-            do j = idwint(2)%beg, idwint(2)%end
-                do i = idwint(1)%beg, idwint(1)%end
+        do k = bnd0_lo, bnd0_hi
+            do j = bnd1_lo, bnd1_hi
+                do i = bnd2_lo, bnd2_hi
                     alpha_f = q_particles(part_q_idx%alphaf)%sf(i, j, k)
 
                     dalphapdt = 0._wp
@@ -711,14 +732,19 @@ contains
     !> rhs -= (alpha_p/alpha_f)*field_vars(part_field_idx%dsrc_tmp).
     subroutine s_add_pressure_source(rhs)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         real(stp), dimension(idwint(1)%beg:,idwint(2)%beg:,idwint(3)%beg:), intent(inout) :: rhs
-        integer                                                                           :: i, j, k
-        real(wp)                                                                          :: alpha_f
+        integer :: i, j, k
+        real(wp) :: alpha_f
 
+        bnd0_lo = idwint(3)%beg; bnd0_hi = idwint(3)%end
+        bnd1_lo = idwint(2)%beg; bnd1_hi = idwint(2)%end
+        bnd2_lo = idwint(1)%beg; bnd2_hi = idwint(1)%end
         $:GPU_PARALLEL_LOOP(private='[i, j, k, alpha_f]', collapse=3)
-        do k = idwint(3)%beg, idwint(3)%end
-            do j = idwint(2)%beg, idwint(2)%end
-                do i = idwint(1)%beg, idwint(1)%end
+        do k = bnd0_lo, bnd0_hi
+            do j = bnd1_lo, bnd1_hi
+                do i = bnd2_lo, bnd2_hi
                     alpha_f = q_particles(part_q_idx%alphaf)%sf(i, j, k)
                     rhs(i, j, k) = rhs(i, j, k) - real((1._wp - alpha_f)/alpha_f*field_vars(part_field_idx%dsrc_tmp)%sf(i, j, k), &
                         & kind=stp)
@@ -856,16 +882,21 @@ contains
     !! (i, j, k) indexing.
     subroutine s_gradient_field(vL_field, vR_field, dq, dir, fbeg, fend)
 
-        real(stp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:), intent(out)  :: dq
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
+        real(stp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:), intent(out) :: dq
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(in) :: vL_field, vR_field
-        integer, intent(in)                                                                 :: dir, fbeg, fend
-        integer                                                                             :: i, j, k, f
-        real(wp)                                                                            :: mydx, dsum
+        integer, intent(in) :: dir, fbeg, fend
+        integer :: i, j, k, f
+        real(wp) :: mydx, dsum
 
+        bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+        bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
+        bnd2_lo = idwbuff(1)%beg; bnd2_hi = idwbuff(1)%end
         $:GPU_PARALLEL_LOOP(private='[i, j, k, f, mydx, dsum]', collapse=3, copyin='[dir, fbeg, fend]')
-        do k = idwbuff(3)%beg, idwbuff(3)%end
-            do j = idwbuff(2)%beg, idwbuff(2)%end
-                do i = idwbuff(1)%beg, idwbuff(1)%end
+        do k = bnd0_lo, bnd0_hi
+            do j = bnd1_lo, bnd1_hi
+                do i = bnd2_lo, bnd2_hi
                     if (dir == 1) then
                         mydx = dx(i)
                     else if (dir == 2) then
@@ -888,12 +919,14 @@ contains
     !> Barycentric Lagrange interpolation weights at every cell in each direction, computed once.
     impure subroutine s_compute_barycentric_weights(npts)
 
+        integer             :: bnd0_hi, bnd0_lo  !< collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
         integer, intent(in) :: npts
         integer             :: i, j, k, a, b
         real(wp)            :: prod_x, prod_y, prod_z, dx_loc, dy_loc, dz_loc
 
+        bnd0_lo = idwbuff(1)%beg + npts; bnd0_hi = idwbuff(1)%end - npts
         $:GPU_PARALLEL_LOOP(private='[i, a, b, prod_x, dx_loc]', copyin = '[npts]')
-        do i = idwbuff(1)%beg + npts, idwbuff(1)%end - npts
+        do i = bnd0_lo, bnd0_hi
             do a = -npts, npts
                 prod_x = 1._wp
                 do b = -npts, npts
@@ -907,8 +940,9 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
+        bnd0_lo = idwbuff(2)%beg + npts; bnd0_hi = idwbuff(2)%end - npts
         $:GPU_PARALLEL_LOOP(private='[j, a, b, prod_y, dy_loc]', copyin = '[npts]')
-        do j = idwbuff(2)%beg + npts, idwbuff(2)%end - npts
+        do j = bnd0_lo, bnd0_hi
             do a = -npts, npts
                 prod_y = 1._wp
                 do b = -npts, npts
@@ -923,8 +957,9 @@ contains
         $:END_GPU_PARALLEL_LOOP()
 
         if (num_dims == 3) then
+            bnd0_lo = idwbuff(3)%beg + npts; bnd0_hi = idwbuff(3)%end - npts
             $:GPU_PARALLEL_LOOP(private='[k, a, b, prod_z, dz_loc]', copyin = '[npts]')
-            do k = idwbuff(3)%beg + npts, idwbuff(3)%end - npts
+            do k = bnd0_lo, bnd0_hi
                 do a = -npts, npts
                     prod_z = 1._wp
                     do b = -npts, npts

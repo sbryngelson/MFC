@@ -21,6 +21,8 @@ contains
     subroutine s_hlld_riemann_solver(qL_prim_rsx_vf, dqL_prim_dx_vf, dqL_prim_dy_vf, dqL_prim_dz_vf, qL_prim_vf, qR_prim_rsx_vf, &
                                      & dqR_prim_dx_vf, dqR_prim_dy_vf, dqR_prim_dz_vf, qR_prim_vf, q_prim_vf, norm_dir, ix, iy, iz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: qL_prim_rsx_vf, qR_prim_rsx_vf
         type(scalar_field), allocatable, dimension(:), intent(inout) :: dqL_prim_dx_vf, dqR_prim_dx_vf, dqL_prim_dy_vf, &
              & dqR_prim_dy_vf, dqL_prim_dz_vf, dqR_prim_dz_vf
@@ -75,6 +77,9 @@ contains
                 #:set SV = STENCIL_VAR
                 #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
                 if (norm_dir == ${NORM_DIR}$) then
+                    bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                    bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                    bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                     $:GPU_PARALLEL_LOOP(collapse=3, privateArrays='[alpha_rho_L, alpha_rho_R, alpha_L, alpha_R, U_L, U_R, &
                                         & U_starL, U_starR, U_doubleL, U_doubleR, F_L, F_R, F_starL, F_starR, F_hlld]', &
                                         & private='[vel, rho, pres, E, H_no_mag, gamma, pi_inf, qv, vel_rms, B, c, c_fast, &
@@ -82,9 +87,9 @@ contains
                                         & rhoR_star, E_starL, E_starR, sqrt_rhoL_star, sqrt_rhoR_star, denom_ds, sign_Bx, &
                                         & vL_star, vR_star, wL_star, wR_star, v_double, w_double, By_double, Bz_double, &
                                         & E_doubleL, E_doubleR, E_double]', copyin='[norm_dir]')
-                    do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                        do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                            do j = ${X_BND}$%beg, ${X_BND}$%end
+                    do l = bnd0_lo, bnd0_hi
+                        do k = bnd1_lo, bnd1_hi
+                            do j = bnd2_lo, bnd2_hi
                                 ! (1) Extract the left/right primitive states
                                 do i = 1, eqn_idx%cont%end
                                     alpha_rho_L(i) = qL_prim_rsx_vf(${SF('')}$, i)

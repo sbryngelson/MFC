@@ -30,12 +30,14 @@ contains
     !> Bound the species face values vL/vR of direction id, over the range the reconstruction filled.
     subroutine s_bound_species_faces(q_prim_vf, vL, vR, id)
 
-        type(scalar_field), dimension(sys_size), intent(in)                                    :: q_prim_vf
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
+        type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL, vR
-        integer, intent(in)                                                                    :: id
-        type(int_bounds_info), dimension(3)                                                    :: b
-        real(wp)                                                                               :: w, theta, sL, sR, ybar, yL, yR, xi
-        integer                                                                                :: i, j, k, l, polyn
+        integer, intent(in) :: id
+        type(int_bounds_info), dimension(3) :: b
+        real(wp) :: w, theta, sL, sR, ybar, yL, yR, xi
+        integer :: i, j, k, l, polyn
 
         ! Same range as s_reconstruct_cell_boundary_values (m_rhs.fpp)
 
@@ -44,10 +46,13 @@ contains
         b(id)%beg = b(id)%beg + polyn; b(id)%end = b(id)%end - polyn
         w = merge(f_lobatto_weight(polyn), 0.5_wp, recon_type == recon_type_weno)  ! MUSCL is linear: no interior point
 
+        bnd0_lo = b(3)%beg; bnd0_hi = b(3)%end
+        bnd1_lo = b(2)%beg; bnd1_hi = b(2)%end
+        bnd2_lo = b(1)%beg; bnd2_hi = b(1)%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[i, j, k, l, theta, sL, sR, ybar, yL, yR, xi]', copyin='[b, w]')
-        do l = b(3)%beg, b(3)%end
-            do k = b(2)%beg, b(2)%end
-                do j = b(1)%beg, b(1)%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     sL = 0._wp; sR = 0._wp
                     $:GPU_LOOP(parallelism='[seq]')
                     do i = eqn_idx%species%beg, eqn_idx%species%end

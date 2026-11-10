@@ -763,6 +763,8 @@ contains
     !> Save conservative variable data to disk at the current time step
     impure subroutine s_save_data(t_step, start, finish, io_time_avg, nt)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                 :: bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
         integer, intent(inout)  :: t_step
         real(wp), intent(inout) :: start, finish, io_time_avg
         integer, intent(inout)  :: nt
@@ -777,11 +779,14 @@ contains
         stor = 1
 
         if (time_stepper /= time_stepper_rk1) then
+            bnd1_lo = idwbuff(3)%beg; bnd1_hi = idwbuff(3)%end
+            bnd2_lo = idwbuff(2)%beg; bnd2_hi = idwbuff(2)%end
+            bnd3_lo = idwbuff(1)%beg; bnd3_hi = idwbuff(1)%end
             $:GPU_PARALLEL_LOOP(collapse=4, copyin='[idwbuff]')
             do i = 1, sys_size
-                do l = idwbuff(3)%beg, idwbuff(3)%end
-                    do k = idwbuff(2)%beg, idwbuff(2)%end
-                        do j = idwbuff(1)%beg, idwbuff(1)%end
+                do l = bnd1_lo, bnd1_hi
+                    do k = bnd2_lo, bnd2_hi
+                        do j = bnd3_lo, bnd3_hi
                             q_cons_ts(2)%vf(i)%sf(j, k, l) = q_cons_ts(1)%vf(i)%sf(j, k, l)
                         end do
                     end do

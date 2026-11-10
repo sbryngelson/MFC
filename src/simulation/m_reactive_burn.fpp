@@ -62,6 +62,8 @@ contains
     !! @param bounds     Interior cell bounds
     subroutine s_compute_reactive_burn(rhs_vf, q_cons_vf, q_prim_vf, bounds)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                                :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf
         type(scalar_field), dimension(sys_size), intent(in)    :: q_cons_vf, q_prim_vf
         type(int_bounds_info), dimension(1:3), intent(in)      :: bounds
@@ -69,10 +71,13 @@ contains
         real(wp)                                               :: rho, pres, lambda, rate, mdot
         real(wp)                                               :: alpha_rho_react, alpha_react
 
+        bnd0_lo = bounds(3)%beg; bnd0_hi = bounds(3)%end
+        bnd1_lo = bounds(2)%beg; bnd1_hi = bounds(2)%end
+        bnd2_lo = bounds(1)%beg; bnd2_hi = bounds(1)%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[rho, pres, lambda, rate, mdot, alpha_rho_react, alpha_react]', copyin='[bounds]')
-        do z = bounds(3)%beg, bounds(3)%end
-            do y = bounds(2)%beg, bounds(2)%end
-                do x = bounds(1)%beg, bounds(1)%end
+        do z = bnd0_lo, bnd0_hi
+            do y = bnd1_lo, bnd1_hi
+                do x = bnd2_lo, bnd2_hi
                     ! reactant is fluid 1, product is fluid 2
                     rho = q_cons_vf(eqn_idx%cont%beg)%sf(x, y, z) + q_cons_vf(eqn_idx%cont%beg + 1)%sf(x, y, z)
                     pres = q_prim_vf(eqn_idx%E)%sf(x, y, z)
@@ -108,6 +113,8 @@ contains
     !! @param bounds     Interior cell bounds
     subroutine s_reactive_burn_substep(q_cons_vf, dtime, bounds)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                                :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
         real(wp), intent(in)                                   :: dtime
         type(int_bounds_info), dimension(1:3), intent(in)      :: bounds
@@ -124,11 +131,14 @@ contains
 
         dt_sub = dtime/real(rburn%substeps, wp)
 
+        bnd0_lo = bounds(3)%beg; bnd0_hi = bounds(3)%end
+        bnd1_lo = bounds(2)%beg; bnd1_hi = bounds(2)%end
+        bnd2_lo = bounds(1)%beg; bnd2_hi = bounds(1)%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[alpha_rho, alpha, rho, pres, lambda, rate, e_int, gamma_mix, pi_inf_mix, &
                             & qv_mix, rho_mix, dlambda, dmass, alpha_rho_react, alpha_react, i, sub]', copyin='[bounds, dt_sub]')
-        do z = bounds(3)%beg, bounds(3)%end
-            do y = bounds(2)%beg, bounds(2)%end
-                do x = bounds(1)%beg, bounds(1)%end
+        do z = bnd0_lo, bnd0_hi
+            do y = bnd1_lo, bnd1_hi
+                do x = bnd2_lo, bnd2_hi
                     $:GPU_LOOP(parallelism='[seq]')
                     do i = 1, num_fluids
                         alpha_rho(i) = q_cons_vf(i + eqn_idx%cont%beg - 1)%sf(x, y, z)

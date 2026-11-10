@@ -142,6 +142,8 @@ contains
     !> Add chemical reaction source terms to the species transport RHS using net production rates.
     subroutine s_compute_chemistry_reaction_flux(rhs_vf, q_cons_qp, q_T_sf, q_prim_qp, bounds)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                                :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(sys_size), intent(inout) :: rhs_vf
         type(scalar_field), intent(inout)                      :: q_T_sf
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_qp, q_prim_qp
@@ -153,10 +155,13 @@ contains
         real(wp), dimension(${NUM_SPECIES}$)                   :: Ys
         real(wp), dimension(${NUM_SPECIES}$)                   :: omega
 
+        bnd0_lo = bounds(3)%beg; bnd0_hi = bounds(3)%end
+        bnd1_lo = bounds(2)%beg; bnd1_hi = bounds(2)%end
+        bnd2_lo = bounds(1)%beg; bnd2_hi = bounds(1)%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[Ys, omega, eqn, T, rho, omega_m]', copyin='[bounds]')
-        do z = bounds(3)%beg, bounds(3)%end
-            do y = bounds(2)%beg, bounds(2)%end
-                do x = bounds(1)%beg, bounds(1)%end
+        do z = bnd0_lo, bnd0_hi
+            do y = bnd1_lo, bnd1_hi
+                do x = bnd2_lo, bnd2_hi
                     $:GPU_LOOP(parallelism='[seq]')
                     do eqn = eqn_idx%species%beg, eqn_idx%species%end
                         Ys(eqn - eqn_idx%species%beg + 1) = q_prim_qp(eqn)%sf(x, y, z)
@@ -190,6 +195,8 @@ contains
     !! to one (which does not strictly conserve elemental composition).
     subroutine s_chemistry_reaction_substep(q_cons_vf, q_T_sf, dtime, bounds)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                                :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(sys_size), intent(inout) :: q_cons_vf
         type(scalar_field), intent(inout)                      :: q_T_sf
         real(wp), intent(in)                                   :: dtime
@@ -209,11 +216,14 @@ contains
             ! Pass 1: per-rank local stiffness probe -> adapt nsub for this step, no MPI. Each rank
             ! sizes its own work from the largest fractional net species change any of its cells sees.
             stiff_max = 0._wp
+            bnd0_lo = bounds(3)%beg; bnd0_hi = bounds(3)%end
+            bnd1_lo = bounds(2)%beg; bnd1_hi = bounds(2)%end
+            bnd2_lo = bounds(1)%beg; bnd2_hi = bounds(1)%end
             $:GPU_PARALLEL_LOOP(collapse=3, private='[Ys, cdot, eqn, rho, T, T_new, energy, wr, cell_stiff]', &
                                 & reduction='[[stiff_max]]', reductionOp='[MAX]', copyin='[bounds, dtime]')
-            do z = bounds(3)%beg, bounds(3)%end
-                do y = bounds(2)%beg, bounds(2)%end
-                    do x = bounds(1)%beg, bounds(1)%end
+            do z = bnd0_lo, bnd0_hi
+                do y = bnd1_lo, bnd1_hi
+                    do x = bnd2_lo, bnd2_hi
                         rho = q_cons_vf(eqn_idx%cont%beg)%sf(x, y, z)
                         $:GPU_LOOP(parallelism='[seq]')
                         do eqn = eqn_idx%species%beg, eqn_idx%species%end
@@ -255,11 +265,14 @@ contains
         end if
         dt_sub = dtime/real(nsub, wp)
 
+        bnd0_lo = bounds(3)%beg; bnd0_hi = bounds(3)%end
+        bnd1_lo = bounds(2)%beg; bnd1_hi = bounds(2)%end
+        bnd2_lo = bounds(1)%beg; bnd2_hi = bounds(1)%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[Ys, cdot, ddot, y0, prod0, Lloss, alp, eqn, s, rho, energy, T, T_new, Ysum, wr, &
                             & loss_i, prod_p, loss_p, Lbar, pbar]', copyin='[bounds, dt_sub, nsub]')
-        do z = bounds(3)%beg, bounds(3)%end
-            do y = bounds(2)%beg, bounds(2)%end
-                do x = bounds(1)%beg, bounds(1)%end
+        do z = bnd0_lo, bnd0_hi
+            do y = bnd1_lo, bnd1_hi
+                do x = bnd2_lo, bnd2_hi
                     rho = q_cons_vf(eqn_idx%cont%beg)%sf(x, y, z)
 
                     $:GPU_LOOP(parallelism='[seq]')
@@ -351,6 +364,8 @@ contains
     !> Compute species mass diffusion fluxes at cell interfaces using mixture-averaged diffusivities.
     subroutine s_compute_chemistry_diffusion_flux(idir, q_prim_qp, flux_src_flat, irx, iry, irz, q_T_sf)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                             :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(sys_size), intent(in) :: q_prim_qp
         !> Flat (x, y, z, var) source-flux buffer; a plain-array dummy because src/common cannot `use m_riemann_state`.
         real(wp), dimension(-1:,-1:,-1:,1:), intent(inout) :: flux_src_flat
@@ -381,14 +396,17 @@ contains
             ! Model 1: Mixture-Average Transport
             if (chem_params%transport_model == 1) then
                 ! Note: Added 'i' and 'eqn' to private list.
+                bnd0_lo = isc3%beg; bnd0_hi = isc3%end
+                bnd1_lo = isc2%beg; bnd1_hi = isc2%end
+                bnd2_lo = isc1%beg; bnd2_hi = isc1%end
                 $:GPU_PARALLEL_LOOP(collapse=3,  private='[x, y, z, i, eqn, Ys_L, Ys_R, Ys_cell, Xs_L, Xs_R, &
                                     & mass_diffusivities_mixavg1, mass_diffusivities_mixavg2, mass_diffusivities_mixavg_Cell, &
                                     & h_l, h_r, Xs_cell, h_k, dXk_dxi, Mass_Diffu_Flux, Mass_Diffu_Energy, MW_L, MW_R, MW_cell, &
                                     & T_L, T_R, P_L, P_R, rho_L, rho_R, rho_cell, rho_Vic, lambda_L, lambda_R, lambda_Cell, &
                                     & dT_dxi, grid_spacing]', copyin='[offsets]')
-                do z = isc3%beg, isc3%end
-                    do y = isc2%beg, isc2%end
-                        do x = isc1%beg, isc1%end
+                do z = bnd0_lo, bnd0_hi
+                    do y = bnd1_lo, bnd1_hi
+                        do x = bnd2_lo, bnd2_hi
                             ! Calculate grid spacing using direction-based indexing
                             select case (idir)
                             case (1)
@@ -498,13 +516,16 @@ contains
                 ! Model 2: Unity Lewis Number
             else if (chem_params%transport_model == 2) then
                 ! Note: Added ALL scalars and 'i'/'eqn' to private list to prevent race conditions.
+                bnd0_lo = isc3%beg; bnd0_hi = isc3%end
+                bnd1_lo = isc2%beg; bnd1_hi = isc2%end
+                bnd2_lo = isc1%beg; bnd2_hi = isc1%end
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[x, y, z, i, eqn, Ys_L, Ys_R, Ys_cell, dYk_dxi, Mass_Diffu_Flux, &
                                     & grid_spacing, MW_L, MW_R, MW_cell, P_L, P_R, rho_L, rho_R, rho_cell, T_L, T_R, Cp_L, Cp_R, &
                                     & hmix_L, hmix_R, dh_dxi, lambda_L, lambda_R, lambda_Cell, diffusivity_L, diffusivity_R, &
                                     & diffusivity_cell, Mass_Diffu_Energy]', copyin='[offsets]')
-                do z = isc3%beg, isc3%end
-                    do y = isc2%beg, isc2%end
-                        do x = isc1%beg, isc1%end
+                do z = bnd0_lo, bnd0_hi
+                    do y = bnd1_lo, bnd1_hi
+                        do x = bnd2_lo, bnd2_hi
                             ! Calculate grid spacing using direction-based indexing
                             select case (idir)
                             case (1)

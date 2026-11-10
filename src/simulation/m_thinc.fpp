@@ -206,15 +206,20 @@ contains
     !> @brief Compute the unit normal and interface-position parameter d at each interface cell
     subroutine s_compute_mthinc_normals(v_vf)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                      :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(:), intent(in) :: v_vf
         integer                                      :: j, k, l
         real(wp)                                     :: nr_x, nr_y, nr_z, nmag, nmax, ac
         type(int_bounds_info), dimension(3)          :: id_norm
 
+        bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+        bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
+        bnd2_lo = idwbuff(1)%beg; bnd2_hi = idwbuff(1)%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l]')
-        do l = idwbuff(3)%beg, idwbuff(3)%end
-            do k = idwbuff(2)%beg, idwbuff(2)%end
-                do j = idwbuff(1)%beg, idwbuff(1)%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     mthinc_nhat(1, j, k, l) = 0._wp
                     mthinc_nhat(2, j, k, l) = 0._wp
                     mthinc_nhat(3, j, k, l) = 0._wp
@@ -235,10 +240,13 @@ contains
         end if
 
         ! Compute unit normal and solve for d at interior
+        bnd0_lo = id_norm(3)%beg; bnd0_hi = id_norm(3)%end
+        bnd1_lo = id_norm(2)%beg; bnd1_hi = id_norm(2)%end
+        bnd2_lo = id_norm(1)%beg; bnd2_hi = id_norm(1)%end
         $:GPU_PARALLEL_LOOP(collapse=3, private='[j, k, l, nr_x, nr_y, nr_z, nmag, nmax, ac]', copyin='[id_norm]')
-        do l = id_norm(3)%beg, id_norm(3)%end
-            do k = id_norm(2)%beg, id_norm(2)%end
-                do j = id_norm(1)%beg, id_norm(1)%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     ac = v_vf(eqn_idx%adv%beg)%sf(j, k, l)
 
                     if (ac >= ic_eps .and. ac <= 1._wp - ic_eps) then
@@ -294,6 +302,8 @@ contains
     !! reconstructions at material interfaces. Called after WENO/MUSCL reconstruction per direction.
     subroutine s_thinc_compression(v_rs_ws, vL_rs_vf_x, vR_rs_vf_x, recon_dir, is1_d, is2_d, is3_d)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(in) :: v_rs_ws
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: vL_rs_vf_x, vR_rs_vf_x
         integer, intent(in) :: recon_dir
@@ -311,11 +321,14 @@ contains
             #:set SV = STENCIL_VAR
             #:set SF = lambda offs: COORDS.format(STENCIL_IDX = SV + offs)
             if (recon_dir == ${REC_DIR}$) then
+                bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                 $:GPU_PARALLEL_LOOP(collapse=3,private='[j, k, l, aCL, aC, aCR, aTHINC, moncon, sgn, qmin, qmax, A, B, C, &
                                     & beta_eff, nh1, nh2, nh3, d_local, rho1, rho2, rho_b, rho_e]')
-                do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                    do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                        do j = ${X_BND}$%beg, ${X_BND}$%end
+                do l = bnd0_lo, bnd0_hi
+                    do k = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
                             aCL = v_rs_ws(${SF(' - 1')}$, eqn_idx%adv%beg)
                             aC = v_rs_ws(${SF('')}$, eqn_idx%adv%beg)
                             aCR = v_rs_ws(${SF(' + 1')}$, eqn_idx%adv%beg)

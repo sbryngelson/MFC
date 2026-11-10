@@ -95,6 +95,8 @@ contains
 
     subroutine s_compute_capillary_source_flux(vSrc_rsx_vf, id, isx, isy, isz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                         :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         real(wp), dimension(-1:,-1:,-1:,1:), intent(in) :: vSrc_rsx_vf
         integer, intent(in)                             :: id
         type(int_bounds_info), intent(in)               :: isx, isy, isz
@@ -109,10 +111,13 @@ contains
         integer  :: j, k, l, i
 
         if (id == 1) then
+            bnd0_lo = isz%beg; bnd0_hi = isz%end
+            bnd1_lo = isy%beg; bnd1_hi = isy%end
+            bnd2_lo = isx%beg; bnd2_hi = isx%end
             $:GPU_PARALLEL_LOOP(collapse=3, private='[Omega, w1L, w2L, w3L, w1R, w2R, w3R, w1, w2, w3, normWL, normWR, normW]')
-            do l = isz%beg, isz%end
-                do k = isy%beg, isy%end
-                    do j = isx%beg, isx%end
+            do l = bnd0_lo, bnd0_hi
+                do k = bnd1_lo, bnd1_hi
+                    do j = bnd2_lo, bnd2_hi
                         w1L = gL_x(j, k, l, 1)
                         w2L = gL_x(j, k, l, 2)
                         w3L = 0._wp
@@ -152,10 +157,13 @@ contains
             $:END_GPU_PARALLEL_LOOP()
         else if (id == 2) then
             #:if not MFC_CASE_OPTIMIZATION or num_dims > 1
+                bnd0_lo = isz%beg; bnd0_hi = isz%end
+                bnd1_lo = isy%beg; bnd1_hi = isy%end
+                bnd2_lo = isx%beg; bnd2_hi = isx%end
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[Omega, w1L, w2L, w3L, w1R, w2R, w3R, w1, w2, w3, normWL, normWR, normW]')
-                do l = isz%beg, isz%end
-                    do k = isy%beg, isy%end
-                        do j = isx%beg, isx%end
+                do l = bnd0_lo, bnd0_hi
+                    do k = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
                             w1L = gL_x(j, k, l, 1)
                             w2L = gL_x(j, k, l, 2)
                             w3L = 0._wp
@@ -195,10 +203,13 @@ contains
             #:endif
         else if (id == 3) then
             #:if not MFC_CASE_OPTIMIZATION or num_dims > 2
+                bnd0_lo = isz%beg; bnd0_hi = isz%end
+                bnd1_lo = isy%beg; bnd1_hi = isy%end
+                bnd2_lo = isx%beg; bnd2_hi = isx%end
                 $:GPU_PARALLEL_LOOP(collapse=3, private='[Omega, w1L, w2L, w3L, w1R, w2R, w3R, w1, w2, w3, normWL, normWR, normW]')
-                do l = isz%beg, isz%end
-                    do k = isy%beg, isy%end
-                        do j = isx%beg, isx%end
+                do l = bnd0_lo, bnd0_hi
+                    do k = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
                             w1L = gL_x(j, k, l, 1)
                             w2L = gL_x(j, k, l, 2)
                             w3L = 0._wp
@@ -312,18 +323,24 @@ contains
     !> Reconstruct left and right cell-boundary values of capillary variables
     subroutine s_reconstruct_cell_boundary_values_capillary(v_vf, vL_x, vR_x)
 
-        type(scalar_field), dimension(iv%beg:iv%end), intent(in)                                  :: v_vf
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
+        type(scalar_field), dimension(iv%beg:iv%end), intent(in) :: v_vf
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,iv%beg:), intent(out) :: vL_x
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,iv%beg:), intent(out) :: vR_x
-        integer                                                                                   :: i, j, k, l
+        integer :: i, j, k, l
 
         $:GPU_UPDATE(device='[iv]')
 
+        bnd0_lo = iv%beg; bnd0_hi = iv%end
+        bnd1_lo = idwbuff(3)%beg; bnd1_hi = idwbuff(3)%end
+        bnd2_lo = idwbuff(2)%beg; bnd2_hi = idwbuff(2)%end
+        bnd3_lo = idwbuff(1)%beg; bnd3_hi = idwbuff(1)%end
         $:GPU_PARALLEL_LOOP(collapse=4, private='[i, j, k, l]')
-        do i = iv%beg, iv%end
-            do l = idwbuff(3)%beg, idwbuff(3)%end
-                do k = idwbuff(2)%beg, idwbuff(2)%end
-                    do j = idwbuff(1)%beg, idwbuff(1)%end
+        do i = bnd0_lo, bnd0_hi
+            do l = bnd1_lo, bnd1_hi
+                do k = bnd2_lo, bnd2_hi
+                    do j = bnd3_lo, bnd3_hi
                         vL_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
                         vR_x(j, k, l, i) = v_vf(i)%sf(j, k, l)
                     end do

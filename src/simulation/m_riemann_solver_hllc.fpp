@@ -32,6 +32,8 @@ contains
     subroutine s_hllc_riemann_solver(qL_prim_rsx_vf, dqL_prim_dx_vf, dqL_prim_dy_vf, dqL_prim_dz_vf, qL_prim_vf, qR_prim_rsx_vf, &
                                      & dqR_prim_dx_vf, dqR_prim_dy_vf, dqR_prim_dz_vf, qR_prim_vf, q_prim_vf, norm_dir, ix, iy, iz)
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         real(wp), dimension(idwbuff(1)%beg:,idwbuff(2)%beg:,idwbuff(3)%beg:,1:), intent(inout) :: qL_prim_rsx_vf, qR_prim_rsx_vf
         type(scalar_field), dimension(sys_size), intent(in) :: q_prim_vf
         type(scalar_field), allocatable, dimension(:), intent(inout) :: qL_prim_vf, qR_prim_vf
@@ -177,6 +179,9 @@ contains
                     ! 6-EQUATION MODEL WITH HLLC HLLC star-state flux with contact wave speed s_S
                     if (model_eqns == model_eqns_6eq) then
                         ! 6-equation model (model_eqns=3): separate phasic internal energies
+                        bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                        bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                        bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                         $:GPU_PARALLEL_LOOP(collapse=3, privateArrays='[vel_L, vel_R, Re_L, Re_R, alpha_L, alpha_R, alpha_rho_L, &
                                             & alpha_rho_R, Ys_L, Ys_R, Xs_L, Xs_R, Gamma_iL, Gamma_iR, Cp_iL, Cp_iR, R_species]', &
                                             & private='[i, j, k, l, pcorr, rho_L, rho_R, pres_L, pres_R, E_L, E_R, H_L, H_R, &
@@ -187,9 +192,9 @@ contains
                                             & rho_Star, E_Star, p_Star, p_K_Star, vel_K_star, s_L, s_R, s_M, s_P, s_S, xi_M, &
                                             & xi_P, xi_L, xi_R, xi_L_m1, xi_R_m1, xi_MP, xi_PP, alpha_K_star, alpha_rho_K_star, &
                                             & p_isen_L, p_isen_R, e_K_star]', firstprivate='[Re_size_loc1, Re_size_loc2]')
-                        do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                            do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                                do j = ${X_BND}$%beg, ${X_BND}$%end
+                        do l = bnd0_lo, bnd0_hi
+                            do k = bnd1_lo, bnd1_hi
+                                do j = bnd2_lo, bnd2_hi
                                     vel_L_rms = 0._wp; vel_R_rms = 0._wp
                                     rho_L = 0._wp; rho_R = 0._wp
                                     gamma_L = 0._wp; gamma_R = 0._wp
@@ -489,6 +494,9 @@ contains
                         $:END_GPU_PARALLEL_LOOP()
                     else if (model_eqns == model_eqns_5eq .and. bubbles_euler) then
                         ! 5-equation model with Euler-Euler bubble dynamics
+                        bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                        bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                        bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                         $:GPU_PARALLEL_LOOP(collapse=3, privateArrays='[R0_L, R0_R, V0_L, V0_R, P0_L, P0_R, pbw_L, pbw_R, vel_L, &
                                             & vel_R, alpha_L, alpha_R, alpha_rho_L, alpha_rho_R, Re_L, Re_R, Ys_L, Ys_R, Cp_iL, &
                                             & Cp_iR, Xs_L, Xs_R, Gamma_iL, Gamma_iR]', private='[i, q, rho_avg, h_avg, gamma_avg, &
@@ -498,9 +506,9 @@ contains
                                             & s_P, s_S, xi_M, xi_P, xi_L, xi_R, xi_L_m1, xi_R_m1, xi_MP, xi_PP, nbub_L, nbub_R, &
                                             & PbwR3Lbar, PbwR3Rbar, R3Lbar, R3Rbar, R3V2Lbar, R3V2Rbar]', &
                                             & firstprivate='[Re_size_loc1, Re_size_loc2]')
-                        do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                            do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                                do j = ${X_BND}$%beg, ${X_BND}$%end
+                        do l = bnd0_lo, bnd0_hi
+                            do k = bnd1_lo, bnd1_hi
+                                do j = bnd2_lo, bnd2_hi
                                     vel_L_rms = 0._wp; vel_R_rms = 0._wp
                                     rho_L = 0._wp; rho_R = 0._wp
                                     gamma_L = 0._wp; gamma_R = 0._wp
@@ -907,12 +915,15 @@ contains
                                 $:GPU_PARALLEL_LOOP(collapse=3, private=_hllc_priv, privateArrays=_hllc_arr, copyin='[is1, is2, &
                                                     & is3]', firstprivate='[Re_size_loc1, Re_size_loc2]')
                             #:else
+                                bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                                bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                                bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                                 $:GPU_PARALLEL_LOOP(collapse=3, private=_hllc_priv, privateArrays=_hllc_arr, copyin='[is1, is2, &
                                                     & is3]', firstprivate='[Re_size_loc1, Re_size_loc2]')
                             #:endif
-                            do l = ${Z_BND}$%beg, ${Z_BND}$%end
-                                do k = ${Y_BND}$%beg, ${Y_BND}$%end
-                                    do j = ${X_BND}$%beg, ${X_BND}$%end
+                            do l = bnd0_lo, bnd0_hi
+                                do k = bnd1_lo, bnd1_hi
+                                    do j = bnd2_lo, bnd2_hi
                                         vel_L_rms = 0._wp; vel_R_rms = 0._wp
                                         rho_L = 0._wp; rho_R = 0._wp
                                         gamma_L = 0._wp; gamma_R = 0._wp

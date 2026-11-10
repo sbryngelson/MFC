@@ -147,10 +147,13 @@ contains
         end if
 #endif
 
+        bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+        bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
+        bnd2_lo = idwbuff(1)%beg; bnd2_hi = idwbuff(1)%end
         $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3)
-        do l = idwbuff(3)%beg, idwbuff(3)%end
-            do k = idwbuff(2)%beg, idwbuff(2)%end
-                do j = idwbuff(1)%beg, idwbuff(1)%end
+        do l = bnd0_lo, bnd0_hi
+            do k = bnd1_lo, bnd1_hi
+                do j = bnd2_lo, bnd2_hi
                     jac(j, k, l) = 0._stp
                     if (igr_iter_solver == 1) jac_old(j, k, l) = 0._stp
                 end do
@@ -221,6 +224,11 @@ contains
     subroutine s_igr_iterative_solve(q_cons_vf, bc_type, t_step)
 
         $:CRAY_DIR('OPTIMIZE (-haggress)')
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
+
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+        integer                                                    :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
         type(scalar_field), dimension(sys_size), intent(inout)     :: q_cons_vf
         type(integer_field), dimension(1:num_dims,1:2), intent(in) :: bc_type
         integer, intent(in)                                        :: t_step
@@ -302,10 +310,13 @@ contains
             call s_populate_F_igr_buffers(bc_type, jac_sf)
 
             if (igr_iter_solver == 1) then  ! Jacobi iteration
+                bnd0_lo = idwbuff(3)%beg; bnd0_hi = idwbuff(3)%end
+                bnd1_lo = idwbuff(2)%beg; bnd1_hi = idwbuff(2)%end
+                bnd2_lo = idwbuff(1)%beg; bnd2_hi = idwbuff(1)%end
                 $:GPU_PARALLEL_LOOP(private='[j, k, l]', collapse=3)
-                do l = idwbuff(3)%beg, idwbuff(3)%end
-                    do k = idwbuff(2)%beg, idwbuff(2)%end
-                        do j = idwbuff(1)%beg, idwbuff(1)%end
+                do l = bnd0_lo, bnd0_hi
+                    do k = bnd1_lo, bnd1_hi
+                        do j = bnd2_lo, bnd2_hi
                             jac_old(j, k, l) = jac(j, k, l)
                         end do
                     end do
