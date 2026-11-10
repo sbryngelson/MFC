@@ -2369,7 +2369,48 @@ contains
         end do
         $:END_GPU_PARALLEL_LOOP()
 
+        call s_ib_flux_wall_diag(q_cons_vf)  ! DIAGNOSTIC, not for the PR
+
     end subroutine s_ib_flux_wall_prepare
+
+    !> DIAGNOSTIC, not for the PR: min/max and NaN counts of the wall source, theta and the species densities, first 40 calls.
+    impure subroutine s_ib_flux_wall_diag(q_cons_vf)
+
+        type(scalar_field), dimension(sys_size), intent(in) :: q_cons_vf
+        integer, save                                       :: ncall = 0
+        integer                                             :: q, nn, na
+        real(wp)                                            :: lo, hi
+
+        ncall = ncall + 1
+        if (ncall > 40) return
+        print '(A, I0, A, ES12.4, A, F10.6)', ' FWDIAG call ', ncall, ' dt = ', dt, ' mytime = ', mytime
+        do q = 1, ibw_a + 1
+            if (q <= ibw_a) then
+                $:GPU_UPDATE(host='[ib_wall_src(q)%sf]')
+                lo = real(minval(ib_wall_src(q)%sf(0:m,0:n,0:p)), wp)
+                hi = real(maxval(ib_wall_src(q)%sf(0:m,0:n,0:p)), wp)
+                nn = count(ib_wall_src(q)%sf(0:m,0:n,0:p) /= ib_wall_src(q)%sf(0:m,0:n,0:p))
+                na = count(ib_wall_src(q)%sf(0:m,0:n,0:p) /= 0._wp)
+                print '(A, I3, A, 2ES14.5, A, I0, A, I0)', ' FWDIAG src(', q, ') min,max = ', lo, hi, ' nan = ', nn, &
+                    & ' nonzero = ', na
+            else
+                $:GPU_UPDATE(host='[ib_wall_theta%sf]')
+                lo = real(minval(ib_wall_theta%sf(0:m,0:n,0:p)), wp)
+                hi = real(maxval(ib_wall_theta%sf(0:m,0:n,0:p)), wp)
+                print '(A, 2ES14.5, A, I0)', ' FWDIAG theta min,max = ', lo, hi, ' count(theta<1) = ', count(ib_wall_theta%sf(0:m, &
+                    & 0:n,0:p) < 1._wp)
+            end if
+        end do
+        do q = eqn_idx%cont%beg, eqn_idx%species%end
+            $:GPU_UPDATE(host='[q_cons_vf(q)%sf]')
+            nn = count(q_cons_vf(q)%sf(0:m,0:n,0:p) /= q_cons_vf(q)%sf(0:m,0:n,0:p))
+            if (nn > 0 .or. q <= eqn_idx%E .or. q == eqn_idx%species%beg) then
+                print '(A, I3, A, 2ES14.5, A, I0)', ' FWDIAG cons(', q, ') min,max = ', real(minval(q_cons_vf(q)%sf(0:m,0:n, &
+                    & 0:p)), wp), real(maxval(q_cons_vf(q)%sf(0:m,0:n,0:p)), wp), ' nan = ', nn
+            end if
+        end do
+
+    end subroutine s_ib_flux_wall_diag
 
     !> ib_flux_wall: sum over the reacting-wall faces of fluid cell (j, k, l) of the wall area per cell volume, times species q's
     !! consumption rate max(-mdot_q, 0) (q > 0) or 1 (q = 0)
