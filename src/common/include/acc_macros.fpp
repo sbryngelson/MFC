@@ -136,8 +136,15 @@
     #:set collapse_val = GEN_COLLAPSE_STR(collapse)
     #:set parallelism_val = GEN_PARALLELISM_STR(parallelism)
     #:set default_val = GEN_DEFAULT_STR(default)
-    #:set private_val = GEN_PRIVATE_STR(private, False).strip('\n') + GEN_PRIVATE_STR(privateArrays, False).strip('\n') + &
-        & GEN_PRIVATE_STR(firstprivate, True).strip('\n')
+    #! One private clause: a second one next to it is legal OpenACC but makes NVHPC 26.5 size the private arrays absurdly
+    #:if private is not None and privateArrays is not None
+        #:set private_all = '[' + private.strip()[1:-1] + ', ' + privateArrays.strip()[1:-1] + ']'
+    #:elif privateArrays is not None
+        #:set private_all = privateArrays
+    #:else
+        #:set private_all = private
+    #:endif
+    #:set private_val = GEN_PRIVATE_STR(private_all, False).strip('\n') + GEN_PRIVATE_STR(firstprivate, True).strip('\n')
     #:set reduction_val = GEN_REDUCTION_STR(reduction, reductionOp)
     #:set copy_val = GEN_COPY_STR(copy)
     #:set copyin_val = GEN_COPYIN_STR(copyin, False).strip('\n') + GEN_COPYIN_STR(copyinReadOnly, True).strip('\n')
