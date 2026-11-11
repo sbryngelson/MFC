@@ -911,13 +911,13 @@ contains
                             #:endif
                             ! Identical calls on purpose: offload kernels are named by the .fpp line of their GPU_PARALLEL_LOOP, so
                             ! a shared call gives both emissions one name and amdflang launches the wrong one. Do not merge.
+                            bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
+                            bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
+                            bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                             #:if HYPO
                                 $:GPU_PARALLEL_LOOP(collapse=3, private=_hllc_priv, privateArrays=_hllc_arr, copyin='[is1, is2, &
                                                     & is3]', firstprivate='[Re_size_loc1, Re_size_loc2]')
                             #:else
-                                bnd0_lo = ${Z_BND}$%beg; bnd0_hi = ${Z_BND}$%end
-                                bnd1_lo = ${Y_BND}$%beg; bnd1_hi = ${Y_BND}$%end
-                                bnd2_lo = ${X_BND}$%beg; bnd2_hi = ${X_BND}$%end
                                 $:GPU_PARALLEL_LOOP(collapse=3, private=_hllc_priv, privateArrays=_hllc_arr, copyin='[is1, is2, &
                                                     & is3]', firstprivate='[Re_size_loc1, Re_size_loc2]')
                             #:endif
