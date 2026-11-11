@@ -209,11 +209,47 @@ def check_raw_directives(repo_root: Path) -> list[str]:
     return errors
 
 
-# Opt out of check_collapsed_loop_bounds for one loop nest (on the GPU_PARALLEL_LOOP line or the first do line).
+# Opt out of check_collapsed_loop_bounds: a trailing comment on a `do` line of the nest. It cannot go on the
+# `$:GPU_PARALLEL_LOOP` line, because Fypp evaluates that line as Python.
 DERIVED_BOUNDS_MARKER = "lint: derived-bounds-ok"
 
-_COLLAPSE_RE = re.compile(r"collapse\s*=\s*(\d+)")
-_DO_BOUNDS_RE = re.compile(r"do\s+\w+\s*=\s*(.+)$", re.IGNORECASE)
+_PARALLEL_LOOP_RE = re.compile(r"\$:\s*GPU_PARALLEL_LOOP\s*\(")
+_COLLAPSE_RE = re.compile(r"collapse\s*=\s*([^,)\s]+)")
+_DO_BOUNDS_RE = re.compile(r"(?:\w+\s*:\s*)?do\s+(?:\d+\s+)?\w+\s*=\s*(.+)$", re.IGNORECASE)
+_MAX_COLLAPSE = 3  # a collapse count that is not a literal digit (a Fypp variable) is checked as this deep
+
+
+def _statement_at(lines: list[str], k: int) -> tuple[str, int, bool]:
+    """Return the code at line k with '&' continuations joined, the last line used, and whether any carries the opt-out marker."""
+    code = lines[k].split("!")[0].strip()
+    marked = DERIVED_BOUNDS_MARKER in lines[k]
+    while code.endswith("&") and k + 1 < len(lines):
+        k += 1
+        marked = marked or DERIVED_BOUNDS_MARKER in lines[k]
+        code = code[:-1].strip() + " " + lines[k].split("!")[0].strip().lstrip("&").strip()
+    return code, k, marked
+
+
+def _collapsed_do_headers(lines: list[str], start: int, depth: int) -> list[tuple[str, bool]]:
+    """Return (bounds, opted-out) for the first `depth` consecutive `do` headers at or after line start.
+
+    Blank, comment and preprocessor lines are skipped; a ';'-joined line holds several headers; any other statement ends the nest.
+    """
+    headers: list[tuple[str, bool]] = []
+    k = start
+    while k < len(lines) and len(headers) < depth:
+        text = lines[k].strip()
+        if not text or text.startswith(("!", "#", "@:")):
+            k += 1
+            continue
+        code, k, marked = _statement_at(lines, k)
+        for part in code.split(";"):
+            m = _DO_BOUNDS_RE.match(part.strip())
+            if not m:
+                return headers
+            headers.append((m.group(1).strip(), marked))
+        k += 1
+    return headers[:depth]
 
 
 def check_collapsed_loop_bounds(repo_root: Path) -> list[str]:
@@ -228,22 +264,21 @@ def check_collapsed_loop_bounds(repo_root: Path) -> list[str]:
         lines = src.read_text(encoding="utf-8").splitlines()
         rel = src.relative_to(repo_root)
         for i, line in enumerate(lines):
-            if not line.strip().startswith("$:GPU_PARALLEL_LOOP("):
+            if not _PARALLEL_LOOP_RE.match(line.strip()):
                 continue
             j = i
-            while lines[j].rstrip().split("!")[0].rstrip().endswith("&") and j + 1 < len(lines):
+            while lines[j].split("!")[0].rstrip().endswith("&") and j + 1 < len(lines):
                 j += 1
-            m = _COLLAPSE_RE.search(" ".join(lines[i : j + 1]))
-            if not m or int(m.group(1)) < 2:
+            m = _COLLAPSE_RE.search(" ".join(x.split("!")[0] for x in lines[i : j + 1]))
+            if not m:
                 continue
-            nest = [lines[k] for k in range(j + 1, len(lines)) if lines[k].strip() and not lines[k].strip().startswith("!")][: int(m.group(1))]
-            if any(DERIVED_BOUNDS_MARKER in x for x in [line, *nest]):
+            depth = int(m.group(1)) if m.group(1).isdigit() else _MAX_COLLAPSE
+            if depth < 2:
                 continue
-            for do_line in nest:
-                b = _DO_BOUNDS_RE.match(do_line.strip().split("!")[0])
-                if b and "%" in b.group(1):
+            for bounds, marked in _collapsed_do_headers(lines, j + 1, depth):
+                if "%" in bounds and not marked:
                     errors.append(
-                        f"  {rel}:{i + 1} collapsed GPU loop bound '{b.group(1).strip()}' reads a derived-type member. "
+                        f"  {rel}:{i + 1} collapsed GPU loop bound '{bounds}' reads a derived-type member. "
                         "Fix: copy the bounds into integer scalars before the directive (see gpuParallelization.md)"
                     )
                     break

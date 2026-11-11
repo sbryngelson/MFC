@@ -365,6 +365,75 @@ def test_collapsed_loop_bounds_ignore_uncollapsed_and_inner_loops(tmp_path):
     assert check_collapsed_loop_bounds(tmp_path) == []
 
 
-def test_collapsed_loop_bounds_opt_out_marker(tmp_path):
-    _write_src(tmp_path, "simulation/m_x.fpp", _loop_src("$:GPU_PARALLEL_LOOP(collapse=2)  ! lint: derived-bounds-ok"))
+def _src(*lines: str) -> str:
+    return "\n".join(lines) + "\n"
+
+
+def test_collapsed_loop_bounds_opt_out_marker_on_do_line(tmp_path):
+    src = _src(
+        "        $:GPU_PARALLEL_LOOP(collapse=2)",
+        "        do l = ib%beg, ib%end  ! lint: derived-bounds-ok",
+        "            do k = 1, n",
+        "            end do",
+        "        end do",
+    )
+    _write_src(tmp_path, "simulation/m_x.fpp", src)
+    assert check_collapsed_loop_bounds(tmp_path) == []
+
+
+def test_collapsed_loop_bounds_see_through_preprocessor_lines(tmp_path):
+    src = _src(
+        "        #:if HYPO",
+        "        $:GPU_PARALLEL_LOOP(collapse=2)",
+        "        #:else",
+        "        $:GPU_PARALLEL_LOOP(collapse=2)",
+        "        #:endif",
+        "        do l = 1, n",
+        "            do k = ib%beg, ib%end",
+        "            end do",
+        "        end do",
+    )
+    _write_src(tmp_path, "simulation/m_x.fpp", src)
+    assert len(check_collapsed_loop_bounds(tmp_path)) >= 1
+
+
+def test_collapsed_loop_bounds_split_semicolon_nest(tmp_path):
+    src = _src(
+        "        $:GPU_PARALLEL_LOOP(collapse=3)",
+        "        do q = 0, p; do l = 0, n; do k = 0, m",
+        "            s = 0",
+        "            do i = ib%beg, ib%end",
+        "            end do",
+        "        end do; end do; end do",
+    )
+    _write_src(tmp_path, "simulation/m_x.fpp", src)
+    assert check_collapsed_loop_bounds(tmp_path) == []
+    _write_src(tmp_path, "simulation/m_y.fpp", _src("        $:GPU_PARALLEL_LOOP(collapse=3)", "        do q = 0, p; do l = 0, n; do k = ib%beg, m"))
+    assert len(check_collapsed_loop_bounds(tmp_path)) == 1
+
+
+def test_collapsed_loop_bounds_join_continued_do_lines(tmp_path):
+    src = _src(
+        "        $:GPU_PARALLEL_LOOP(collapse=2)",
+        "        do l = 1, &",
+        "            & ib(3)%end",
+        "            do k = 1, n",
+        "            end do",
+        "        end do",
+    )
+    _write_src(tmp_path, "simulation/m_x.fpp", src)
+    assert len(check_collapsed_loop_bounds(tmp_path)) == 1
+
+
+def test_collapsed_loop_bounds_variable_collapse_and_named_loops(tmp_path):
+    _write_src(tmp_path, "simulation/m_x.fpp", _loop_src("$:GPU_PARALLEL_LOOP(collapse=${N}$)"))
+    assert len(check_collapsed_loop_bounds(tmp_path)) == 1
+    named = _src("        $:GPU_PARALLEL_LOOP(collapse=2)", "        outer: DO l = ib%beg, ib%end", "            do k = 1, n", "            end do", "        end do outer")
+    _write_src(tmp_path, "simulation/m_y.fpp", named)
+    assert len(check_collapsed_loop_bounds(tmp_path)) == 2
+
+
+def test_collapsed_loop_bounds_ignore_member_in_comment(tmp_path):
+    src = _src("        $:GPU_PARALLEL_LOOP(collapse=2)", "        do l = 1, n  ! was ib%end", "            do k = 1, n", "            end do", "        end do")
+    _write_src(tmp_path, "simulation/m_x.fpp", src)
     assert check_collapsed_loop_bounds(tmp_path) == []

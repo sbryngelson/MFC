@@ -919,7 +919,7 @@ answer is wrong, or one backend diverges from all the others.
   115074924544 bytes` on a 1D case. Fixed in 26.9 and absent in 25.11; the build is green
   and the failure appears only at launch. Copy the bounds into `integer` scalars before the
   directive and loop over those. `check_collapsed_loop_bounds` in `lint_source.py` enforces
-  this; `! lint: derived-bounds-ok` on the directive opts a nest out.
+  this; a trailing `! lint: derived-bounds-ok` on one of the nest's `do` lines opts it out (not on the directive: Fypp evaluates that line as Python).
 - **Do not wrap `GPU_LOOP` in `GPU_PARALLEL` for spatial loops.** `GPU_LOOP` emits empty
   directives on Cray and AMD, so the loop runs serially with no diagnostic. Spatial loops
   always use `GPU_PARALLEL_LOOP` / `END_GPU_PARALLEL_LOOP`.
