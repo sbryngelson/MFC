@@ -912,6 +912,14 @@ reproducer runs correctly on AFAR 24.3, but this is not yet verified inside MFC.
 Every entry here was measured. They share a failure mode: the build stays green and the
 answer is wrong, or one backend diverges from all the others.
 
+- **Collapsed loop bounds must be scalars, not derived-type members.** On NVHPC 26.5 a
+  `collapse(2+)` kernel whose bounds read a member (`do j = ibounds(1)%%beg, ibounds(1)%%end`)
+  and whose private arrays have runtime sizes (`num_fluids`, `weno_polyn`) allocates the
+  private arrays for the whole index space at launch: `Out of memory allocating
+  115074924544 bytes` on a 1D case. Fixed in 26.9 and absent in 25.11; the build is green
+  and the failure appears only at launch. Copy the bounds into `integer` scalars before the
+  directive and loop over those. `check_collapsed_loop_bounds` in `lint_source.py` enforces
+  this; `! lint: derived-bounds-ok` on the directive opts a nest out.
 - **Do not wrap `GPU_LOOP` in `GPU_PARALLEL` for spatial loops.** `GPU_LOOP` emits empty
   directives on Cray and AMD, so the loop runs serially with no diagnostic. Spatial loops
   always use `GPU_PARALLEL_LOOP` / `END_GPU_PARALLEL_LOOP`.

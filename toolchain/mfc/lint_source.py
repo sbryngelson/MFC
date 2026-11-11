@@ -209,6 +209,48 @@ def check_raw_directives(repo_root: Path) -> list[str]:
     return errors
 
 
+# Opt out of check_collapsed_loop_bounds for one loop nest (on the GPU_PARALLEL_LOOP line or the first do line).
+DERIVED_BOUNDS_MARKER = "lint: derived-bounds-ok"
+
+_COLLAPSE_RE = re.compile(r"collapse\s*=\s*(\d+)")
+_DO_BOUNDS_RE = re.compile(r"do\s+\w+\s*=\s*(.+)$", re.IGNORECASE)
+
+
+def check_collapsed_loop_bounds(repo_root: Path) -> list[str]:
+    """Flag collapsed GPU loops whose bounds read derived-type members (NVHPC 26.5 allocates ~100 GB of private arrays at launch).
+
+    Copy the bounds into integer scalars before the directive and loop over those.
+    """
+    errors: list[str] = []
+    src_dir = repo_root / SRC_DIR
+
+    for src in _fortran_fpp_files(src_dir):
+        lines = src.read_text(encoding="utf-8").splitlines()
+        rel = src.relative_to(repo_root)
+        for i, line in enumerate(lines):
+            if not line.strip().startswith("$:GPU_PARALLEL_LOOP("):
+                continue
+            j = i
+            while lines[j].rstrip().split("!")[0].rstrip().endswith("&") and j + 1 < len(lines):
+                j += 1
+            m = _COLLAPSE_RE.search(" ".join(lines[i : j + 1]))
+            if not m or int(m.group(1)) < 2:
+                continue
+            nest = [lines[k] for k in range(j + 1, len(lines)) if lines[k].strip() and not lines[k].strip().startswith("!")][: int(m.group(1))]
+            if any(DERIVED_BOUNDS_MARKER in x for x in [line, *nest]):
+                continue
+            for do_line in nest:
+                b = _DO_BOUNDS_RE.match(do_line.strip().split("!")[0])
+                if b and "%" in b.group(1):
+                    errors.append(
+                        f"  {rel}:{i + 1} collapsed GPU loop bound '{b.group(1).strip()}' reads a derived-type member. "
+                        "Fix: copy the bounds into integer scalars before the directive (see gpuParallelization.md)"
+                    )
+                    break
+
+    return errors
+
+
 def check_stage_guards(repo_root: Path) -> list[str]:
     """Flag per-executable preprocessor guards (MFC_PRE_PROCESS, MFC_SIMULATION, MFC_POST_PROCESS) in source.
 
@@ -812,6 +854,7 @@ def main():
     all_errors: list[str] = []
     all_errors.extend(check_raw_directives(repo_root))
     all_errors.extend(check_stage_guards(repo_root))
+    all_errors.extend(check_collapsed_loop_bounds(repo_root))
     all_errors.extend(check_double_precision(repo_root))
     all_errors.extend(check_junk_code(repo_root))
     all_errors.extend(check_false_integers(repo_root))

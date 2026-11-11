@@ -3,6 +3,7 @@
 from mfc.lint_source import (
     _extract_bcast_roots,
     check_amd_species_array_sizes,
+    check_collapsed_loop_bounds,
     check_device_routine_element_args,
     check_double_precision,
     check_integer_wp,
@@ -332,3 +333,38 @@ def test_a_non_species_array_is_not_flagged(tmp_path):
     (src / "m_x.fpp").write_text("\n".join(_amd_block("real(wp), dimension(3) :: alpha_rho_IP")), encoding="utf-8")
 
     assert check_amd_species_array_sizes(tmp_path) == []
+
+
+def _loop_src(directive: str, bounds: str = "ib(3)%beg, ib(3)%end", pre: str = "") -> str:
+    return f"{pre}        {directive}\n        do l = {bounds}\n            do k = 1, n\n            end do\n        end do\n"
+
+
+def test_collapsed_loop_bounds_flag_derived_type_members(tmp_path):
+    _write_src(tmp_path, "simulation/m_x.fpp", _loop_src("$:GPU_PARALLEL_LOOP(collapse=2)"))
+    errors = check_collapsed_loop_bounds(tmp_path)
+    assert len(errors) == 1
+    assert "ib(3)%beg" in errors[0]
+
+
+def test_collapsed_loop_bounds_accept_scalars(tmp_path):
+    _write_src(tmp_path, "simulation/m_x.fpp", _loop_src("$:GPU_PARALLEL_LOOP(collapse=2)", "bnd0_lo, bnd0_hi"))
+    assert check_collapsed_loop_bounds(tmp_path) == []
+
+
+def test_collapsed_loop_bounds_read_multiline_directive(tmp_path):
+    directive = "$:GPU_PARALLEL_LOOP(private='[i, j]', &\n            & collapse=3)"
+    _write_src(tmp_path, "simulation/m_x.fpp", _loop_src(directive))
+    assert len(check_collapsed_loop_bounds(tmp_path)) == 1
+
+
+def test_collapsed_loop_bounds_ignore_uncollapsed_and_inner_loops(tmp_path):
+    _write_src(tmp_path, "simulation/m_x.fpp", _loop_src("$:GPU_PARALLEL_LOOP()"))
+    _write_src(tmp_path, "simulation/m_y.fpp", _loop_src("$:GPU_PARALLEL_LOOP(collapse=1)"))
+    inner = "        $:GPU_PARALLEL_LOOP(collapse=2)\n        do l = 1, n\n            do k = 1, n\n                do i = ib%beg, ib%end\n"
+    _write_src(tmp_path, "simulation/m_z.fpp", inner + "                end do\n            end do\n        end do\n")
+    assert check_collapsed_loop_bounds(tmp_path) == []
+
+
+def test_collapsed_loop_bounds_opt_out_marker(tmp_path):
+    _write_src(tmp_path, "simulation/m_x.fpp", _loop_src("$:GPU_PARALLEL_LOOP(collapse=2)  ! lint: derived-bounds-ok"))
+    assert check_collapsed_loop_bounds(tmp_path) == []
