@@ -1448,13 +1448,13 @@ contains
             #:else
                 subroutine s_finalize_riemann_solver_hatR(flux_vf, flux_gsrc_vf, norm_dir)
 
-                    !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
-                    integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
                     type(scalar_field), dimension(sys_size), intent(inout) :: flux_vf, flux_gsrc_vf
 
                 #:endif
                 integer, intent(in) :: norm_dir
                 integer             :: i, j, k, l  !< Generic loop iterators
+                !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
+                integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo, bnd3_hi, bnd3_lo
                 ! Reshaping Outputted Data in y-direction
 
                 if (norm_dir == 2) then

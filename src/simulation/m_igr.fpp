@@ -93,6 +93,9 @@ contains
     !> Initialize the IGR module
     subroutine s_initialize_igr_module()
 
+        !> collapsed-loop bounds as scalars (see gpuParallelization.md)
+        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
+
         if (viscous) then
             @:ALLOCATE(Res_igr(1:2, 1:maxval(Re_size)))
             do i = 1, 2
@@ -224,8 +227,6 @@ contains
     subroutine s_igr_iterative_solve(q_cons_vf, bc_type, t_step)
 
         $:CRAY_DIR('OPTIMIZE (-haggress)')
-        !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
-        integer :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
 
         !> collapsed-loop bounds as scalars (see gpuParallelization.md, NVHPC 26.5)
         integer                                                    :: bnd0_hi, bnd0_lo, bnd1_hi, bnd1_lo, bnd2_hi, bnd2_lo
