@@ -336,7 +336,14 @@ exit 0
             if (TARGET CUDA::nvToolsExt) # CUDA <= 12.8
                 target_link_libraries(${a_target} PRIVATE CUDA::nvToolsExt)
             else() # CUDA >= 12.9
-                target_link_libraries(${a_target} PRIVATE nvhpcwrapnvtx)
+                # NVHPC 26.9 (CUDA 13.3) no longer ships libnvhpcwrapnvtx
+                include(CheckFortranSourceCompiles)
+                set(CMAKE_REQUIRED_LIBRARIES nvhpcwrapnvtx)
+                check_fortran_source_compiles("program t\nend program" MFC_HAS_NVHPCWRAPNVTX SRC_EXT f90)
+                unset(CMAKE_REQUIRED_LIBRARIES)
+                if (MFC_HAS_NVHPCWRAPNVTX)
+                    target_link_libraries(${a_target} PRIVATE nvhpcwrapnvtx)
+                endif()
                 target_link_options(${a_target} PRIVATE "-cudalib=nvtx3")
             endif()
         endif()
