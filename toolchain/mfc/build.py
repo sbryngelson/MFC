@@ -1,4 +1,5 @@
 import dataclasses
+import functools
 import hashlib
 import os
 import queue
@@ -687,16 +688,18 @@ def compiler_fingerprint() -> str:
         value = os.environ.get(var, "").split(maxsplit=1)
         if value:
             value[0] = os.path.realpath(shutil.which(value[0]) or value[0])
-            version = _compiler_version(value[0])
+            version = _compiler_version(value[0], frozenset(os.environ.items()))
             parts.append(f"{var}={' '.join(value)}" + (f" ({version})" if version else ""))
     return ";".join(parts)
 
 
-def _compiler_version(exe: str) -> str:
+@functools.lru_cache(maxsize=None)
+def _compiler_version(exe: str, environ: frozenset) -> str:
     """First line of `exe --version`, or "" if it does not answer.
 
     Wrappers (Cray ftn/cc/CC under another PrgEnv, OpenMPI mpifort with OMPI_FC) resolve to the same path while selecting a
-    different compiler, so the path alone cannot tell them apart.
+    different compiler, so the path alone cannot tell them apart. Cached per (exe, environment): every get_slug asks, and
+    that is thousands of `--version` launches (minutes with NVHPC) per `./mfc.sh test`.
     """
     try:
         out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10, check=False).stdout

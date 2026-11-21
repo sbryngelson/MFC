@@ -192,3 +192,18 @@ def test_compiler_fingerprint_tells_wrappers_apart_by_version(tmp_path, monkeypa
     gnu = compiler_fingerprint()
     monkeypatch.setenv("WRAPPED_COMPILER", "nvfortran")
     assert compiler_fingerprint() != gnu
+
+
+def test_compiler_fingerprint_asks_each_compiler_once(tmp_path, monkeypatch):
+    """get_slug runs once per (case, target): `--version` must not be relaunched for every one."""
+    launches = tmp_path / "launches"
+    wrapper = tmp_path / "mpifort"
+    wrapper.write_text(f'#!/bin/sh\necho x >> {launches}\necho "wrapped 1.0"\n')
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv("FC", "mpifort")
+    monkeypatch.delenv("CC", raising=False)
+    monkeypatch.delenv("CXX", raising=False)
+
+    assert compiler_fingerprint() == compiler_fingerprint()
+    assert len(launches.read_text().split()) == 1
