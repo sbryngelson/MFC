@@ -1016,6 +1016,9 @@ contains
         integer                :: gbl_id  ! used for analytic ib patch motion
         real(wp)               :: t_stage  ! time of the state produced by RK stage s (used by prescribed kinematics)
         real(wp), dimension(3) :: vel_new, angular_new
+        !> two-way bodies' angular momentum after this stage's torque (at least one column: no zero-size mapped array)
+        real(wp), dimension(3, max(num_ibs, 1)) :: ang_mom
+        logical, dimension(num_ibs)             :: two_way
 
         call nvtxStartRange("PROPAGATE-IMMERSED-BOUNDARIES")
 
@@ -1023,17 +1026,31 @@ contains
 
         t_stage = f_step_time(rk_c(s + 1), t_step, dt)
 
-        $:GPU_PARALLEL_LOOP(private='[i, gbl_id, vel_new, angular_new]', copyin='[s, t_stage]')
-        do i = 1, num_ibs
-            if (s == 1) then
-                patch_ib(i)%step_vel = patch_ib(i)%vel
-                patch_ib(i)%step_angular_vel = patch_ib(i)%angular_vel
-                patch_ib(i)%step_angles = patch_ib(i)%angles
-                patch_ib(i)%step_x_centroid = patch_ib(i)%x_centroid
-                patch_ib(i)%step_y_centroid = patch_ib(i)%y_centroid
-                patch_ib(i)%step_z_centroid = patch_ib(i)%z_centroid
-            end if
+        two_way = patch_ib(1:num_ibs)%moving_ibm >= 2 .and. patch_ib(1:num_ibs)%kin_model <= 0
+        ang_mom = 0._wp
+        if (num_ibs > 0) then
+            $:GPU_PARALLEL_LOOP(private='[i, angular_new]', copyin='[s, two_way]', copy='[ang_mom]')
+            do i = 1, num_ibs
+                if (s == 1) then
+                    patch_ib(i)%step_vel = patch_ib(i)%vel
+                    patch_ib(i)%step_angular_vel = patch_ib(i)%angular_vel
+                    patch_ib(i)%step_angles = patch_ib(i)%angles
+                    patch_ib(i)%step_x_centroid = patch_ib(i)%x_centroid
+                    patch_ib(i)%step_y_centroid = patch_ib(i)%y_centroid
+                    patch_ib(i)%step_z_centroid = patch_ib(i)%z_centroid
+                end if
+                if (two_way(i)) then
+                    angular_new = (rk_coef(s, 1)*patch_ib(i)%angular_vel + rk_coef(s, 2)*patch_ib(i)%step_angular_vel)/rk_coef(s, 4)
+                    ang_mom(:,i) = (angular_new*patch_ib(i)%moment) + (rk_coef(s, 3)*dt*patch_ib(i)%torque/rk_coef(s, 4))
+                end if
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        end if
+        ! 3D: the moment about the new angular momentum, all bodies in one exchange
+        if (ib_moment_resum) call s_compute_moments_of_inertia(ang_mom, two_way)
 
+        $:GPU_PARALLEL_LOOP(private='[i, gbl_id, vel_new, angular_new]', copyin='[s, t_stage, ang_mom]')
+        do i = 1, num_ibs
             ! Compute forces BEFORE the RK velocity blend so the device copy of patch_ib%vel matches the host (pre-blend) when
             ! velocity-dependent collision damping forces are evaluated on the GPU.
             if (patch_ib(i)%moving_ibm > 0) then
@@ -1043,15 +1060,9 @@ contains
                     vel_new = (rk_coef(s, 1)*patch_ib(i)%vel + rk_coef(s, 2)*patch_ib(i)%step_vel)/rk_coef(s, 4)
                     angular_new = (rk_coef(s, 1)*patch_ib(i)%angular_vel + rk_coef(s, 2)*patch_ib(i)%step_angular_vel)/rk_coef(s, 4)
 
-                    if (patch_ib(i)%moving_ibm >= 2) then  ! if we are using two-way coupling, apply force and torque
-                        ! update the velocity from the force value
+                    if (patch_ib(i)%moving_ibm >= 2) then  ! two-way coupling: apply force and torque
                         vel_new = vel_new + rk_coef(s, 3)*dt*(patch_ib(i)%force/patch_ib(i)%mass)/rk_coef(s, 4)
-
-                        ! update the angular velocity with the torque value add the torque to the angular momentum
-                        angular_new = (angular_new*patch_ib(i)%moment) + (rk_coef(s, 3)*dt*patch_ib(i)%torque/rk_coef(s, 4))
-                        ! update the moment of inertia to be based on the direction of the angular momentum
-                        if (num_dims == 3) call s_compute_moment_of_inertia(patch_ib(i), angular_new, patch_ib(i)%moment)
-                        angular_new = angular_new/patch_ib(i)%moment
+                        angular_new = ang_mom(:,i)/patch_ib(i)%moment
                     end if
 
                     ! Update the angle and position from the current-stage velocities, before they are overwritten

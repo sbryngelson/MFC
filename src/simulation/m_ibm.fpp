@@ -213,6 +213,7 @@ module m_ibm
     logical :: ib_wall_quad   !< ib_wall_order = 2: quadratic wall-normal ghost velocity at no-slip walls
     $:GPU_DECLARE(create='[ib_ip_width, ib_keep_ghost, ib_wall_quad]')
     logical :: centroid_offsets_active = .false.  !< some patch is a moving airfoil or STL, which carries a centroid_offset
+    logical :: ib_moment_resum = .false.  !< some 3D two-way body has a non-analytic moment, re-summed about each stage's axis
 
     ! IB force reduction (s_communicate_ib_forces): distinct neighborhood ranks in ascending order, and buffers allocated once
     integer, parameter    :: ib_rec_len = 7                           !< gbl_patch_id, force(1:3), torque(1:3)
@@ -343,13 +344,13 @@ contains
         end do
 
         ! after the markers and centroid offsets: bodies without an analytic moment sum it over their marked cells
-        $:GPU_PARALLEL_LOOP(private='[i]')
-        do i = 1, num_ibs
-            if (patch_ib(i)%moving_ibm /= 0) call s_compute_moment_of_inertia(patch_ib(i), patch_ib(i)%angular_vel, &
-                & patch_ib(i)%moment)
-        end do
-        $:END_GPU_PARALLEL_LOOP()
+        call s_compute_moments_of_inertia(reshape([(patch_ib(i)%angular_vel, i=1, num_ibs)], [3, num_ibs]), &
+                                          & patch_ib(1:num_ibs)%moving_ibm /= 0)
         $:GPU_UPDATE(host='[patch_ib(1:num_ibs)]')
+        ! 3D two-way bodies re-sum their moment each stage (s_advance_ib_pose) when any is non-analytic
+        call s_mpi_allreduce_integer_sum(int(count([(patch_ib(i)%moving_ibm >= 2 .and. patch_ib(i)%kin_model <= 0 &
+                                         & .and. .not. f_analytic_moment(patch_ib(i)), i=1, num_ibs)]), 8), n_need)
+        ib_moment_resum = num_dims == 3 .and. n_need > 0_8
 
         ! find the number of ghost points and set them to be the maximum total across ranks
         call s_find_num_ghost_points(num_gps)
@@ -4130,81 +4131,139 @@ contains
 
     end subroutine s_restore_centroid_offsets
 
-    !> Computes the moment of inertia for an immersed boundary
-    subroutine s_compute_moment_of_inertia(patch, axis, moment)
+    !> Moment of inertia of each selected IB about axes(:, i). A body without an analytic moment sums r^2 over its marked cells; the
+    !! rank partials are added through the owner exchange, so every rank holding it gets the same value. Collective over the IB
+    !! neighborhood.
+    impure subroutine s_compute_moments_of_inertia(axes, sel)
+
+        real(wp), dimension(3, num_ibs), intent(in) :: axes
+        logical, dimension(num_ibs), intent(in)     :: sel
+        real(wp), dimension(num_ibs, 3)             :: parts, zeros
+        real(wp), dimension(3)                      :: ax
+        real(wp), dimension(2)                      :: part
+        integer                                     :: i
+
+        parts = 0._wp
+        zeros = 0._wp
+        if (num_ibs > 0) then
+            $:GPU_PARALLEL_LOOP(private='[i, ax, part]', copyin='[axes, sel]', copy='[parts]')
+            do i = 1, num_ibs
+                if (sel(i)) then
+                    ax = axes(:,i)
+                    call s_moment_partials(patch_ib(i), ax, part)
+                    parts(i,1:2) = part
+                end if
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        end if
+
+        ! (sum of r^2, cell count) reduced as a force
+        call s_communicate_ib_forces(parts, zeros)
+
+        if (num_ibs > 0) then
+            $:GPU_PARALLEL_LOOP(private='[i, ax, part]', copyin='[axes, sel, parts]')
+            do i = 1, num_ibs
+                if (sel(i)) then
+                    ax = axes(:,i)
+                    part = parts(i,1:2)
+                    patch_ib(i)%moment = f_moment_of_inertia(patch_ib(i), ax, part)
+                end if
+            end do
+            $:END_GPU_PARALLEL_LOOP()
+        end if
+
+    end subroutine s_compute_moments_of_inertia
+
+    !> The geometries with an analytic moment of inertia: circle, rectangle, ellipse, sphere
+    pure logical function f_analytic_moment(patch)
+
+        $:GPU_ROUTINE(function_name='f_analytic_moment', parallelism='[seq]', cray_inline=True)
+        type(ib_patch_parameters), intent(in) :: patch
+
+        f_analytic_moment = patch%geometry == 2 .or. patch%geometry == 3 .or. patch%geometry == 6 .or. patch%geometry == 8
+
+    end function f_analytic_moment
+
+    !> This rank's share of a non-analytic moment about axis: the sum of squared distances to the axis over the body's marked cells,
+    !! and their count. Zero for an analytic body, or a 3D body not rotating.
+    subroutine s_moment_partials(patch, axis, part)
 
         $:GPU_ROUTINE(parallelism='[seq]')
 
         type(ib_patch_parameters), intent(in) :: patch
         real(wp), dimension(3), intent(in)    :: axis
-        real(wp), intent(out)                 :: moment
-        real(wp)                              :: distance_to_axis
-        real(wp), dimension(3)                :: position, closest_point_along_axis, vector_to_axis, normal_axis, centroid
+        real(wp), dimension(2), intent(out)   :: part
+        real(wp), dimension(3)                :: position, normal_axis, centroid
         integer                               :: i, j, k, count, gbl_id, xp, yp, zp
 
-        ! if the IB is in 2D or a 3D sphere, we can compute this exactly
+        part = 0._wp
+        if (f_analytic_moment(patch)) return
+        if (p == 0) then
+            normal_axis = [0._wp, 0._wp, 1._wp]
+        else if (sqrt(sum(axis**2)) < sgm_eps) then
+            return
+        else
+            normal_axis = axis/sqrt(sum(axis**2))
+        end if
+
+        count = 0
+        do i = 0, m
+            do j = 0, n
+                do k = 0, p
+                    if (ib_markers%sf(i, j, k) == 0) cycle
+                    call s_decode_patch_periodicity(ib_markers%sf(i, j, k), gbl_id, xp, yp, zp)
+                    if (gbl_id == patch%gbl_patch_id) then
+                        count = count + 1
+
+                        ! position relative to the centroid of the periodic image this cell belongs to
+                        centroid(1) = patch%x_centroid + real(xp, wp)*(glb_bounds(1)%end - glb_bounds(1)%beg)
+                        centroid(2) = patch%y_centroid + real(yp, wp)*(glb_bounds(2)%end - glb_bounds(2)%beg)
+                        if (num_dims < 3) then
+                            position = [x_cc(i) - centroid(1), y_cc(j) - centroid(2), 0._wp]
+                        else
+                            centroid(3) = patch%z_centroid + real(zp, wp)*(glb_bounds(3)%end - glb_bounds(3)%beg)
+                            position = [x_cc(i), y_cc(j), z_cc(k)] - centroid
+                        end if
+
+                        ! squared distance to the rotation axis
+                        position = position - normal_axis*dot_product(normal_axis, position)
+                        part(1) = part(1) + dot_product(position, position)
+                    end if
+                end do
+            end do
+        end do
+        part(2) = real(count, wp)
+
+    end subroutine s_moment_partials
+
+    !> Moment of inertia about axis from the summed partials (s_moment_partials); analytic geometries exactly
+    function f_moment_of_inertia(patch, axis, part) result(moment)
+
+        $:GPU_ROUTINE(function_name='f_moment_of_inertia', parallelism='[seq]', cray_inline=True)
+        type(ib_patch_parameters), intent(in) :: patch
+        real(wp), dimension(3), intent(in)    :: axis
+        real(wp), dimension(2), intent(in)    :: part
+        real(wp)                              :: moment
+
         if (patch%geometry == 2) then  ! circle
             moment = 0.5_wp*patch%mass*(patch%radius)**2
         else if (patch%geometry == 3) then  ! rectangle
             moment = patch%mass*(patch%length_x**2 + patch%length_y**2)/12._wp
         else if (patch%geometry == 6) then  ! ellipse
-            moment = 0.0625_wp*patch%mass*(patch%length_x**2 + patch %length_y**2)
+            moment = 0.0625_wp*patch%mass*(patch%length_x**2 + patch%length_y**2)
         else if (patch%geometry == 8) then  ! sphere
             moment = 0.4_wp*patch%mass*(patch%radius)**2
-        else  ! we do not have an analytic moment of inertia calculation and need to approximate it directly via a sum
-            count = 0
-
-            if (p == 0) then
-                normal_axis = [0, 0, 1]
-            else if (sqrt(sum(axis**2)) < sgm_eps) then
-                ! if the object is not actually rotating at this time, return a dummy value and exit
-                moment = 1._wp
-                return
-            else
-                normal_axis = axis/sqrt(sum(axis**2))
-            end if
-
-            moment = 0._wp
-
-            do i = 0, m
-                do j = 0, n
-                    do k = 0, p
-                        if (ib_markers%sf(i, j, k) == 0) cycle
-                        call s_decode_patch_periodicity(ib_markers%sf(i, j, k), gbl_id, xp, yp, zp)
-                        if (gbl_id == patch%gbl_patch_id) then
-                            count = count + 1  ! increment the count of total cells in the boundary
-
-                            ! position relative to the centroid of the periodic image this cell belongs to
-                            centroid(1) = patch%x_centroid + real(xp, wp)*(glb_bounds(1)%end - glb_bounds(1)%beg)
-                            centroid(2) = patch%y_centroid + real(yp, wp)*(glb_bounds(2)%end - glb_bounds(2)%beg)
-                            if (num_dims < 3) then
-                                position = [x_cc(i) - centroid(1), y_cc(j) - centroid(2), 0._wp]
-                            else
-                                centroid(3) = patch%z_centroid + real(zp, wp)*(glb_bounds(3)%end - glb_bounds(3)%beg)
-                                position = [x_cc(i), y_cc(j), z_cc(k)] - centroid
-                            end if
-
-                            ! project the position along the axis to find the closest distance to the rotation axis
-                            closest_point_along_axis = normal_axis*dot_product(normal_axis, position)
-                            vector_to_axis = position - closest_point_along_axis
-                            distance_to_axis = dot_product(vector_to_axis, vector_to_axis)  ! saves the distance to the axis squared
-
-                            ! compute the position component of the moment
-                            moment = moment + distance_to_axis
-                        end if
-                    end do
-                end do
-            end do
-
-            ! uniform density: each of the count cells carries mass/count; a rank holding none of the body gets the dummy value
-            if (count > 0) then
-                moment = moment*patch%mass/count
-            else
-                moment = 1._wp
-            end if
+        else if (p > 0 .and. sqrt(sum(axis**2)) < sgm_eps) then
+            moment = 1._wp  ! not rotating: a dummy value
+        else if (part(2) > 0._wp) then
+            moment = part(1)*patch%mass/part(2)  ! uniform density: each of the cells carries mass/count
+        else if (patch%moment > 0._wp) then
+            moment = patch%moment  ! no cell on any rank (the body left the domain): keep the last value
+        else
+            moment = 1._wp
         end if
 
-    end subroutine s_compute_moment_of_inertia
+    end function f_moment_of_inertia
 
     !> Wrap immersed boundary positions across periodic domain boundaries
     subroutine s_wrap_periodic_ibs()
